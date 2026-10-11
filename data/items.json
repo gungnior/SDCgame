@@ -1,0 +1,23 @@
+[
+  { "id": "medical_bandage",    "name": "止血带",     "name_en": "Bandage",        "category": "medical",    "weight": 0.05, "stack_max": 10,  "icon": "res://art/items/medical_bandage.png",    "value": 30,   "desc": "快速止血，回血少", "stage": "B" },
+  { "id": "medical_kit",        "name": "医疗包",     "name_en": "Medkit",         "category": "medical",    "weight": 0.40, "stack_max": 3,   "icon": "res://art/items/medical_kit.png",        "value": 120,  "desc": "大幅回复生命",     "stage": "B" },
+  { "id": "medical_painkiller", "name": "止痛药",     "name_en": "Painkiller",     "category": "medical",    "weight": 0.03, "stack_max": 10,  "icon": "res://art/items/medical_painkiller.png", "value": 45,   "desc": "缓解疼痛，移速恢复", "stage": "B" },
+
+  { "id": "ammo_pistol",        "name": "手枪弹",     "name_en": "Pistol Ammo",    "category": "ammo",       "weight": 0.010, "stack_max": 120, "icon": "res://art/items/ammo_pistol.png",       "value": 2,    "desc": "9mm 通用弹药",     "stage": "B" },
+  { "id": "ammo_rifle",         "name": "步枪弹",     "name_en": "Rifle Ammo",     "category": "ammo",       "weight": 0.012, "stack_max": 120, "icon": "res://art/items/ammo_rifle.png",        "value": 3,    "desc": "5.56 制式弹药",     "stage": "B" },
+  { "id": "ammo_shell",         "name": "霰弹",       "name_en": "Shotgun Shell",  "category": "ammo",       "weight": 0.030, "stack_max": 60,  "icon": "res://art/items/ammo_shell.png",        "value": 4,    "desc": "12 号霰弹",         "stage": "B" },
+
+  { "id": "armor_light",        "name": "轻型护甲",   "name_en": "Light Armor",    "category": "armor",      "weight": 2.50, "stack_max": 1,   "icon": "res://art/items/armor_light.png",        "value": 200,  "desc": "牺牲防护换机动",   "stage": "B" },
+  { "id": "armor_heavy",        "name": "重型护甲",   "name_en": "Heavy Armor",    "category": "armor",      "weight": 7.00, "stack_max": 1,   "icon": "res://art/items/armor_heavy.png",        "value": 650,  "desc": "防护高但拖慢移速", "stage": "B" },
+
+  { "id": "backpack_tactical",  "name": "战术背包",   "name_en": "Tactical Pack",  "category": "backpack",   "weight": 1.80, "stack_max": 1,   "icon": "res://art/items/backpack_tactical.png",  "value": 350,  "desc": "大幅提升负重上限", "stage": "B" },
+
+  { "id": "consumable_can",     "name": "罐头",       "name_en": "Canned Food",    "category": "consumable", "weight": 0.25, "stack_max": 5,   "icon": "res://art/items/consumable_can.png",     "value": 20,   "desc": "缓慢回复体力",     "stage": "B" },
+  { "id": "consumable_water",   "name": "净水",       "name_en": "Purified Water","category": "consumable", "weight": 0.50, "stack_max": 5,   "icon": "res://art/items/consumable_water.png",   "value": 25,   "desc": "回复水分",         "stage": "B" },
+
+  { "id": "valuables_goldwatch","name": "金表",       "name_en": "Gold Watch",     "category": "valuables",  "weight": 0.10, "stack_max": 1,   "icon": "res://art/items/valuables_goldwatch.png", "value": 480,  "desc": "轻便的高价值战利品", "stage": "B" },
+  { "id": "valuables_gpu",      "name": "显卡",       "name_en": "Graphics Card",  "category": "valuables",  "weight": 0.80, "stack_max": 1,   "icon": "res://art/items/valuables_gpu.png",      "value": 1200, "desc": "昂贵但占负重",     "stage": "B" },
+  { "id": "valuables_hdd",      "name": "军用硬盘",   "name_en": "Military Drive","category": "valuables",  "weight": 0.30, "stack_max": 1,   "icon": "res://art/items/valuables_hdd.png",      "value": 900,  "desc": "数据比硬件值钱",   "stage": "B" },
+
+  { "id": "key_labcard",        "name": "实验室门卡", "name_en": "Lab Keycard",    "category": "key",        "weight": 0.02, "stack_max": 1,   "icon": "res://art/items/key_labcard.png",        "value": 0,    "desc": "开启高价值区域",   "stage": "B" }
+]
