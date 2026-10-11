@@ -27,6 +27,7 @@ func _initialize() -> void:
 	_suite("定义类辅助方法", _test_def_helpers)
 	_suite("掉落表抽样", _test_loot_roll)
 	_suite("CJK 字体与中文断行", _test_font_cjk)
+	_suite("逻辑网格 LogicalGrid", _test_logical_grid)
 
 	print("")
 	if _failed == 0:
@@ -275,3 +276,76 @@ func _test_font_cjk() -> void:
 
 	print("        ⚠️ 以上断行断言在编辑器里恒真（见文件头说明）。")
 	print("           导出包的真实断行效果请在真机上跑 test/m0_device_check.tscn 目视确认。")
+
+
+# ─────────────────── B 阶段：逻辑网格（T-31） ───────────────────
+
+func _test_logical_grid() -> void:
+	var g := LogicalGrid.new(20, 14)   # 20x14 逻辑格 = 60x42 tile
+
+	_check_eq(g.width, 20, "宽度 20 逻辑格")
+	_check_eq(g.height, 14, "高度 14 逻辑格")
+	_check_eq(g.walkable_count(), 0, "初始全为墙")
+
+	# tile 尺寸换算
+	_check_eq(g.tile_extents(), Vector2i(60, 42), "tile 范围 = 60x42")
+	_check_eq(LogicalGrid.CELL_SIZE_TILES, 3, "1 逻辑格 = 3 tile")
+	_check_eq(LogicalGrid.CELL_PX, 48, "1 逻辑格 = 48 px")
+
+	# ── 核心保证：走廊恒宽 1 逻辑格 = 3 tile ──
+	# 这是 T-31 的全部意义：手机触屏操作要求最小可行走宽度 >=3 格，
+	# 而"走廊恒宽 1 逻辑格"让它在【结构上不可能被违反】。
+	var c := Vector2i(2, 5)
+	g.carve_corridor_l(Vector2i(2, 5), Vector2i(15, 5))
+	_check_eq(g.get_cell(c), LogicalGrid.Cell.CORRIDOR, "走廊格被标记为 CORRIDOR")
+	_check_eq(g.get_cell(Vector2i(15, 5)), LogicalGrid.Cell.CORRIDOR, "走廊终点被挖开")
+
+	# 走廊的 tile 宽度必须正好 3
+	var rect := g.cell_to_tile_rect(c)
+	_check_eq(rect.size, Vector2i(3, 3), "一个逻辑格覆盖 3x3 tile")
+	_check_eq(rect.size.x, LogicalGrid.CELL_SIZE_TILES, "走廊 tile 宽度 == 3（>=3 格硬约束）")
+
+	# 走廊上下必须是墙（否则宽度就 >3 了）
+	_check_eq(g.is_walkable(c + Vector2i(0, -1)), false, "走廊上方是墙")
+	_check_eq(g.is_walkable(c + Vector2i(0, 1)), false, "走廊下方是墙")
+
+	# ── V 形走廊也要挖通 ──
+	g.carve_corridor_l(Vector2i(15, 5), Vector2i(15, 11))
+	_check_eq(g.get_cell(Vector2i(15, 11)), LogicalGrid.Cell.CORRIDOR, "L 形走廊的竖段被挖开")
+	_check(g.is_fully_connected(), "L 形走廊连通")
+
+	# ── 挖房间 ──
+	g.carve_rect(Rect2i(2, 2, 5, 3))
+	_check_eq(g.get_cell(Vector2i(3, 3)), LogicalGrid.Cell.FLOOR, "房间内部是 FLOOR")
+	_check_eq(g.get_cell(Vector2i(2, 2)), LogicalGrid.Cell.FLOOR, "房间左上角被挖开")
+
+	# ── tile 坐标换算往返 ──
+	var probes: Array[Vector2i] = [Vector2i(0, 0), Vector2i(5, 5), Vector2i(59, 41), Vector2i(17, 32)]
+	for t in probes:
+		var cell := g.tile_to_cell(t)
+		var back := g.cell_to_tile_rect(cell)
+		_check(back.has_point(t), "tile %s 落在其所属逻辑格 %s 的矩形内" % [str(t), str(cell)])
+
+	# 边界：越界 tile 归到界外逻辑格，is_walkable 应返回 false
+	_check_eq(g.in_bounds(Vector2i(-1, 0)), false, "负坐标越界")
+	_check_eq(g.tile_is_walkable(Vector2i(-1, -1)), false, "越界 tile 不可走")
+
+	# ── 连通性校验 ──
+	# 孤立一个房间，整图应当不连通
+	var g2 := LogicalGrid.new(20, 14)
+	g2.carve_rect(Rect2i(1, 1, 3, 3))
+	g2.carve_rect(Rect2i(15, 10, 3, 3))
+	_check_eq(g2.is_fully_connected(), false, "两个互不相连的房间 -> 不连通")
+	g2.carve_corridor_l(Vector2i(2, 2), Vector2i(16, 11))
+	_check(g2.is_fully_connected(), "挖通走廊后 -> 连通")
+
+	# flood_fill 只覆盖可达部分
+	var reach := g2.flood_fill(Vector2i(2, 2))
+	_check_eq(reach.size(), g2.walkable_count(), "连通后 flood_fill 覆盖全部可走格")
+
+	# ── ASCII 便于目视调试 ──
+	var ascii := g2.to_ascii()
+	_check(ascii.contains("#"), "ASCII 图含墙")
+	_check(ascii.contains("."), "ASCII 图含地面")
+	_check(ascii.contains("+"), "ASCII 图含走廊")
+
