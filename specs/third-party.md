@@ -87,7 +87,17 @@
 
 | # | 字体名 | 授权 | 用途 | LICENSE 存档 | 状态 |
 |---|---|---|---|---|---|
-| F-001 | *(待填)* | | UI / 字幕 | | |
+| F-001 | **Noto Sans SC**（可变字重，`NotoSansSC[wght].ttf`） | **OFL-1.1** | M0 验证用 CJK 字体；UI 正文 | `art/fonts/OFL.txt` | ✅ 已入库（16.9 MB） |
+
+**来源**：[google/fonts](https://github.com/google/fonts/tree/main/ofl/notosanssc) ·
+经 jsDelivr 获取：`https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanssc/NotoSansSC[wght].ttf`
+
+> ⚠️ **生产前需要处理两件事**：
+> 1. **换成像素中文字体** —— Noto Sans SC 是衬线/黑体风格，与像素画不搭。
+>    推荐 **[缝合像素字体 Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)**（OFL，8/10/12px 像素字号）。
+>    ⚠️ 注意：该仓库**只放字形源 PNG，编译好的字体在 GitHub Releases 里**，jsDelivr 取不到，需要从 Releases 下载。
+> 2. **子集化（subset）** —— 16.9 MB 太大。用 `fonttools` 按实际用字裁剪，
+>    预计可压到 **200–500 KB**。**这直接影响包体预算（V-07）。**
 
 ---
 

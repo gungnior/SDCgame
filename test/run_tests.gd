@@ -26,6 +26,7 @@ func _initialize() -> void:
 	_suite("SimRng 确定性", _test_rng_determinism)
 	_suite("定义类辅助方法", _test_def_helpers)
 	_suite("掉落表抽样", _test_loot_roll)
+	_suite("CJK 字体与中文断行", _test_font_cjk)
 
 	print("")
 	if _failed == 0:
@@ -210,3 +211,67 @@ func _test_loot_roll() -> void:
 			same = false
 			break
 	_check(same, "同 seed 的掉落抽样完全一致")
+
+
+# ─────────────────── M0 隐形炸弹 (1/2)：中文显示与断行 ───────────────────
+#
+# 背景（specs/tech-stack.md §6.8 / V-16）：
+#   🚨 Godot 默认项目字体只支持 Latin-1 子集，【无法显示中文】——不换字体就是满屏方块。
+#   🚨 中文断行需要 ICU 断行规则数据，该数据【默认不导出】。必须开
+#      Project Settings > Internationalization > Locale > Include Text Server Data。
+#      代价：包体约 +4 MB。
+#
+# ⚠️ 实测重要发现（2026-10-11，Godot 4.7.2）：
+#   把 include_text_server_data 设为 false 后，本套件的断行断言【依然全部通过】。
+#   原因：该开关只控制数据是否打进【导出包】，而编辑器/headless 运行自带这份数据。
+#   ⇒ **断行行为在编辑器里无法证伪，只有导出的 APK/PCK 才能验证。**
+#   ⇒ 因此本套件里：
+#        · 「设置已开启」是【真正的守门断言】——它防止误关
+#        · 断行断言是【编辑器层的健全性检查】，不能当作导出包的证明
+#   ⇒ 导出包的验证交给 test/m0_device_check.gd（真机场景，目视确认）
+
+func _test_font_cjk() -> void:
+	# ⭐ 守门断言：防止误关这个开关
+	var tsd: Variant = ProjectSettings.get_setting("internationalization/locale/include_text_server_data", null)
+	_check(tsd == true, "[守门] include_text_server_data 已开启（当前: %s）" % str(tsd))
+
+	# 1) 字体能否加载
+	var font := load("res://art/fonts/NotoSansSC-VF.ttf") as FontFile
+	if font == null:
+		_check(false, "加载 res://art/fonts/NotoSansSC-VF.ttf")
+		return
+	_check(true, "CJK 字体加载成功")
+
+	# 2) 字形覆盖 —— 缺字形会显示成豆腐块
+	var sample := "撤离枪械医疗背包弹药护甲战利品倒计时"
+	var missing := ""
+	for i in sample.length():
+		if not font.has_char(sample.unicode_at(i)):
+			missing += sample[i]
+	_check(missing.is_empty(), "游戏常用字全有字形" + ("" if missing.is_empty() else "  缺: " + missing))
+
+	# 3) 中文断行 —— 这是 include_text_server_data 的直接效果
+	#    不开这一项时，CJK 没有词边界规则，长中文串在受限宽度下无法正常换行。
+	var size := 16
+	var text := "在倒计时结束之前带着装备撤离否则你将失去本次行动的全部战利品"
+	var narrow := 160.0
+
+	var m_narrow := font.get_multiline_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, narrow, size)
+	var m_wide := font.get_multiline_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size)
+
+	var one_line_h := float(size) * 1.5
+	_check(m_wide.y <= one_line_h, "[编辑器] 不限宽度时只有一行（高 %.1f px）" % m_wide.y)
+	_check(m_narrow.y > m_wide.y, "[编辑器] 限宽后行数增加（%.1f -> %.1f px）" % [m_wide.y, m_narrow.y])
+	_check(m_narrow.y > one_line_h, "[编辑器] 限宽 160px 时换行了（高 %.1f px）" % m_narrow.y)
+	_check(m_narrow.x <= narrow + 0.5, "[编辑器] 换行后不超出限定宽度（宽 %.1f <= %.1f）" % [m_narrow.x, narrow])
+
+	# 4) 行数应当合理：既不是完全不换行，也没退化成每字一行
+	_check(m_narrow.y < float(size) * 20.0, "[编辑器] 行数在合理范围（总高 %.1f px）" % m_narrow.y)
+
+	# 5) 中英混排也要能断
+	var mixed := "拾荒者 dropped a 战术背包 worth 1200 元"
+	var m_mixed := font.get_multiline_string_size(mixed, HORIZONTAL_ALIGNMENT_LEFT, 200.0, size)
+	_check(m_mixed.x > 0.0 and m_mixed.y > 0.0, "[编辑器] 中英混排测量正常（%.1f x %.1f）" % [m_mixed.x, m_mixed.y])
+
+	print("        ⚠️ 以上断行断言在编辑器里恒真（见文件头说明）。")
+	print("           导出包的真实断行效果请在真机上跑 test/m0_device_check.tscn 目视确认。")

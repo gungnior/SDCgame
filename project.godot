@@ -1,4 +1,4 @@
-; Godot 4.7.2 工程配置
+﻿; Godot 4.7.2 工程配置
 ;
 ; 依据 specs/tech-stack.md：
 ;   T-02  渲染器 Compatibility（2D 纯像素游戏，兼容设备最广）
@@ -42,3 +42,10 @@ common/physics_ticks_per_second=120
 
 ; 触摸屏控制；不申请网络权限
 pointing/emulate_mouse_from_touch=true
+
+[internationalization]
+
+; ⚠️ M0 关键项(1/2)：中文断行必须靠 ICU 断行规则数据，而该数据【默认不导出】。
+; 不开这一项，中文换行/分词会不正确。代价：包体约 +4 MB。
+; 验证：test/run_tests.gd 的「CJK 字体与中文断行」套件。
+locale/include_text_server_data=true

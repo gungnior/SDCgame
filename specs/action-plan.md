@@ -85,7 +85,9 @@
 
 - [ ] Godot 4.7 导出安卓，真机稳定 60 fps
 - [ ] 🚨 **中文显示 + 断行**（CJK 字体 + 勾 `Include Text Server Data`，**+约 4 MB 包体**）
+      → **必须真机验证**：`test/m0_device_check.tscn`（⚠️ 编辑器里这个开关恒真，测不出差别）
 - [ ] 🚨 **Compatibility 渲染器下 `CPUParticles2D` 可见** —— 用错 `GPUParticles2D` 会**静默消失、不报错**
+      → 同一场景里已有 CPU/GPU 左右对照：`test/m0_device_check.tscn`
 - [ ] 🚨 **双虚拟摇杆可用**（先试 4.7 原生；验证 `InputEventScreenDrag`）
 - [ ] **像素完美 + 相机无抖动**（`canvas_items`+`integer` vs `viewport` 实机 A/B）
 - [ ] **流场寻路**：1 个敌人追你；流场为**纯数据数组**，可 headless 单测
