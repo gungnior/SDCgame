@@ -51,7 +51,7 @@
 | **T-01** | **引擎版本 = Godot 4.7.x 稳定版**（当前 **4.7.2**，2026-08-18 发布） | ⚠️ **本条已更正**：早先版本锁定 4.6，理由是"4.7 仅 dev"。实测 [官方 versions.json](https://godotengine.org/versions.json) 显示 **4.7.2 已稳定**（4.8 才在 dev）。三处独立佐证：官方版本清单、LimboAI v1.8.1 对应 4.7.2、GUT 9.7.1 对应 4.7 |
 | **T-01b** | **因 T-01 更正，必须重新评估"原生 `VirtualJoystick` 是否取代第三方插件"** | 该节点自 **4.7 起内置**（三模式 `FIXED` / `DYNAMIC` / `FOLLOWING`，`FOLLOWING` 是双摇杆射击首选）。若 4.7.2 稳定版确认可用，则 **T-10 降级为备选** |
 | **T-02** | **渲染器 = Compatibility（`gl_compatibility`）**，用项目设置按平台覆盖 | 纯 2D 像素游戏，兼容设备最广、更省电、驱动问题更少 |
-| **T-03** | ⚠️ **粒子一律使用 `CPUParticles2D`，禁止 `GPUParticles2D`** | **`GPUParticles2D` 在 Compatibility 渲染器下静默失效——不报错、不警告，粒子直接消失**。会影响枪口火光/血雾/烟雾/爆炸全部 VFX |
+| **T-03** | ⚠️ **粒子一律使用 `CPUParticles2D`**（VFX 的基准实现） | ⚠️ **本条理由已更正**（结论不变）。见下方 T-03 详解 |
 
 ```ini
 ; project.godot —— 桌面开发用 Forward+，移动导出自动切 Compatibility
@@ -62,6 +62,41 @@ renderer/rendering_method.mobile = "gl_compatibility"
 
 > **T-03 的例外**：若确认必须用 GPU 粒子，则渲染器改 Mobile（Vulkan），覆盖 2018 年后设备，但老机驱动风险上升。
 > **默认走 T-03，不选 Mobile。**
+
+### 1.1 ⚠️ T-03 详解：这条的理由已被实测更正
+
+**旧说法（错的）**：「`GPUParticles2D` 在 Compatibility 下必定静默失效」。
+
+**实测与查证后的正确说法**：**桌面能用，安卓 OpenGL ES 上不可靠。**
+
+| 证据 | 内容 |
+|---|---|
+| **本机实测**（Godot 4.7.2 / `gl_compatibility` / OpenGL 3.3 / RTX 4070 SUPER） | `GPUParticles2D` **正常渲染**（204 亮像素 vs CPU 的 249）——**没有静默失效** |
+| [saltmire 实测文章](https://dev.to/saltmire/gpuparticles2d-vs-cpuparticles2d-in-godot-4-which-and-when-3e1f) | 「GPU particles only work on the Compatibility renderer ... **since Godot 4.2**」 —— 4.2 起 Compatibility 后端**加了 GPU 粒子路径** |
+| [bugnet 分析](https://bugnet.io/blog/fix-godot-gpu-particles-not-rendering-mobile) | Compatibility（**OpenGL ES 3.0**）不支持 **compute shader** → 移动端 GPU 粒子**静默不渲染、无报错** |
+| [godot#94915](https://github.com/godotengine/godot/issues/94915) | `gl_compatibility` 下 `GPUParticles2D` 的可见性与崩溃问题 |
+
+**⇒ 为什么结论仍然是「一律用 `CPUParticles2D`」**：
+
+1. **桌面验证通过 ≠ 设备上没问题。** 本机是 OpenGL 3.3 桌面驱动；安卓走 OpenGL ES，
+   驱动与能力集不同。**桌面测试会给人虚假的安全感。**
+2. `CPUParticles2D` **在所有渲染器/平台上行为一致**，没有第一帧 shader 编译卡顿，
+   也不需要维护 `visibility_rect`。
+3. 我们的 VFX 是**大量小而短的爆发**（枪口火光/弹壳/血花），
+   **正是 CPU 粒子的适用场景**——不是需要 turbulence/collision/sub-emitter 的大场面。
+4. 若将来确实需要大场面（雨雪、雾团），再**局部**改用 `GPUParticles2D` 并在真机复验。
+
+**验证工具**：`test/test_particles_compat.gd` —— 像素级 A/B，可自动化：
+
+```bash
+godot --path . --rendering-method gl_compatibility --rendering-driver opengl3 \
+      --script res://test/test_particles_compat.gd
+```
+
+> 脚本会如实报告三种结果，**不会为了迎合假设而假装通过**：
+> ① CPU 可见 + GPU 不可见 → 证实静默失效
+> ② **两者都可见 → 报告「本机未失效」，并提示仍需真机复验**（本机就是这种）
+> ③ CPU 也不可见 → 报告统计方式或渲染器有问题，退出码 1
 
 **关于 GDScript 性能**：不要预optimize。只有 Profiler 证明瓶颈在脚本执行时才考虑 C# / GDExtension——
 两者都要为每个 ABI 交叉编译 `.so` 并打包，显著增加构建复杂度，**在安卓上是最后手段**。
