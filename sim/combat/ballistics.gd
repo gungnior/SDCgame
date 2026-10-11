@@ -1,4 +1,4 @@
-﻿class_name Ballistics
+class_name Ballistics
 extends RefCounted
 
 ## 网格射线 —— 纯数据，零物理调用

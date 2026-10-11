@@ -1,4 +1,4 @@
-﻿extends SceneTree
+extends SceneTree
 
 ## Headless 测试运行器
 ##
@@ -45,6 +45,7 @@ func _initialize() -> void:
 	_suite("A 阶段：枪械改装 WeaponModding", _test_weapon_modding)
 	_suite("A 阶段：医疗 MedicalSystem", _test_medical)
 	_suite("A 阶段：藏身处 Hideout", _test_hideout)
+	_suite("项目卫生", _test_project_hygiene)
 
 	print("")
 	if _failed == 0:
@@ -1540,3 +1541,48 @@ func _test_hideout() -> void:
 	var leftover := h.deposit(drops)
 	_check_eq(leftover.size(), 0, "入库无剩余")
 	_check_eq(h.stash.count_of("valuables_gpu"), 1, "仓库收到显卡")
+
+
+# ─────────────────── 项目卫生（永久守卫）───────────────────
+
+func _test_project_hygiene() -> void:
+	# ⚠️ 为什么需要这个测试：
+	#   Windows PowerShell 5.1 的 `Set-Content -Encoding UTF8` 会写入 UTF-8 BOM。
+	#   本项目已因此踩坑两次：
+	#     1) data/*.json 带 BOM —— 契约明令禁止（data/SCHEMA.md）
+	#     2) export_presets.cfg 带 BOM —— Godot 的 ConfigFile 解析不了，
+	#        导出时报「Invalid export preset name: Android」，且不提示是 BOM 的问题
+	#   所以这里把它变成一条永久断言。
+	var offenders: Array[String] = []
+	var exts := [".gd", ".json", ".cfg", ".godot", ".tscn", ".tres"]
+	_scan_bom("res://", exts, offenders)
+	_check(offenders.is_empty(), "项目文本文件无 UTF-8 BOM" +
+		("" if offenders.is_empty() else "  违规: " + ", ".join(offenders)))
+
+
+func _scan_bom(dir_path: String, exts: Array, out: Array[String]) -> void:
+	var d := DirAccess.open(dir_path)
+	if d == null:
+		return
+	d.list_dir_begin()
+	var name := d.get_next()
+	while name != "":
+		if name.begins_with("."):
+			name = d.get_next()
+			continue
+		var full := dir_path.path_join(name)
+		if d.current_is_dir():
+			# 跳过引擎缓存与本地安装目录
+			if name != ".godot" and name != "_install" and name != "build":
+				_scan_bom(full, exts, out)
+		else:
+			var ext := "." + name.get_extension()
+			if exts.has(ext):
+				var f := FileAccess.open(full, FileAccess.READ)
+				if f != null:
+					var b := f.get_buffer(3)
+					f.close()
+					if b.size() == 3 and b[0] == 0xEF and b[1] == 0xBB and b[2] == 0xBF:
+						out.append(full.replace("res://", ""))
+		name = d.get_next()
+	d.list_dir_end()

@@ -1,4 +1,4 @@
-﻿class_name RoomGraph
+class_name RoomGraph
 extends RefCounted
 
 ## 房间邻接图 —— specs/tech-stack.md §5.2 的 ②③④ 步

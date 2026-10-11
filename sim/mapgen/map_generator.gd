@@ -1,4 +1,4 @@
-﻿class_name MapGenerator
+class_name MapGenerator
 extends RefCounted
 
 ## 地图生成器 —— 编排 specs/tech-stack.md §5.2 的完整图优先链路

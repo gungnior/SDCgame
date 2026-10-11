@@ -1,4 +1,4 @@
-﻿class_name EnemyAgent
+class_name EnemyAgent
 extends RefCounted
 
 ## 敌人个体：状态机 + 效用评分 + 流场移动

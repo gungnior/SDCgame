@@ -1,4 +1,4 @@
-﻿class_name Perception
+class_name Perception
 extends RefCounted
 
 ## 感知：视野锥 + 听觉（基于格子）

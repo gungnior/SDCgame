@@ -1,4 +1,4 @@
-﻿class_name Squad
+class_name Squad
 extends RefCounted
 
 ## 小队黑板 —— specs/tech-stack.md §4.7（T-83）

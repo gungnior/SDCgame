@@ -1,4 +1,4 @@
-﻿class_name Inventory
+class_name Inventory
 extends RefCounted
 
 ## 背包 —— 纯槽位 + 重量（specs/tech-stack.md §6.2 T-61）

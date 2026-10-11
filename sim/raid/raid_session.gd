@@ -1,4 +1,4 @@
-﻿class_name RaidSession
+class_name RaidSession
 extends RefCounted
 
 ## 一次突袭（搜 → 打 → 撤）的完整回合
