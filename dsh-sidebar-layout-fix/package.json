@@ -1,0 +1,22 @@
+{
+  "name": "dsh-sidebar-layout-fix",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stacks the sidebar footer action entries vertically so several plugins can register there without overlapping.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  }
+}

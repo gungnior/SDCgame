@@ -1,0 +1,32 @@
+# ---- DeepSeek Harness 本地态（勿提交）----
+.dsh-home/
+.dsh/
+
+# ---- 夜间任务运行产物 ----
+_nightrun/
+tasks/*.result.json
+
+# ---- Godot ----
+.godot/
+godot/.godot/
+godot/android/build/
+godot/export_presets.cfg
+*.translation
+
+# ---- 付费素材不入公开仓库（D-13）----
+assets_paid/
+art_paid/
+
+# ---- 密钥与凭据 ----
+*.keystore
+*.jks
+.credentials.yaml
+.env
+.env.*
+
+# ---- 系统与编辑器 ----
+Thumbs.db
+desktop.ini
+*.tmp
+.vscode/
+.idea/

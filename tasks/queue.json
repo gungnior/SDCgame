@@ -1,0 +1,93 @@
+{
+  "_comment": "夜间批处理任务队列。⚠️ 只放【有自动验收命令】的机械性任务。核心玩法/手感/架构决策绝不放这里——那些必须有人在场。",
+  "_rules": [
+    "每个任务的 prompt 必须自包含：headless 模式是全新会话，不会记得之前的对话。",
+    "每个任务必须有 verify 规则，通过才 commit，不通过自动回滚。",
+    "任务失败时 nightrun 会停止队列，不级联——避免一个错误被放大成一片错误。",
+    "新任务只能由人工审核后加入。"
+  ],
+  "_statusLegend": ["pending", "done", "failed"],
+
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "生成物品表 data/items.json（B 阶段 15 件）",
+      "status": "pending",
+      "prompt": "为 Godot 4 像素俯视搜打撤游戏生成物品数据表。只输出文件，不要问问题。\n\n写文件：data/items.json\n内容：一个 JSON 数组，恰好 15 个物品对象，按 B 阶段（核心循环）范围。\n\n每个对象的字段（全部必填）：\n  id        小写 snake_case 英文，全局唯一\n  name      中文名\n  name_en   英文名\n  category  必须是这八个之一：medical / ammo / armor / backpack / consumable / valuables / key / misc\n  weight    数字，单位 kg，保留两位小数（如 0.35）\n  stack_max  整数，可堆叠上限；不可堆叠的写 1\n  icon      字符串，形如 res://art/items/{id}.png\n  value     整数，商人回收价（单位：元）\n  desc      一句中文描述，20 字以内\n\n构成要求（严格执行）：\n  medical    3 件（止血带 / 医疗包 / 止痛药）\n  ammo       3 件（手枪弹 / 步枪弹 / 霰弹）\n  armor      2 件（轻型护甲 / 重型护甲）\n  backpack   1 件（战术背包）\n  consumable 2 件（罐头 / 净水）\n  valuables  3 件（高价值战利品，如金表 / 显卡 / 军用硬盘）\n  key        1 件（实验室门卡）\n\n平衡原则：value 与 weight 大致正相关；医疗与弹药 stack_max 可较高（5~60），护甲/背包/钥匙 stack_max = 1。\n\n只写这一个文件。不要写 README、不要写多余文件。",
+      "verify": {
+        "type": "json-array",
+        "path": "data/items.json",
+        "requiredFields": ["id", "name", "name_en", "category", "weight", "stack_max", "icon", "value", "desc"],
+        "uniqueKey": "id",
+        "minCount": 15,
+        "maxCount": 15,
+        "enumFields": {
+          "category": ["medical", "ammo", "armor", "backpack", "consumable", "valuables", "key", "misc"]
+        }
+      }
+    },
+
+    {
+      "id": "T-002",
+      "title": "生成枪械表 data/weapons.json（B 阶段 3 把）",
+      "status": "pending",
+      "prompt": "为 Godot 4 像素俯视搜打撤游戏生成枪械数据表。只输出文件，不要问问题。\n\n写文件：data/weapons.json\n内容：一个 JSON 数组，恰好 3 把枪，覆盖三种战斗距离。\n\n每把枪的字段（全部必填）：\n  id            小写 snake_case，唯一\n  name          中文名\n  name_en       英文名\n  category      固定 \"weapon\"\n  ammo_id       对应弹药物品的 id，必须是 ammo_pistol / ammo_rifle / ammo_shell 之一\n  damage        整数，单发伤害\n  rpm           整数，射速（发/分钟）\n  mag_size      整数，弹匣容量\n  reload_time   数字，换弹耗时（秒，保留一位小数）\n  spread_deg    数字，腰射基础散布（度，保留一位小数）\n  range_m       整数，有效射程（米）\n  recoil_v      数字，垂直后坐力\n  recoil_h      数字，水平后坐力\n  weight        数字，kg\n  value         整数，商人回收价\n  icon          形如 res://art/guns/{id}/base.png\n\n三把枪：\n  1. 手枪  —— 伤害低、射速中、弹匣小、换弹快、散布小、射程近\n  2. 步枪  —— 伤害中、射速中、弹匣中、射程远、散布小，作为全能基准\n  3. 霰弹枪 —— 单发伤害高、射速慢、弹匣小、换弹慢、散布大、射程近\n\n数值要自洽：霰弹枪 range_m 明显最小，步枪 range_m 明显最大。\n\n只写这一个文件。",
+      "verify": {
+        "type": "json-array",
+        "path": "data/weapons.json",
+        "requiredFields": ["id", "name", "name_en", "category", "ammo_id", "damage", "rpm", "mag_size", "reload_time", "spread_deg", "range_m", "recoil_v", "recoil_h", "weight", "value", "icon"],
+        "uniqueKey": "id",
+        "minCount": 3,
+        "maxCount": 3,
+        "enumFields": { "category": ["weapon"] }
+      }
+    },
+
+    {
+      "id": "T-003",
+      "title": "生成敌人表 data/enemies.json（B 阶段 2 种）",
+      "status": "pending",
+      "prompt": "为 Godot 4 像素俯视搜打撤游戏生成敌人数据表。只输出文件，不要问问题。\n\n写文件：data/enemies.json\n内容：一个 JSON 数组，恰好 2 种敌人，覆盖两种战斗压力。\n\n每种敌人的字段（全部必填）：\n  id              小写 snake_case，唯一\n  name            中文名\n  name_en         英文名\n  archetype       必须是 melee（近战冲脸）或 ranged（远程射击）之一\n  hp              整数，生命值\n  move_speed      数字，移动速度（米/秒，保留一位小数）\n  sight_range_m   整数，视野距离（米）\n  sight_angle_deg 整数，视野锥角度\n  hear_range_m    整数，听觉半径（米）\n  reaction_time   数字，从发现玩家到开火的延迟（秒，保留两位小数）\n  give_up_dist_m  整数，追击放弃距离（米）\n  damage          整数，单次攻击伤害\n  attack_cooldown 数字，攻击/射击间隔（秒）\n  loot_value_avg  整数，预期掉落价值（元）\n  sprite          形如 res://art/enemies/{id}/side/idle_00.png\n\n两只敌人：\n  1. melee  —— 快、血少、视野近、无反应延迟（直接冲）、伤害靠贴身\n  2. ranged —— 慢、血多、视野远、有 0.3~0.6 秒反应延迟、远程射击\n\nreference: 参考 Zero Sievert 的节奏——reaction_time 是决定\"公平感\"的关键数值，\nranged 的 reaction_time 不要低于 0.25 秒。\n\n只写这一个文件。",
+      "verify": {
+        "type": "json-array",
+        "path": "data/enemies.json",
+        "requiredFields": ["id", "name", "name_en", "archetype", "hp", "move_speed", "sight_range_m", "sight_angle_deg", "hear_range_m", "reaction_time", "give_up_dist_m", "damage", "attack_cooldown", "loot_value_avg", "sprite"],
+        "uniqueKey": "id",
+        "minCount": 2,
+        "maxCount": 2,
+        "enumFields": { "archetype": ["melee", "ranged"] }
+      }
+    },
+
+    {
+      "id": "T-004",
+      "title": "生成掉落表 data/loot_tables.json",
+      "status": "pending",
+      "prompt": "为 Godot 4 像素俯视搜打撤游戏生成掉落表。只输出文件，不要问问题。\n\n写文件：data/loot_tables.json\n内容：一个 JSON 数组，恰好 3 个掉落表对象，对应 B 阶段的 2 种房间类型 + 1 种敌人掉落。\n\n每个掉落表的字段（全部必填）：\n  id          小写 snake_case，唯一（room_common / room_extract / enemy_drop）\n  name        中文名\n  entries     数组，至少 3 项。每项含：\n                item_id  必须是 item_ 开头的物品 id\n                weight   正整数，相对权重\n                min      整数，单次最少数量\n                max      整数，单次最多数量\n\n三个表的倾向：\n  room_common   —— 普通房间：以低价值消耗品为主\n  room_extract  —— 撤离点房间：以高价值战利品为主（风险回报）\n  enemy_drop    —— 敌人掉落：以弹药与医疗为主\n\n注意：不要引用不存在的 item_id。物品 id 采用「类别前缀 + 名称」的英文小写下划线形式，\n例如 ammo_pistol / medical_bandage / valuables_goldwatch。\n\n只写这一个文件。",
+      "verify": {
+        "type": "json-array",
+        "path": "data/loot_tables.json",
+        "requiredFields": ["id", "name", "entries"],
+        "uniqueKey": "id",
+        "minCount": 3,
+        "maxCount": 3
+      }
+    },
+
+    {
+      "id": "T-005",
+      "title": "生成房间类型表 data/rooms.json",
+      "status": "pending",
+      "prompt": "为 Godot 4 像素俯视搜打撤游戏生成房间类型表。只输出文件，不要问问题。\n\n背景：地图生成采用「图优先」链路——BSP 出房间 → 房间邻接图 → Kruskal MST 保连通 →\n按「图距离 + 深度」分配房间类型 → 按类型花预算。详见 specs/tech-stack.md 第 5 节。\n\n写文件：data/rooms.json\n内容：一个 JSON 数组，恰好 3 个房间类型对象。\n\n每个对象的字段（全部必填）：\n  id                小写 snake_case，唯一\n  name              中文名\n  room_type        必须是 spawn（出生）/ common（普通）/ extract（撤离）之一\n  min_count         整数，每张地图该类型房间的最少数量\n  max_count         整数，每张地图该类型房间的最多数量\n  loot_table_id     对应 data/loot_tables.json 里的 id\n  enemy_budget_min  整数，该房间敌人数量下限\n  enemy_budget_max  整数，该房间敌人数量上限\n  min_graph_dist    整数，距出生点的最小图距离（跳数）\n\n约束（关键，别写错）：\n  spawn      —— min_count = 1, max_count = 1, min_graph_dist = 0, enemy_budget 可为 0~1\n  common     —— min_graph_dist = 1\n  extract    —— min_count = 2（撤离点至少两个，这是硬约束）, min_graph_dist >= 4\n\n撤离点的 min_graph_dist 是「出生点到撤离点」的最小图距离，是防止出生即撤离的关键。\n\n只写这一个文件。",
+      "verify": {
+        "type": "json-array",
+        "path": "data/rooms.json",
+        "requiredFields": ["id", "name", "room_type", "min_count", "max_count", "loot_table_id", "enemy_budget_min", "enemy_budget_max", "min_graph_dist"],
+        "uniqueKey": "id",
+        "minCount": 3,
+        "maxCount": 3,
+        "enumFields": { "room_type": ["spawn", "common", "extract"] }
+      }
+    }
+  ]
+}

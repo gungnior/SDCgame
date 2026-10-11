@@ -1,0 +1,12 @@
+# dsh-sidebar-layout-fix bundle patch.
+#
+# The host half is intentionally empty: this bundle only changes browser
+# layout, so it contributes one inert row and one client module.
+#
+# Install with:
+#   dsh plugin --profile web add file:D:/aaaaadsh/dsh-sidebar-layout-fix
+# Uninstall with:
+#   dsh plugin --profile web remove dsh-sidebar-layout-fix
+- insert:
+    - id: sidebar-layout-fix
+      name: 'dsh-sidebar-layout-fix'
