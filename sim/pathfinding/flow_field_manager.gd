@@ -51,6 +51,87 @@ func has_field(target_cell: Vector2i) -> bool:
 	return _fields.has(target_cell)
 
 
+# ─────────────────── 连续空间推进 ───────────────────
+
+## 沿流场把位置从 pos 朝目标推进 speed*delta 的距离，返回新位置。
+##
+## ⚠️ 两个实测踩过的坑，都在这里修掉了：
+##
+## ① 不能「沿方向向量平移」
+##    连续坐标会逐渐漂离格子中心，最终越过墙角进入实心格，
+##    之后流场在该格没有方向 → 永久卡死。
+##    ⇒ 本函数朝【下一个格子的中心】走。
+##
+## ② 对角移动的直线可能擦过墙角
+##    从 (12,22) 斜走到对角格 (13,21) 时，直线会经过 (13,22)，
+##    而流场允许对角移动只需【两个正交邻居之一】可通行 —— 所以 (13,22) 可能是墙。
+##    ⇒ 本函数检查落点格是否可走；不可走就退化成正交单轴移动。
+func step_toward(pos: Vector2, target_cell: Vector2i, speed: float, delta: float) -> Vector2:
+	if speed <= 0.0 or delta <= 0.0:
+		return pos
+	var my_cell := Ballistics.cell_of(pos)
+	if my_cell == target_cell:
+		return pos
+	var d := direction_for(my_cell, target_cell)
+	if d == Vector2i.ZERO:
+		return pos
+	if not _cell_walkable(my_cell + d):
+		return pos
+
+	var step := speed * delta
+	var next_center := Ballistics.cell_center(my_cell + d)
+	var to_next := next_center - pos
+	var dist := to_next.length()
+	if dist <= 0.0001:
+		return next_center
+	var dir_unit := to_next / dist
+
+	# 试完整一步（含对角）
+	var full := pos + dir_unit * minf(step, dist)
+	if dist <= step:
+		full = next_center
+	if _pos_walkable(full):
+		return full
+
+	# 擦墙角 -> 退化为正交单轴：优先走那个「单轴邻居可走」的方向
+	var axes: Array[Vector2i] = []
+	if d.x != 0:
+		axes.append(Vector2i(d.x, 0))
+	if d.y != 0:
+		axes.append(Vector2i(0, d.y))
+	var p := pos
+	var remaining := step
+	for ax in axes:
+		if remaining <= 0.0:
+			break
+		var ac := Ballistics.cell_of(p)
+		var nc := ac + ax
+		if not _cell_walkable(nc):
+			continue
+		var center := Ballistics.cell_center(nc)
+		var v := center - p
+		var vl := v.length()
+		if vl <= 0.0001:
+			continue
+		var mv := minf(remaining, vl)
+		p = p + v / vl * mv
+		remaining -= mv
+	return p
+
+
+func _cell_walkable(c: Vector2i) -> bool:
+	return _grid != null and _grid.is_walkable(c)
+
+
+func _pos_walkable(p: Vector2) -> bool:
+	return _cell_walkable(Ballistics.cell_of(p))
+
+
+## 是否已经走到目标格
+func at_target(pos: Vector2, target_cell: Vector2i) -> bool:
+	return Ballistics.cell_of(pos) == target_cell
+
+
 func field_count() -> int:
 	return _fields.size()
 

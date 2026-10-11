@@ -47,11 +47,19 @@ func is_extract() -> bool:
 	return room_type == "extract"
 
 
-## 在 [min_count, max_count] 内抽一个数量。rng 必须注入（T-32）。
+## 在 [min_count, max_count] 内抽一个【房间数量】。rng 必须注入（T-32）。
 func roll_count(rng: SimRng) -> int:
 	if max_count <= min_count:
 		return min_count
 	return rng.randi_range(min_count, max_count)
+
+
+## ⚠️ 抽【敌人预算】。注意这是【另一组字段】（enemy_budget_min/max），
+##    绝不能用 roll_count() —— 那抽的是房间数量（如 6~12），会得到离谱的敌人总数。
+func roll_enemy_budget(rng: SimRng) -> int:
+	if enemy_budget_max <= enemy_budget_min:
+		return enemy_budget_min
+	return rng.randi_range(enemy_budget_min, enemy_budget_max)
 
 
 func _to_string() -> String:

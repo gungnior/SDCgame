@@ -232,7 +232,7 @@ func _try_assign_with_spawn(spawn_idx: int, spawn_def: RoomTypeDef, extract_def:
 	spawn_room.room_type_id = spawn_def.id
 	spawn_room.room_type = "spawn"
 	spawn_room.loot_table_id = spawn_def.loot_table_id
-	spawn_room.enemy_budget = spawn_def.roll_count(rng)
+	spawn_room.enemy_budget = spawn_def.roll_enemy_budget(rng)
 
 	_shuffle(far)
 	var want := extract_def.roll_count(rng)
@@ -242,7 +242,7 @@ func _try_assign_with_spawn(spawn_idx: int, spawn_def: RoomTypeDef, extract_def:
 		r.room_type_id = extract_def.id
 		r.room_type = "extract"
 		r.loot_table_id = extract_def.loot_table_id
-		r.enemy_budget = extract_def.roll_count(rng)
+		r.enemy_budget = extract_def.roll_enemy_budget(rng)
 
 	for r in graph.rooms:
 		if r.room_type == "common" or r.room_type.is_empty():
@@ -250,7 +250,7 @@ func _try_assign_with_spawn(spawn_idx: int, spawn_def: RoomTypeDef, extract_def:
 			if common_def != null:
 				r.room_type_id = common_def.id
 				r.loot_table_id = common_def.loot_table_id
-				r.enemy_budget = common_def.roll_count(rng)
+				r.enemy_budget = common_def.roll_enemy_budget(rng)
 	return true
 
 
