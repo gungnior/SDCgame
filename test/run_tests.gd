@@ -1,4 +1,4 @@
-extends SceneTree
+﻿extends SceneTree
 
 ## Headless 测试运行器
 ##
@@ -28,6 +28,10 @@ func _initialize() -> void:
 	_suite("掉落表抽样", _test_loot_roll)
 	_suite("CJK 字体与中文断行", _test_font_cjk)
 	_suite("逻辑网格 LogicalGrid", _test_logical_grid)
+	_suite("房间图 RoomGraph", _test_room_graph)
+	_suite("地图生成器 MapGenerator", _test_map_generator)
+	_suite("流场寻路 FlowField", _test_flow_field)
+	_suite("流场缓存 FlowFieldManager", _test_flow_field_manager)
 
 	print("")
 	if _failed == 0:
@@ -348,4 +352,284 @@ func _test_logical_grid() -> void:
 	_check(ascii.contains("#"), "ASCII 图含墙")
 	_check(ascii.contains("."), "ASCII 图含地面")
 	_check(ascii.contains("+"), "ASCII 图含走廊")
+
+
+# ─────────────────── B 阶段：房间图 ───────────────────
+
+func _test_room_graph() -> void:
+	var rg := RoomGraph.new()
+	for i in 6:
+		rg.add_room(Rect2i(i * 5, (i % 2) * 6, 3, 3))
+	_check_eq(rg.room_count(), 6, "6 个房间")
+	_check_eq(rg.edges.size(), 0, "初始无边")
+
+	# ── Kruskal MST 必须给出 n-1 条边且全连通 ──
+	var ok := rg.build_mst()
+	_check(ok, "MST 构建成功")
+	_check_eq(rg.mst_edges.size(), 5, "MST 边数 = n-1 = 5")
+	_check(rg.is_graph_connected(), "MST 后图全连通")
+
+	# ── BFS 图距离 ──
+	rg.assign_depths(0)
+	var d0 := rg.graph_distance(0, 0)
+	var d5 := rg.graph_distance(0, 5)
+	_check_eq(d0, 0, "自己到自己的图距离 = 0")
+	_check(d5 > 0, "到第 5 个房间的图距离 > 0")
+	# 图距离满足三角不等式
+	_check(d5 <= rg.graph_distance(0, 2) + rg.graph_distance(2, 5), "图距离满足三角不等式")
+
+	# ── 回加环 ──
+	var rng := SimRng.new(2024)
+	var added := rg.add_cycle_edges(0.15, rng)
+	_check(added > 0, "回加了 %d 条环边（>0）" % added)
+	_check_eq(rg.edges.size(), 5 + added, "总边数 = MST + 环")
+	_check(rg.is_graph_connected(), "加环后仍连通")
+	# 环边不能与 MST 边重复
+	var dup := false
+	for e in rg.cycle_edges:
+		if rg.mst_edges.has(e):
+			dup = true
+	_check(not dup, "环边与 MST 边不重复")
+
+	# ── 同 seed 的环边选择可复现 ──
+	var rg_b := RoomGraph.new()
+	for i in 6:
+		rg_b.add_room(Rect2i(i * 5, (i % 2) * 6, 3, 3))
+	rg_b.build_mst()
+	rg_b.add_cycle_edges(0.15, SimRng.new(2024))
+	_check_eq(rg_b.cycle_edges, rg.cycle_edges, "同 seed 的环边完全一致")
+
+	# ── 邻居查询 ──
+	_check(rg.neighbors(0).size() >= 1, "房间 0 至少有一个邻居")
+
+
+# ─────────────────── B 阶段：地图生成器 ───────────────────
+
+func _test_map_generator() -> void:
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+
+	var gen := MapGenerator.new()
+	var ok := gen.generate(12345, reg.room_types, 26, 26)
+
+	if not ok:
+		for e in gen.errors:
+			print("        err: %s" % e)
+
+	_check(ok, "地图生成成功")
+	if not ok:
+		return
+
+	print("        %s" % gen.summary())
+	print("        尝试 %d 次，使用 seed %d" % [gen.attempts_used, gen.used_seed])
+
+	# ── 硬约束（T-34 / data/rooms.json）──
+	var spawn_n := 0
+	var extract_n := 0
+	var extract_min_depth := 999999
+	for r in gen.graph.rooms:
+		if r.room_type == "spawn":
+			spawn_n += 1
+		elif r.room_type == "extract":
+			extract_n += 1
+			extract_min_depth = mini(extract_min_depth, r.depth)
+
+	_check_eq(spawn_n, 1, "出生点恰好 1 个")
+	_check(extract_n >= 2, "撤离点 %d 个（>=2）" % extract_n)
+	_check(extract_min_depth >= 4, "撤离点最小图距离 %d（>=4，防出生即撤离）" % extract_min_depth)
+	_check(gen.grid.is_fully_connected(), "逻辑格级全连通")
+	_check(gen.graph.is_graph_connected(), "房间图级全连通")
+	_check(gen.graph.rooms.size() >= 4, "房间数 %d（>=4）" % gen.graph.rooms.size())
+
+	# ── 环的存在：纯树走起来很闷 ──
+	_check(gen.graph.cycle_edges.size() > 0, "存在环边 %d 条" % gen.graph.cycle_edges.size())
+	_check(gen.graph.edges.size() > gen.graph.rooms.size() - 1, "边数 > n-1（确实成环）")
+
+	# ── ⭐ 走廊宽度硬约束：在【tile 层级】测量最小通行段 ──
+	# 这是 T-31 唯一真正该测的东西。
+	# 之前写成「走廊格不能四向开阔」是错的 —— 走廊交叉口本来就四向开阔。
+	# 正确测法：把逻辑格展开到 tile，量最窄的连续可走段有多宽。
+	# 因为可走性定义在逻辑格层级（1 格 = 3 tile），最小值必然是 3。
+	var tiles_w := gen.grid.tile_extents().x
+	var tiles_h := gen.grid.tile_extents().y
+	var min_h_run := 999999
+	for ty in tiles_h:
+		var run := 0
+		for tx in tiles_w:
+			if gen.grid.tile_is_walkable(Vector2i(tx, ty)):
+				run += 1
+			else:
+				if run > 0:
+					min_h_run = mini(min_h_run, run)
+				run = 0
+		if run > 0:
+			min_h_run = mini(min_h_run, run)
+	_check(min_h_run >= LogicalGrid.CELL_SIZE_TILES,
+		"tile 级最小水平通行段 = %d tile（硬约束要求 >= %d）" % [min_h_run, LogicalGrid.CELL_SIZE_TILES])
+
+	var min_v_run := 999999
+	for tx in tiles_w:
+		var run := 0
+		for ty in tiles_h:
+			if gen.grid.tile_is_walkable(Vector2i(tx, ty)):
+				run += 1
+			else:
+				if run > 0:
+					min_v_run = mini(min_v_run, run)
+				run = 0
+		if run > 0:
+			min_v_run = mini(min_v_run, run)
+	_check(min_v_run >= LogicalGrid.CELL_SIZE_TILES,
+		"tile 级最小垂直通行段 = %d tile（硬约束要求 >= %d）" % [min_v_run, LogicalGrid.CELL_SIZE_TILES])
+
+	# ── 逻辑格内的 3x3 tile 必须整块一致 ──
+	var expansion_ok := true
+	for y in gen.grid.height:
+		for x in gen.grid.width:
+			var cc := Vector2i(x, y)
+			var expect := gen.grid.is_walkable(cc)
+			var rr := gen.grid.cell_to_tile_rect(cc)
+			for ty2 in range(rr.position.y, rr.position.y + rr.size.y):
+				for tx2 in range(rr.position.x, rr.position.x + rr.size.x):
+					if gen.grid.tile_is_walkable(Vector2i(tx2, ty2)) != expect:
+						expansion_ok = false
+	_check(expansion_ok, "逻辑格 -> tile 展开一致（无线级缝隙）")
+
+	# ── 同 seed 完全可复现（T-32）──
+	var gen2 := MapGenerator.new()
+	gen2.generate(12345, reg.room_types, 26, 26)
+	_check_eq(gen2.used_seed, gen.used_seed, "同 seed -> 同 used_seed")
+	_check_eq(gen2.graph.rooms.size(), gen.graph.rooms.size(), "同 seed -> 同房间数")
+	_check_eq(gen2.grid.walkable_count(), gen.grid.walkable_count(), "同 seed -> 同可走格数")
+	_check_eq(gen2.to_ascii(), gen.to_ascii(), "同 seed -> 完全一致的地图")
+
+	# ── 多 seed 播种都能成功（鲁棒性）──
+	var ok_count := 0
+	for s in [1, 7, 42, 999, 31337]:
+		var g := MapGenerator.new()
+		if g.generate(s, reg.room_types, 26, 26):
+			ok_count += 1
+	_check_eq(ok_count, 5, "5 个不同 seed 全部生成成功")
+
+	# ── 敌人预算已分配 ──
+	_check(gen.total_enemy_budget() > 0, "敌人预算总数 %d > 0" % gen.total_enemy_budget())
+	_check(gen.spawn_room() != null, "能取到出生点房间")
+	_check(gen.extract_rooms().size() >= 2, "能取到 >=2 个撤离点房间")
+
+
+# ─────────────────── B 阶段：流场寻路 ───────────────────
+
+func _test_flow_field() -> void:
+	var g := LogicalGrid.new(15, 11)
+	g.carve_rect(Rect2i(1, 1, 13, 9))              # 整块挖空
+	g.carve_rect(Rect2i(7, 4, 1, 3), LogicalGrid.Cell.SOLID)   # 中间竖一堵墙
+
+	var f := FlowField.new()
+	f.load_from_grid(g)
+	var target := Vector2i(12, 5)
+	f.build(target)
+
+	_check(f.valid, "流场构建有效")
+	_check_eq(f.integration_at(target), 0, "目标格的 integration = 0")
+	_check(f.is_reachable(Vector2i(2, 5)), "左侧格可达")
+
+	# 不可达：把墙做成完全隔断
+	var g2 := LogicalGrid.new(11, 11)
+	g2.carve_rect(Rect2i(1, 1, 9, 9))
+	g2.carve_rect(Rect2i(5, 1, 1, 9), LogicalGrid.Cell.SOLID)   # 竖贯全图
+	var f2 := FlowField.new()
+	f2.load_from_grid(g2)
+	f2.build(Vector2i(8, 5))
+	_check(not f2.is_reachable(Vector2i(2, 5)), "被墙隔断的格不可达")
+	_check_eq(f2.get_direction(Vector2i(2, 5)), Vector2i.ZERO, "不可达格无方向")
+
+	# ── 方向确实指向目标 ──
+	var from := Vector2i(2, 5)
+	var path := f.trace_path(from)
+	_check(path.size() > 0, "能沿流场走出一条路径（%d 格）" % path.size())
+	_check_eq(path[0], from, "路径起点正确")
+	_check_eq(path[path.size() - 1], target, "路径终点是目标")
+
+	# ── 每一步都缩短距离场（梯度正确性）──
+	var monotone := true
+	for i in range(path.size() - 1):
+		if f.integration_at(path[i + 1]) >= f.integration_at(path[i]):
+			monotone = false
+			break
+	_check(monotone, "路径上 integration 严格递减（梯度正确）")
+
+	# ── 防贴角穿墙：对角移动不能穿过两面墙的夹缝 ──
+	var g3 := LogicalGrid.new(9, 9)
+	g3.carve_rect(Rect2i(1, 1, 7, 7))
+	g3.set_cell(Vector2i(4, 4), LogicalGrid.Cell.SOLID)
+	g3.set_cell(Vector2i(5, 4), LogicalGrid.Cell.SOLID)
+	g3.set_cell(Vector2i(4, 5), LogicalGrid.Cell.SOLID)
+	# (5,5) 可走，(4,4) 是墙 —— 从 (5,4) 到 (5,5) 不能对角穿过 (4,4)/(4,5) 的夹角
+	var f3 := FlowField.new()
+	f3.load_from_grid(g3)
+	f3.build(Vector2i(7, 7))
+	var d := f3.get_direction(Vector2i(5, 5))
+	_check(d != Vector2i(-1, -1), "不允许从墙角对角穿过去")
+	_check(f3.is_reachable(Vector2i(1, 1)), "绕行后仍可达")
+
+	# ── 规模：大网格也能正确且快速完成（二叉堆，无 O(n^2) 退化）──
+	var big := LogicalGrid.new(120, 120)
+	big.carve_rect(Rect2i(1, 1, 118, 118))
+	var fb := FlowField.new()
+	fb.load_from_grid(big)
+	var t0 := Time.get_ticks_usec()
+	fb.build(Vector2i(118, 118))
+	var ms := float(Time.get_ticks_usec() - t0) / 1000.0
+	_check(fb.is_reachable(Vector2i(1, 1)), "120x120 网格可达")
+	_check(ms < 2000.0, "120x120 构建耗时 %.1f ms（二叉堆无 O(n^2) 退化）" % ms)
+	var p := fb.trace_path(Vector2i(1, 1), 1000)
+	_check(p.size() > 100, "大网格路径长度 %d" % p.size())
+
+
+# ─────────────────── B 阶段：流场缓存 ───────────────────
+
+func _test_flow_field_manager() -> void:
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+	var gen := MapGenerator.new()
+	if not gen.generate(777, reg.room_types, 26, 26):
+		_check(false, "前置地图生成失败")
+		return
+
+	var mgr := FlowFieldManager.new()
+	mgr.setup(gen.grid)
+
+	var spawn := gen.spawn_room()
+	var extract := gen.extract_rooms()[0]
+	if spawn == null or extract == null:
+		_check(false, "取不到出生点/撤离点")
+		return
+
+	# 同一目标格反复询问 → 只构建一次
+	for i in 20:
+		mgr.direction_for(spawn.center, extract.center)
+	_check_eq(mgr.build_count, 1, "同一目标格 20 次询问只构建 1 次")
+	_check_eq(mgr.hit_count, 19, "命中 19 次")
+
+	# 换目标格 → 新建
+	mgr.direction_for(extract.center, spawn.center)
+	_check_eq(mgr.build_count, 2, "换目标格后重建 1 次")
+	_check_eq(mgr.field_count(), 2, "缓存里 2 份流场")
+
+	# 失效后重建
+	mgr.invalidate_all()
+	_check_eq(mgr.field_count(), 0, "invalidate_all 清空缓存")
+	mgr.direction_for(spawn.center, extract.center)
+	_check_eq(mgr.build_count, 3, "失效后重新构建")
+
+	# 方向可用性：出生点的敌人应当能朝撤离点走
+	var d := mgr.direction_for(spawn.center, extract.center)
+	_check(d != Vector2i.ZERO, "敌人能拿到朝目标的方向 %s" % str(d))
+
+	# 缓存裁剪
+	for i in 30:
+		mgr.direction_for(spawn.center, Vector2i(i % gen.grid.width, i % gen.grid.height))
+	mgr.trim_to(5)
+	_check(mgr.field_count() <= 5, "trim_to(5) 后缓存 <= 5 份（实际 %d）" % mgr.field_count())
+
 
