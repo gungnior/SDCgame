@@ -16,8 +16,8 @@ config/name="搜打撤"
 config/description="2D 像素俯视搜打撤 · 单机 PvE · 完全离线"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://art/icon.png"
-; ⚠️ 临时：指向 M0 真机验证场景。B 阶段有真正的入口场景后要改掉。
-run/main_scene="res://test/m0_device_check.tscn"
+; 主场景 = 可玩的突袭场景（表现层最小闭环）
+run/main_scene="res://view/raid_scene.tscn"
 
 [display]
 

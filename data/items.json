@@ -1,7 +1,7 @@
-[
-  { "id": "medical_bandage",    "name": "止血带",     "name_en": "Bandage",        "category": "medical",    "weight": 0.05, "stack_max": 10,  "icon": "res://art/items/medical_bandage.png",    "value": 30,   "desc": "快速止血，回血少", "stage": "B" },
-  { "id": "medical_kit",        "name": "医疗包",     "name_en": "Medkit",         "category": "medical",    "weight": 0.40, "stack_max": 3,   "icon": "res://art/items/medical_kit.png",        "value": 120,  "desc": "大幅回复生命",     "stage": "B" },
-  { "id": "medical_painkiller", "name": "止痛药",     "name_en": "Painkiller",     "category": "medical",    "weight": 0.03, "stack_max": 10,  "icon": "res://art/items/medical_painkiller.png", "value": 45,   "desc": "缓解疼痛，移速恢复", "stage": "B" },
+﻿[
+  { "id": "medical_bandage",    "name": "止血带",     "name_en": "Bandage",        "category": "medical",    "weight": 0.05, "stack_max": 10,  "icon": "res://art/items/medical_bandage.png",    "value": 30,   "desc": "快速止血，回血少", "stage": "B", "treat": { "hp": 25, "time": 2.0, "bleed": true } },
+  { "id": "medical_kit",        "name": "医疗包",     "name_en": "Medkit",         "category": "medical",    "weight": 0.40, "stack_max": 3,   "icon": "res://art/items/medical_kit.png",        "value": 120,  "desc": "大幅回复生命",     "stage": "B", "treat": { "hp": 75, "time": 4.5, "bleed": true, "armor": 10 } },
+  { "id": "medical_painkiller", "name": "止痛药",     "name_en": "Painkiller",     "category": "medical",    "weight": 0.03, "stack_max": 10,  "icon": "res://art/items/medical_painkiller.png", "value": 45,   "desc": "缓解疼痛，移速恢复", "stage": "B", "treat": { "hp": 10, "time": 1.5, "bleed": false } },
 
   { "id": "ammo_pistol",        "name": "手枪弹",     "name_en": "Pistol Ammo",    "category": "ammo",       "weight": 0.010, "stack_max": 120, "icon": "res://art/items/ammo_pistol.png",       "value": 2,    "desc": "9mm 通用弹药",     "stage": "B" },
   { "id": "ammo_rifle",         "name": "步枪弹",     "name_en": "Rifle Ammo",     "category": "ammo",       "weight": 0.012, "stack_max": 120, "icon": "res://art/items/ammo_rifle.png",        "value": 3,    "desc": "5.56 制式弹药",     "stage": "B" },

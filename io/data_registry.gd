@@ -56,6 +56,7 @@ func load_all(stage: String = "B") -> bool:
 	_load_enemies()
 	_load_loot_tables()
 	_load_room_types()
+	_load_attachments()
 
 	_validate_cross_refs()
 	_validate_map_constraints()
@@ -168,6 +169,30 @@ func _load_enemies() -> void:
 			errors.append("[enemies] %s: ranged 的 reaction_time=%.2f 低于下限 %.2f —— 会被玩家感知为不公平"
 				% [e.id, e.reaction_time, EnemyDef.MIN_RANGED_REACTION])
 		enemies[e.id] = e
+
+
+func _load_attachments() -> void:
+	var data: Variant = _read_json("attachments")
+	if data == null:
+		return                       # A 阶段才有的表，B 阶段允许缺失
+	if not (data is Array):
+		errors.append("[attachments] 顶层必须是数组")
+		return
+	for row in data:
+		if not (row is Dictionary):
+			continue
+		var a := AttachmentDef.from_dict(row)
+		if a.id.is_empty():
+			errors.append("[attachments] 有条目缺少 id")
+			continue
+		if not _allowed(a.stage):
+			continue
+		if not a.is_valid_slot():
+			errors.append("[attachments] %s: slot='%s' 非法（合法：%s）" % [a.id, a.slot, str(AttachmentDef.SLOTS)])
+		if attachments.has(a.id):
+			errors.append("[attachments] id 重复: %s" % a.id)
+			continue
+		attachments[a.id] = a
 
 
 func _load_loot_tables() -> void:

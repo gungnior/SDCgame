@@ -47,7 +47,17 @@
 | `icon` | string | ✅ | `res://art/items/{id}.png` |
 | `value` | int | ✅ | ≥0，商人回收价（元） |
 | `desc` | string | ✅ | 中文，≤20 字 |
+| `treat` | object | ⬜ | **仅 medical 类用**：`{ hp, time, bleed, armor }` |
 | `stage` | string | ⬜ | `B` / `A` / `C`，默认 `B` |
+
+**`treat` 字段**（医疗物品的治疗参数，见 `sim/medical.gd`）
+
+| 子字段 | 类型 | 含义 |
+|---|---|---|
+| `hp` | int | 回复血量 |
+| `time` | number | **耗时秒数** —— 治疗期间不能移动/射击，这是真实的战术取舍 |
+| `bleed` | bool | 是否同时止血 |
+| `armor` | int | 修甲量（可选） |
 
 ---
 
@@ -137,6 +147,39 @@
 | `spawn` 的 `min_count == max_count == 1` | 出生点唯一 |
 | `extract` 的 `min_count ≥ 2` | **撤离点至少两个**，否则玩家无选择 |
 | `extract` 的 `min_graph_dist ≥ 4` | **防止出生即撤离**——这是撤离点设计的关键 |
+
+---
+
+---
+
+## 7. `data/attachments.json`（A 阶段）
+
+**数组**，每项：
+
+| 字段 | 类型 | 必填 | 约束 |
+|---|---|---|---|
+| `id` | string | ✅ | 唯一 |
+| `name` / `name_en` | string | ✅ | |
+| `slot` | enum | ✅ | `sight` / `muzzle` / `grip` / `mag` |
+| `mods` | object | ✅ | 字段 → **增量**（正负皆可） |
+| `weight` | number | ✅ | kg |
+| `value` | int | ✅ | ≥0 |
+| `icon` | string | ✅ | `res://art/items/{id}.png` |
+| `desc` | string | ✅ | |
+| `stage` | string | ⬜ | 默认 `A` |
+
+**`mods` 允许的字段**（`sim/items/weapon_modding.gd` 的 `MODIFIABLE`）：
+`damage` · `rpm` · `mag_size` · `reload_time` · `spread_deg` · `range_m` ·
+`recoil_v` · `recoil_h` · `weight` · `noise_m`（**未知字段会被忽略**，防脏数据）
+
+**数值下限**（`FLOORS`）：伤害 ≥1 · 射速 ≥20 · 弹匣 ≥1 · 换弹 ≥0.3s · 散布 ≥0 · 射程 ≥3m
+—— 保证塞满负向配件也不会出现负数伤害这类荒谬结果。
+
+**每把枪的插槽数**：A 阶段 **2 个**（`WeaponModding.SLOTS_A`），C 阶段 **4 个**（`SLOTS_C`），
+顺序按 `AttachmentDef.SLOTS` = `[sight, muzzle, grip, mag]`。
+
+> ⚠️ `attachments.json` **只由 GDScript 的 `DataRegistry` 校验**（Python 校验器暂未覆盖）。
+> B 阶段允许该文件缺失。
 
 ---
 

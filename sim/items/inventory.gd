@@ -1,4 +1,4 @@
-class_name Inventory
+﻿class_name Inventory
 extends RefCounted
 
 ## 背包 —— 纯槽位 + 重量（specs/tech-stack.md §6.2 T-61）
@@ -52,6 +52,10 @@ func used_slots() -> int:
 		if s != null:
 			n += 1
 	return n
+
+
+func has_item(item_id: String) -> bool:
+	return count_of(item_id) > 0
 
 
 func count_of(item_id: String) -> int:

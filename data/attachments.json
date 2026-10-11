@@ -1,0 +1,17 @@
+[
+  { "id": "att_sight_red_dot",   "name": "红点镜",     "name_en": "Red Dot",        "slot": "sight",  "mods": { "spread_deg": -0.35, "range_m": 6 },              "weight": 0.20, "value": 180, "icon": "res://art/items/att_sight_red_dot.png",   "desc": "散布更小、射程更远",     "stage": "A" },
+  { "id": "att_sight_holo",      "name": "全息镜",     "name_en": "Holographic",    "slot": "sight",  "mods": { "spread_deg": -0.50, "range_m": 10, "weight": 0.2 }, "weight": 0.32, "value": 340, "icon": "res://art/items/att_sight_holo.png",      "desc": "精度最好但更重",         "stage": "A" },
+  { "id": "att_sight_scope",     "name": "4 倍镜",     "name_en": "4x Scope",       "slot": "sight",  "mods": { "spread_deg": -0.65, "range_m": 18, "rpm": -40 }, "weight": 0.55, "value": 520, "icon": "res://art/items/att_sight_scope.png",     "desc": "远射强，近战反应变慢",   "stage": "A" },
+  { "id": "att_sight_iron",      "name": "机械瞄具",   "name_en": "Iron Sights",    "slot": "sight",  "mods": { "spread_deg": -0.10 },                             "weight": 0.05, "value": 30,  "icon": "res://art/items/att_sight_iron.png",      "desc": "聊胜于无",               "stage": "A" },
+
+  { "id": "att_muzzle_suppressor","name": "消音器",    "name_en": "Suppressor",     "slot": "muzzle", "mods": { "damage": -3, "recoil_v": -0.35, "recoil_h": -0.25, "noise_m": -18 }, "weight": 0.45, "value": 460, "icon": "res://art/items/att_muzzle_suppressor.png", "desc": "大幅降低枪声传播",  "stage": "A" },
+  { "id": "att_muzzle_comp",     "name": "补偿器",     "name_en": "Compensator",    "slot": "muzzle", "mods": { "recoil_v": -0.55, "recoil_h": -0.30, "spread_deg": 0.10 }, "weight": 0.25, "value": 300, "icon": "res://art/items/att_muzzle_comp.png",     "desc": "压枪更好、散布略增",     "stage": "A" },
+  { "id": "att_muzzle_brake",    "name": "枪口制退器", "name_en": "Muzzle Brake",   "slot": "muzzle", "mods": { "recoil_v": -0.70, "recoil_h": -0.15, "noise_m": 6 }, "weight": 0.30, "value": 260, "icon": "res://art/items/att_muzzle_brake.png",    "desc": "垂直后坐力显著下降",     "stage": "A" },
+  { "id": "att_muzzle_ext",      "name": "加长枪管",   "name_en": "Extended Barrel","slot": "muzzle", "mods": { "range_m": 14, "damage": 4, "weight": 0.4, "spread_deg": 0.15 }, "weight": 0.60, "value": 380, "icon": "res://art/items/att_muzzle_ext.png", "desc": "伤害与射程换机动",   "stage": "A" },
+
+  { "id": "att_grip_vertical",   "name": "垂直握把",   "name_en": "Vertical Grip",  "slot": "grip",   "mods": { "recoil_v": -0.35, "recoil_h": -0.10 },           "weight": 0.18, "value": 150, "icon": "res://art/items/att_grip_vertical.png",   "desc": "稳定垂直后坐",           "stage": "A" },
+  { "id": "att_grip_angled",     "name": "斜角握把",   "name_en": "Angled Grip",    "slot": "grip",   "mods": { "recoil_h": -0.30, "spread_deg": -0.10 },         "weight": 0.15, "value": 140, "icon": "res://art/items/att_grip_angled.png",     "desc": "稳定水平后坐",           "stage": "A" },
+
+  { "id": "att_mag_ext",         "name": "扩容弹匣",   "name_en": "Extended Mag",   "slot": "mag",    "mods": { "mag_size": 10, "weight": 0.35, "reload_time": 0.4 }, "weight": 0.40, "value": 220, "icon": "res://art/items/att_mag_ext.png",      "desc": "弹药更多但换弹更慢",     "stage": "A" },
+  { "id": "att_mag_quick",       "name": "快速弹匣",   "name_en": "Quickdraw Mag",  "slot": "mag",    "mods": { "reload_time": -0.6 },                             "weight": 0.10, "value": 180, "icon": "res://art/items/att_mag_quick.png",       "desc": "换弹更快",               "stage": "A" }
+]

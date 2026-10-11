@@ -22,6 +22,8 @@ var icon: String = ""
 var value: int = 0
 var desc: String = ""
 var stage: String = "B"
+## 医疗物品的治疗参数（medical 类才有）：{hp, time, bleed, armor}
+var treat: Dictionary = {}
 
 
 static func from_dict(d: Dictionary) -> ItemDef:
@@ -36,6 +38,7 @@ static func from_dict(d: Dictionary) -> ItemDef:
 	o.value = int(d.get("value", 0))
 	o.desc = str(d.get("desc", ""))
 	o.stage = str(d.get("stage", "B"))
+	o.treat = d.get("treat", {})
 	return o
 
 

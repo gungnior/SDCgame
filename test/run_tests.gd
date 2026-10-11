@@ -1,4 +1,4 @@
-extends SceneTree
+﻿extends SceneTree
 
 ## Headless 测试运行器
 ##
@@ -41,6 +41,10 @@ func _initialize() -> void:
 	_suite("小队 Squad", _test_squad)
 	_suite("敌人个体 EnemyAgent", _test_enemy_agent)
 	_suite("突袭回合 RaidSession", _test_raid_session)
+	_suite("A 阶段：人物状态 Vitals", _test_vitals)
+	_suite("A 阶段：枪械改装 WeaponModding", _test_weapon_modding)
+	_suite("A 阶段：医疗 MedicalSystem", _test_medical)
+	_suite("A 阶段：藏身处 Hideout", _test_hideout)
 
 	print("")
 	if _failed == 0:
@@ -1256,3 +1260,283 @@ func _test_raid_session() -> void:
 	var healed := raid4.heal(100)
 	_check_eq(healed, 40, "治疗量被上限截断为 40")
 	_check_eq(raid4.hp, raid4.max_hp, "回满血")
+
+
+
+# ─────────────────── A 阶段：人物状态 / 改装 / 医疗 / 藏身处 ───────────────────
+
+func _test_vitals() -> void:
+	var v := Vitals.new()
+	v.reset(100, 40)
+	_check_eq(v.hp, 100, "初始 HP 100")
+	_check_eq(v.armor, 40, "初始护甲 40")
+	_check(not v.dead, "初始存活")
+
+	# 护甲吸收
+	var lost := v.take_damage(30)
+	_check(v.armor < 40, "护甲被消耗（%d）" % v.armor)
+	_check(lost < 30, "护甲吸收了部分伤害（实际掉血 %d < 30）" % lost)
+	_check(v.armor_absorbed > 0, "记录吸收量 %d" % v.armor_absorbed)
+
+	# 打光护甲后全额进血
+	var v2 := Vitals.new()
+	v2.reset(100, 5)
+	v2.take_damage(100)
+	_check_eq(v2.armor, 0, "护甲被打光")
+	_check(v2.hp < 100, "HP 受损（%d）" % v2.hp)
+
+	# 治疗上限
+	var v3 := Vitals.new()
+	v3.reset(100, 0)
+	v3.take_damage(40)
+	var healed := v3.heal(999)
+	_check_eq(healed, 40, "治疗被上限截断为 40")
+	_check_eq(v3.hp, 100, "回满")
+
+	# 修甲上限
+	v3.max_armor = 20
+	var rep := v3.repair_armor(999)
+	_check_eq(rep, 20, "修甲被上限截断")
+
+	# 流血
+	var v4 := Vitals.new()
+	v4.reset(100, 0)
+	v4.apply_bleed(Vitals.Bleed.LIGHT)
+	_check(v4.is_bleeding(), "进入流血状态")
+	_check(v4.bleed_dps() > 0.0, "流血 DPS %.2f" % v4.bleed_dps())
+	var before := v4.hp
+	for _i in 100:
+		v4.tick(0.1)
+	_check(v4.hp < before, "流血持续掉血（%d -> %d）" % [before, v4.hp])
+	v4.stop_bleed()
+	_check(not v4.is_bleeding(), "止血后不再流血")
+	var hp_after := v4.hp
+	for _i in 20:
+		v4.tick(0.1)
+	_check_eq(v4.hp, hp_after, "止血后血量稳定")
+
+	# 重度流血更快
+	var v5 := Vitals.new()
+	v5.reset(100, 0)
+	v5.apply_bleed(Vitals.Bleed.HEAVY)
+	_check(v5.bleed_dps() > v4.bleed_dps(), "重度流血 DPS 更大")
+
+	# 移速惩罚
+	var v6 := Vitals.new()
+	v6.reset(100, 0)
+	var full_speed := v6.speed_multiplier(0.0)
+	v6.hp = 10
+	var hurt_speed := v6.speed_multiplier(0.0)
+	_check(hurt_speed < full_speed, "残血移速更慢（%.2f < %.2f）" % [hurt_speed, full_speed])
+	var heavy := v6.speed_multiplier(2.0)
+	_check(heavy < hurt_speed, "超重叠加后更慢（%.2f）" % heavy)
+
+	# 死亡
+	var v7 := Vitals.new()
+	v7.reset(50, 0)
+	v7.take_damage(999)
+	_check(v7.dead, "被打死")
+	_check_eq(v7.hp, 0, "HP 归零")
+	_check(not v7.heal(50) > 0, "死后无法治疗")
+	_check_eq(v7.speed_multiplier(), 0.0, "死后移速 0")
+
+
+func _test_weapon_modding() -> void:
+	var reg := DataRegistry.new()
+	reg.load_all("A")
+	_check(reg.attachments.size() >= 12, "载入 %d 个配件" % reg.attachments.size())
+
+	var rifle: WeaponDef = reg.get_weapon("weapon_rifle")
+	var lo := WeaponModding.create_loadout(rifle, WeaponModding.SLOTS_A)
+	_check(lo != null, "创建 Loadout")
+	_check_eq(lo.free_slots.size(), WeaponModding.SLOTS_A, "A 阶段 %d 个插槽" % WeaponModding.SLOTS_A)
+	_check_eq(int(round(lo.effective["damage"])), rifle.damage, "初始伤害等于裸枪")
+
+	var base_spread: float = lo.effective["spread_deg"]
+	var base_mag := int(round(lo.effective["mag_size"]))
+
+	# 装瞄具 -> 散布下降
+	var sight: AttachmentDef = reg.attachments["att_sight_red_dot"]
+	_check_eq(WeaponModding.attach(lo, sight), "", "装上红点镜")
+	_check(lo.effective["spread_deg"] < base_spread,
+		"散布下降（%.2f -> %.2f）" % [base_spread, lo.effective["spread_deg"]])
+	_check(lo.attachments.has("sight"), "sight 插槽已占用")
+
+	# 同插槽不能重复装
+	var sight2: AttachmentDef = reg.attachments["att_sight_holo"]
+	_check(WeaponModding.attach(lo, sight2) != "", "同插槽不能重复装")
+
+	# 没有的插槽不能装（枪口不在 A 阶段的前 2 个插槽里）
+	var grip: AttachmentDef = reg.attachments["att_grip_vertical"]
+	var err := WeaponModding.attach(lo, grip)
+	_check(err == "" or err.contains("插槽"), "grip 装载按插槽限制处理：%s" % err)
+
+	# 卸下恢复
+	var removed := WeaponModding.detach(lo, "sight")
+	_check(removed != null, "卸下红点镜")
+	_check(absf(lo.effective["spread_deg"] - base_spread) < 0.001,
+		"卸下后散布恢复（%.2f）" % lo.effective["spread_deg"])
+
+	# to_weapon_def 产出修改后的数值
+	var w2 := WeaponModding.attach(lo, reg.attachments["att_sight_scope"]) == "" \
+		if lo.free_slots.has("sight") else false
+	var eff := lo.to_weapon_def()
+	_check(eff != null, "产出有效 WeaponDef")
+	_check(eff.spread_deg < rifle.spread_deg, "有效散布小于裸枪（%.2f < %.2f）" % [eff.spread_deg, rifle.spread_deg])
+	_check(eff.range_m > rifle.range_m, "有效射程大于裸枪（%d > %d）" % [eff.range_m, rifle.range_m])
+	_check(eff.value >= rifle.value, "改装后价值更高（%d）" % eff.value)
+
+	# 数值下限：塞满负向配件也不会出现负数伤害
+	var pump := WeaponModding.create_loadout(rifle, WeaponModding.SLOTS_C)
+	for id in reg.attachments:
+		WeaponModding.attach(pump, reg.attachments[id])
+	var eff2 := pump.to_weapon_def()
+	_check(eff2.damage >= 1, "伤害不低于 1（%d）" % eff2.damage)
+	_check(eff2.mag_size >= 1, "弹匣不低于 1（%d）" % eff2.mag_size)
+	_check(eff2.spread_deg >= 0.0, "散布不为负（%.2f）" % eff2.spread_deg)
+
+	# C 阶段 4 个插槽
+	_check_eq(WeaponModding.create_loadout(rifle, WeaponModding.SLOTS_C).free_slots.size(), 4, "C 阶段 4 个插槽")
+
+	# diff 摘要
+	var d := pump.diff()
+	_check(d.size() > 0, "diff 报告 %d 项变化" % d.size())
+
+	# auto_fit
+	var auto := WeaponModding.create_loadout(rifle, WeaponModding.SLOTS_A)
+	var fitted := WeaponModding.auto_fit(auto, reg.attachments)
+	_check(fitted > 0, "自动装配了 %d 个配件" % fitted)
+	_check(auto.attachments.size() == fitted, "装配数量一致")
+
+
+func _test_medical() -> void:
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+	var kit: ItemDef = reg.get_item("medical_kit")
+	var bandage: ItemDef = reg.get_item("medical_bandage")
+	_check(not kit.treat.is_empty(), "医疗包带治疗参数：%s" % str(kit.treat))
+
+	var vitals := Vitals.new()
+	vitals.reset(100, 0)
+	vitals.take_damage(60)
+	vitals.apply_bleed(Vitals.Bleed.HEAVY)
+
+	var med := MedicalSystem.new()
+	_check_eq(med.start(kit, vitals), "", "开始用医疗包")
+	_check(med.is_treating(), "治疗中")
+	_check_eq(med.start(bandage, vitals), "正在治疗中", "不能同时开两个治疗")
+
+	# 治疗耗时：中途还没生效
+	var t: float = kit.treat["time"]
+	med.tick(t * 0.5, vitals)
+	_check_eq(vitals.hp, 40, "治疗过半还没回血")
+	_check(med.progress() > 0.4 and med.progress() < 0.6, "进度约 50%%（%.0f%%）" % (med.progress() * 100.0))
+
+	# 走完 -> 生效
+	var res := med.tick(t, vitals)
+	_check(bool(res["done"]), "治疗完成")
+	_check(int(res["healed"]) > 0, "回复 %d 点" % int(res["healed"]))
+	_check(bool(res["stopped_bleed"]), "同时止住了血")
+	_check(not vitals.is_bleeding(), "确实不流血了")
+	_check(not med.is_treating(), "治疗结束")
+	_check_eq(med.treatments_done, 1, "治疗计数 1")
+
+	# 满血时用医疗包 -> 拒绝
+	var v2 := Vitals.new()
+	v2.reset(100, 0)
+	_check(med.start(kit, v2) != "", "满血时拒绝用医疗包")
+
+	# 非医疗物品
+	_check(med.start(reg.get_item("ammo_rifle"), v2) != "", "弹药不能当药用")
+
+	# 打断
+	var v3 := Vitals.new()
+	v3.reset(100, 0)
+	v3.take_damage(50)
+	med.start(bandage, v3)
+	_check(med.is_treating(), "开始治疗")
+	med.cancel()
+	_check(not med.is_treating(), "被打断")
+	_check_eq(v3.hp, 50, "打断后没有回血")
+
+	# 重击打断判定
+	_check(med.should_interrupt(20), "20 点伤害应当打断")
+	_check(not med.should_interrupt(5), "5 点伤害不打断")
+
+
+func _test_hideout() -> void:
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+	var h := Hideout.new(reg.items, 100)
+	_check_eq(h.wallet, 100, "初始资金 100")
+	_check_eq(h.level_of("stash_size"), 0, "升级初始为 0")
+
+	# 钱不够
+	var err := h.buy_upgrade("stash_size")
+	_check(err != "", "钱不够时拒绝升级：%s" % err)
+
+	# 给钱后升级
+	h.wallet = 100000
+	var before_slots := h.slot_count()
+	var cost := h.upgrade_cost("stash_size")
+	_check(cost > 0, "仓库升级价格 %d" % cost)
+	_check_eq(h.buy_upgrade("stash_size"), "", "升级成功")
+	_check_eq(h.level_of("stash_size"), 1, "等级 1")
+	_check_eq(h.wallet, 100000 - cost, "扣款正确")
+	_check(h.slot_count() > before_slots, "仓库槽位增加（%d -> %d）" % [before_slots, h.slot_count()])
+	_check_eq(h.stash.slot_count(), h.slot_count(), "仓库容量已应用")
+
+	# 价格递增
+	_check(h.upgrade_cost("stash_size") > cost, "第二级更贵")
+
+	# 满级
+	for _i in 10:
+		h.wallet = 10000000
+		h.buy_upgrade("stash_size")
+	_check_eq(h.level_of("stash_size"), h.max_level_of("stash_size"), "到达满级")
+	_check_eq(h.upgrade_cost("stash_size"), -1, "满级后价格为 -1")
+	_check(h.buy_upgrade("stash_size") != "", "满级后拒绝再升")
+
+	# 负重升级影响 raid_modifiers
+	h.buy_upgrade("carry_size")
+	_check(h.carry_weight_limit() > Hideout.BASE_WEIGHT_LIMIT,
+		"负重上限提升到 %.1f" % h.carry_weight_limit())
+	_check(float(h.raid_modifiers()["carry_weight_limit"]) == h.carry_weight_limit(), "raid_modifiers 一致")
+
+	# 商人：买入
+	h.wallet = 5000
+	var price := h.stock_price("medical_kit")
+	_check(price > 0, "医疗包售价 %d" % price)
+	var buy_err := h.buy("medical_kit", 2)
+	_check_eq(buy_err, "", "买入 2 个医疗包")
+	_check_eq(h.wallet, 5000 - price * 2, "买入扣款正确")
+	_check_eq(h.stash.count_of("medical_kit"), 2, "仓库里有 2 个")
+
+	# 商人：卖出
+	var got := h.sell("medical_kit", 1)
+	_check(got > 0, "卖出 1 个得 %d 元" % got)
+	_check(got < price, "回收价低于售价（%d < %d）" % [got, price])
+	_check_eq(h.stash.count_of("medical_kit"), 1, "仓库剩 1 个")
+
+	# 卖出不存在的物品
+	_check_eq(h.sell("valuables_gpu", 1), 0, "卖出没有的物品得 0")
+
+	# 商人关系提升回收价
+	var r0 := h.sell_ratio()
+	h.wallet = 100000
+	h.buy_upgrade("merchant_rep")
+	_check(h.sell_ratio() > r0, "商人关系提升回收比例（%.2f -> %.2f）" % [r0, h.sell_ratio()])
+
+	# 序列化往返
+	var d := h.to_dict()
+	var h2 := Hideout.new(reg.items, 0)
+	h2.from_dict(d)
+	_check_eq(h2.wallet, h.wallet, "往返后资金一致")
+	_check_eq(h2.level_of("stash_size"), h.level_of("stash_size"), "往返后等级一致")
+	_check_eq(h2.stash.count_of("medical_kit"), h.stash.count_of("medical_kit"), "往返后仓库一致")
+
+	# 一局带回的东西入库
+	var drops := [{"item_id": "valuables_gpu", "count": 1}]
+	var leftover := h.deposit(drops)
+	_check_eq(leftover.size(), 0, "入库无剩余")
+	_check_eq(h.stash.count_of("valuables_gpu"), 1, "仓库收到显卡")
