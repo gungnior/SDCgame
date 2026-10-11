@@ -15,7 +15,9 @@ config_version=5
 config/name="搜打撤"
 config/description="2D 像素俯视搜打撤 · 单机 PvE · 完全离线"
 config/features=PackedStringArray("4.7", "GL Compatibility")
-config/icon=""
+config/icon="res://art/icon.png"
+; ⚠️ 临时：指向 M0 真机验证场景。B 阶段有真正的入口场景后要改掉。
+run/main_scene="res://test/m0_device_check.tscn"
 
 [display]
 
@@ -32,6 +34,11 @@ renderer/rendering_method="forward_plus"
 renderer/rendering_method.mobile="gl_compatibility"
 ; T-16：Nearest（0 = Nearest）
 textures/canvas_textures/default_texture_filter=0
+; ⚠️ 实测（M0）：导出 Android 会报错「需要 ETC2/ASTC 纹理压缩格式」，【必须开启】。
+;    这不是"要不要压缩"的选择题 —— 它是 Android 导出的前置能力开关。
+;    开启后仍可按纹理决定压缩方式：像素画素材建议在各自的 .import 里设为 Lossless，
+;    避免有损压缩糊掉像素边缘（见 specs/tech-stack.md V-07）。
+textures/vram_compression/import_etc2_astc=true
 
 [physics]
 
