@@ -1,0 +1,44 @@
+; Godot 4.7.2 工程配置
+;
+; 依据 specs/tech-stack.md：
+;   T-02  渲染器 Compatibility（2D 纯像素游戏，兼容设备最广）
+;   T-03  粒子必须用 CPUParticles2D —— GPUParticles2D 在 Compatibility 下【静默失效】
+;   T-15  stretch: canvas_items + keep + integer（像素完美）
+;   T-16  纹理过滤 = Nearest
+;
+; 决策 D-16：本项目【不申请 INTERNET 权限】，代码内零网络请求。
+
+config_version=5
+
+[application]
+
+config/name="搜打撤"
+config/description="2D 像素俯视搜打撤 · 单机 PvE · 完全离线"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon=""
+
+[display]
+
+window/size/viewport_width=640
+window/size/viewport_height=360
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+window/stretch/scale_mode="integer"
+
+[rendering]
+
+; T-02：桌面用 Forward+ 开发，移动导出自动切 Compatibility
+renderer/rendering_method="forward_plus"
+renderer/rendering_method.mobile="gl_compatibility"
+; T-16：Nearest（0 = Nearest）
+textures/canvas_textures/default_texture_filter=0
+
+[physics]
+
+; T-51：提高 physics ticks 换低延迟与低穿模，不用 physics interpolation
+common/physics_ticks_per_second=120
+
+[input_devices]
+
+; 触摸屏控制；不申请网络权限
+pointing/emulate_mouse_from_touch=true

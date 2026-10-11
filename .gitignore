@@ -6,6 +6,9 @@
 _nightrun/
 tasks/*.result.json
 
+# ---- 本地安装的引擎（82MB，不入库）----
+_install/
+
 # ---- Godot ----
 .godot/
 godot/.godot/
