@@ -22,6 +22,11 @@ var _status: Label
 
 
 func _ready() -> void:
+	# ⚠️ 场景切换必须重置阶段计时 —— 否则新场景第一次 mark() 会把
+	#    在【上一个场景】待了多久 算成某一阶段的耗时
+	#    （实测出现过 draw_end=4917ms 的幽灵卡顿，其实只是在藏身处待了 4.7 秒）
+	if Tel != null:
+		Tel.reset_phases()
 	RenderingServer.set_default_clear_color(Color(0.07, 0.08, 0.10))
 	# _build 里会调 _fit_viewport 把自身尺寸钉到视口
 	if Game != null:

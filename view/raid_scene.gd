@@ -138,6 +138,11 @@ var render_mode := RENDER_WHITEBOX
 
 
 func _ready() -> void:
+	# ⚠️ 场景切换必须重置阶段计时 —— 否则新场景第一次 mark() 会把
+	#    在【上一个场景】待了多久 算成某一阶段的耗时
+	#    （实测出现过 draw_end=4917ms 的幽灵卡顿，其实只是在藏身处待了 4.7 秒）
+	if Tel != null:
+		Tel.reset_phases()
 	RenderingServer.set_default_clear_color(Color(0.06, 0.07, 0.09))
 	_setup_sim()
 	_setup_view()
@@ -1523,9 +1528,13 @@ func _update_hud() -> void:
 	lines.append("小队警戒 %.2f   %s" % [
 		squad.alert_level, "交战中" if squad.is_engaged() else ("警觉" if squad.is_alerted() else "放松")])
 	# 性能读数（真机排障用：卡顿时可以直接报数字）
-	lines.append("FPS %d   帧 %.1f ms   敌 %d   音频掉 %d" % [
+	# ⚠️ 这里【不能用 Performance.TIME_PROCESS】—— 真机实测它在 Android 上
+	#    给出与 FPS 自相矛盾的值（HUD 显示 "FPS 60  帧 25.2ms"，
+	#    而同一时刻遥测的墙钟均值是 16.6ms）。改用 Tel 的墙钟测量值。
+	lines.append("FPS %d  平均 %.1f ms  最慢 %.1f ms  敌 %d  音频掉 %d" % [
 		int(Engine.get_frames_per_second()),
-		Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+		0.0 if Tel == null else Tel.last_avg_ms(),
+		0.0 if Tel == null else Tel.last_worst_ms(),
 		agents.size(),
 		0 if Sfx == null else Sfx.dropped_count])
 

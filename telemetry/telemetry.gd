@@ -181,13 +181,14 @@ func _flush_stats() -> void:
 	var wall := 0.0
 	if _window_t0_usec > 0:
 		wall = float(Time.get_ticks_usec() - _window_t0_usec) / 1000.0
+	_last_avg_ms = wall / maxf(1.0, float(_frames))
+	_last_worst_ms = _worst_ms
 	var d := {
 		"k": "stats",
 		"t": _now(),
 		"fps": int(fps),
 		"avg_ms": snappedf(wall / maxf(1.0, float(_frames)), 0.01),
-		"worst_ms": snappedf(_worst_ms, 0.01),
-		"worst_ctx": _worst_ctx,
+		"worst_ms": snappedf(_worst_ms, 0.01),		"worst_ctx": _worst_ctx,
 		"spikes": _spike_window,
 		"spikes_total": _spike_total,
 		# 最慢的三个阶段：名字 / 最慢ms / 累计ms
@@ -237,7 +238,44 @@ func _now() -> float:
 	return snappedf(float(Time.get_ticks_msec() - _run_started_ms) / 1000.0, 0.01)
 
 
+## 场景切换时调用：丢掉跨场景的阶段计时。
+##
+## ⚠️ 不重置会出现**幽灵卡顿**：
+##   旧场景最后一次 mark("draw_end") -> 场景被释放 -> 玩家在藏身处待 4.7 秒
+##   -> 新场景第一次 mark("player") 算出 4917ms 的 "draw_end"。
+##   实测被这个假数据带偏过（以为有 5 秒冻结，其实只是在藏身处待了一会儿）。
+##   只清阶段计时，**不动** fps / 尖峰等全局统计。
+func reset_phases() -> void:
+	_phase_name = ""
+	_phase_t0 = 0
+	_phase_max.clear()
+	_phase_sum.clear()
+	_ctx = "idle"
+	_last_usec = 0
+	_window_t0_usec = 0
+
+
 ## 手动开关（HUD 或调试键）
 func set_enabled(v: bool) -> void:
 	enabled = v
 	emit("telemetry", {"enabled": v})
+
+
+# ─── 供 HUD 显示（**不要再用 Performance.TIME_PROCESS**）───
+#
+# ⚠️ 真机实测踩过两次同一个坑：
+#   ① 遥测里用它 -> 报出 1787 次"80ms 卡顿"，而同窗 avg_ms=16.13ms（正好 60fps），
+#      两者不可能同时成立 -> 遥测改用墙钟
+#   ② **HUD 那一路当时漏改了** -> 屏幕上一直显示 "FPS 60  帧 25.2 ms" 这种
+#      自相矛盾的数字，还把排查方向带偏过
+#   现在 HUD 也统一读这里（墙钟测量值）。
+var _last_avg_ms := 0.0
+var _last_worst_ms := 0.0
+
+
+func last_avg_ms() -> float:
+	return _last_avg_ms
+
+
+func last_worst_ms() -> float:
+	return _last_worst_ms

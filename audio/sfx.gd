@@ -136,9 +136,18 @@ func play(name: String, volume_scale: float = 1.0, pitch_scale: float = 1.0) -> 
 		return
 
 	var max_simul: int = e["max_simul"]
+	# ⚠️⚠️ 并发计数必须【同时】满足：这个槽位登记的是本人 **且** 它现在真的在播。
+	#
+	# 早先只数 `_live` 里的名字，而 `_live` 的条目在音效播完后**从不清理** ——
+	# 只在槽位被 _acquire 复用时才被覆盖。后果极其严重：
+	#   步枪响过 max_simul 次之后，_live 里就永远留着那么多条同名记录
+	#   -> running >= max_simul 恒成立 -> **之后每一枪都被丢弃，枪声彻底消失**。
+	# 真机实测 dropped=95 就是这么来的（不是"并发太多"，是被永久掐断）。
 	var running := 0
-	for nm in _live:
-		if nm == name:
+	# ⚠️ `_live` 是 **Array**（不是 Dictionary）—— 不能用 .get(i, "")，
+	#    那样会 "Too many arguments for get()" 直接编译失败（实测踩过）。
+	for i in _pool.size():
+		if i < _live.size() and str(_live[i]) == name and _pool[i].playing:
 			running += 1
 	if running >= max_simul:
 		dropped_count += 1

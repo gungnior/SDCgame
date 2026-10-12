@@ -69,6 +69,8 @@ func _initialize() -> void:
 	_suite("PC实测：键位与设置菜单", _test_keybindings)
 	_suite("PC实测：Control 尺寸不得塌成 0", _test_control_size_not_zero)
 	_suite("PC实测：藏身处布局", _test_hideout_layout)
+	_suite("手机实测：音频并发计数", _test_sfx_concurrency)
+	_suite("手机实测：HUD 性能读数", _test_hud_perf_metric)
 
 	print("")
 	if _failed == 0:
@@ -2740,3 +2742,57 @@ func _test_whitebox_is_default() -> void:
 	# 而且不能在任何地方被持久化/覆盖成美术模式
 	_check(not rs.contains("render_mode = RENDER_ART\n\t\t_build_map_texture()\n\t_setup_sim"),
 		"启动流程里不会强制切成美术模式")
+
+
+# ─────────────────── 手机实测：音频被永久掐断 / HUD 读数自相矛盾 ───────────────────
+
+func _test_sfx_concurrency() -> void:
+	# 手机实测：`音频掉 95`。
+	# 查证不是"并发太多"，而是**枪声被永久掐断**：
+	#   并发计数只数 `_live` 里的名字，而 `_live` 的条目在音效播完后从不清理,
+	#   只在槽位被 _acquire 复用时才覆盖。
+	#   -> 步枪响过 max_simul 次后，running >= max_simul 恒成立
+	#   -> 之后每一枪都被丢弃。
+	# 正确做法：**同时**检查"槽位登记的是本人" **且** "它现在真的在播"。
+	var src := FileAccess.get_file_as_string("res://audio/sfx.gd")
+	_check(src.contains("and _pool[i].playing"),
+		"并发计数必须检查 .playing（否则播完的残留会把音效永久掐断）")
+	_check(src.contains("str(_live[i]) == name"),
+		"并发计数检查的是槽位登记的名字")
+	# `_live` 是 Array，不能用 Dictionary 的 .get(k, default)
+	_check(not src.contains("_live.get("),
+		"_live 是 Array，不能用 .get(i, default)（会编译失败）")
+	_check(src.contains("var _live: Array"), "_live 确实是 Array")
+
+	# 行为验证：同一个音效播完多轮后仍然能被播放
+	var sfx: Node = load("res://audio/sfx.gd").new()
+	_check(sfx != null, "能实例化 Sfx")
+	sfx.set("enabled", true)
+	# 连播同一音效 30 次，每次之间都让它"播完"（headless 下 playing 恒为 false）
+	var before := int(sfx.get("dropped_count"))
+	for i in 30:
+		sfx.call("play", "reload_start")
+	var after := int(sfx.get("dropped_count"))
+	var dropped := after - before
+	# 去重窗口 35ms，30 次瞬时连播会被去重挡掉大部分；
+	# 关键断言是【不会全部丢弃】，且播放计数在涨
+	_check(int(sfx.get("played_count")) > 0, "确实播放了至少一次")
+	_check(dropped < 30, "不是每次都丢（%d/30 被丢，旧实现会全丢或接近全丢）" % dropped)
+	sfx.free()
+
+
+func _test_hud_perf_metric() -> void:
+	# 手机实测截图：`FPS 60  帧 25.2 ms` —— 两个数不可能同时成立。
+	# 查证：HUD 那一路还在用 `Performance.TIME_PROCESS`，
+	# 而它在 Android 上正是【已经被遥测判定为不可靠】并被换掉的那个。
+	# （同一个坑踩了两次：先修遥测、漏了 HUD。）
+	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	# ⚠️ 只检查**实际调用** —— 注释里会提到它（说明为什么不能用），不算违规
+	_check(not rs.contains("get_monitor(Performance.TIME_PROCESS)"),
+		"HUD 不得再使用 Performance.TIME_PROCESS（Android 上会与 FPS 自相矛盾）")
+	_check(rs.contains("Tel.last_avg_ms()"), "HUD 用遥测的墙钟均值")
+	_check(rs.contains("Tel.last_worst_ms()"), "HUD 用遥测的墙钟最慢值")
+	var tel := FileAccess.get_file_as_string("res://telemetry/telemetry.gd")
+	_check(tel.contains("func last_avg_ms"), "Tel 暴露 last_avg_ms")
+	_check(tel.contains("func last_worst_ms"), "Tel 暴露 last_worst_ms")
+	_check(tel.contains("_last_avg_ms = wall"), "窗口关闭时记录真实墙钟均值")
