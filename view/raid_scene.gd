@@ -80,10 +80,11 @@ var _firing := false
 
 # ─── 视图 ───
 var camera: Camera2D
-var hud: CanvasLayer
-var hud_label: Label
-var hint_label: Label
-var view_label: Label
+## 突袭 HUD（Labels / toast / 尸体提示）—— 实现在 view/raid_hud.gd
+var raid_hud: RaidHud
+
+
+
 var debug_mode := 0              ## 0 普通 1 流向场 2 房间图 3 声音范围
 
 # ─── 手感 / 音频 / 触屏（specs/tech-stack.md §2 与 §7.3）───
@@ -284,49 +285,13 @@ func _setup_view() -> void:
 	add_child(camera)
 	camera.make_current()
 
-	hud = CanvasLayer.new()
-	add_child(hud)
-
-	# 手机上字号要更大（真机反馈：默认 13px 在手机上偏小）
-	var fs := 16 if _is_touch else 13
-	_hud_fs = fs          # 供 _update_hud 使用（局部变量跨不过函数）
-
-	hud_label = Label.new()
-	# ⚠️ 触屏时左上角有【齿轮按钮】（打开设置/暂停），HUD 第一行会被它压住。
-	#    实测截图里 "HP 100/100" 的 H 直接被齿轮盖掉。
-	#    这里把 HUD 整体右移让开齿轮。
-	hud_label.position = Vector2(64 if _is_touch else 10, 6)
-	hud_label.add_theme_font_size_override("font_size", fs)
-	hud_label.add_theme_color_override("font_color", Color(0.92, 0.94, 0.96))
-	hud.add_child(hud_label)
-
-	# ⚠️ 底部两行必须【锚定到左下】而不是写死 y 坐标。
-	#    改成 stretch/aspect="expand" 后，视口高度会随设备比例变化，
-	#    写死 342 在长屏上会飘到屏幕中间（真机踩过）。
-	hint_label = Label.new()
-	hint_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	hint_label.position = Vector2(10, -20)
-	hint_label.add_theme_font_size_override("font_size", fs - 2)
-	hint_label.add_theme_color_override("font_color", Color(0.6, 0.65, 0.72))
-	hud.add_child(hint_label)
-
-	view_label = Label.new()
-	view_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	view_label.position = Vector2(10, -38)
-	view_label.add_theme_font_size_override("font_size", fs - 2)
-	view_label.add_theme_color_override("font_color", Color(0.75, 0.80, 0.88))
-	hud.add_child(view_label)
-
-	# 短提示（手机上唯一的即时反馈渠道 —— 例如"没有医疗物品"）
-	_toast_label = Label.new()
-	_toast_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_toast_label.position = Vector2(-160, 56)
-	_toast_label.size = Vector2(320, 24)
-	_toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_toast_label.add_theme_font_size_override("font_size", fs)
-	_toast_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.45))
-	_toast_label.visible = false
-	hud.add_child(_toast_label)
+	# ── HUD（Labels / toast / 尸体提示）全部在 view/raid_hud.gd ──
+	# 抽出去的原因：_update_hud 是「纯追加型」函数，每加一个统计量都要改，
+	# 是 raid_scene.gd 上最大的冲突面之一。
+	raid_hud = RaidHud.new()
+	raid_hud.scene = self
+	raid_hud.setup(_is_touch)
+	add_child(raid_hud)
 
 	_load_tiles()
 	_build_map_texture()
@@ -1211,32 +1176,17 @@ var _lock_info: Dictionary = {}
 ## 视野锥半角（度）—— 供绘制与调试视图使用
 func aim_cone_deg() -> float:
 	return player_weapon.def.aim_cone_deg if player_weapon != null else 45.0
-## HUD 短提示（2 秒）。手机上唯一的即时反馈渠道。
-var _toast_text := ""
-var _toast_until := 0.0
-var _toast_label: Label = null
-## 附近尸体的交互提示（真机反馈 #4）
-var corpse_label: Label = null
-## HUD 字号（_setup_view 里定，_update_hud 里用）
-var _hud_fs := 13
 
 
 func _toast(msg: String, seconds: float = 2.0) -> void:
-	_toast_text = msg
-	_toast_until = _time + seconds
-	if Tel != null:
-		Tel.emit("toast", {"msg": msg})
+	if raid_hud != null:
+		raid_hud.toast(msg, seconds)
 
 
-## 真正返回藏身处（切场景），与再来一局是两条不同的路
-# ─────────────────── 背包 / 搜索面板（真机反馈 #3 / #6）───────────────────
-
-## 搜索/背包的按键提示文案（触屏与 PC 不同）
 func _bag_key_hint() -> String:
-	return '背包按钮' if _is_touch else 'B'
+	return raid_hud.bag_key_hint() if raid_hud != null else "B"
 
 
-## 打开设置/暂停菜单（ESC / 左上角齿轮 / 安卓返回键）
 func _open_settings() -> void:
 	if settings_menu == null:
 		return
@@ -1582,95 +1532,8 @@ func _draw() -> void:
 
 
 func _update_hud() -> void:
-	if raid == null:
-		return
-	var lines: Array[String] = []
-	lines.append("HP %d/%d   护甲 %d/%d   %s" % [
-		vitals.hp, vitals.max_hp, vitals.armor, vitals.max_armor,
-		Vitals.BLEED_NAME[vitals.bleed]])
-	lines.append("弹药 %d / %d%s" % [
-		player_weapon.ammo_in_mag, player_weapon.reserve_ammo,
-		"  [换弹中]" if player_weapon.is_reloading() else ""])
-	lines.append("剩余 %ds    撤离 %.0f%%" % [int(raid.time_left), raid.extract_progress_ratio() * 100.0])
-	lines.append("携带 %s" % raid.carry.summary())
-	lines.append("击杀 %d   受伤 %d   治疗 %s" % [
-		raid.enemies_killed, vitals.total_damage_taken, medical.status_text()])
-	lines.append("小队警戒 %.2f   %s" % [
-		squad.alert_level, "交战中" if squad.is_engaged() else ("警觉" if squad.is_alerted() else "放松")])
-	# 性能读数（真机排障用：卡顿时可以直接报数字）
-	# ⚠️ 这里【不能用 Performance.TIME_PROCESS】—— 真机实测它在 Android 上
-	#    给出与 FPS 自相矛盾的值（HUD 显示 "FPS 60  帧 25.2ms"，
-	#    而同一时刻遥测的墙钟均值是 16.6ms）。改用 Tel 的墙钟测量值。
-	lines.append("FPS %d  平均 %.1f ms  最慢 %.1f ms  敌 %d  音频掉 %d" % [
-		int(Engine.get_frames_per_second()),
-		0.0 if Tel == null else Tel.last_avg_ms(),
-		0.0 if Tel == null else Tel.last_worst_ms(),
-		agents.size(),
-		0 if Sfx == null else Sfx.dropped_count])
+	# HUD 的全部文本与提示都在 RaidHud 里（view/raid_hud.gd）——
+	# 这里只留委托，避免 _update_hud 继续当「每加一个统计量都要改」的冲突点。
+	if raid_hud != null:
+		raid_hud.refresh()
 
-	var dbg := ["普通", "流场方向", "房间图", "声音范围"]
-	# 结算界面弹出时藏掉 HUD 正文（否则会和结算文字叠在一起）
-	var over := result_overlay != null and result_overlay.is_shown()
-	hud_label.visible = not over
-	hint_label.visible = not over
-	view_label.visible = not over
-	if over:
-		return
-	# ⚠️ 只在文本变化时才赋值。
-	#    Godot 里给 Label.text 赋值（哪怕值相同）也会触发 update_minimum_size -> 布局重算，
-	#    每帧都设是移动端常见的隐形开销（真机"自动开火卡顿"的次要来源）。
-	_set_label(hud_label, "\n".join(lines), "_cache_hud")
-	_set_label(view_label, "[视图] %s%s" % [dbg[debug_mode],
-		"  ·  白模 F5 切换" if render_mode == RENDER_WHITEBOX else "  ·  美术 F5 切换"], "_cache_view")
-
-	# ── 附近尸体的交互提示（真机反馈 #4）──
-	# 用户：和敌人尸体没法交互。（战利品系统呢）
-	# 尸体其实生成了、也能搜 —— 但**没有可见的入口**，玩家不知道按什么。
-	# 所以靠近时直接把提示和按键写出来。
-	if corpse_label == null:
-		corpse_label = Label.new()
-		corpse_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-		corpse_label.position = Vector2(-200, -58)
-		corpse_label.size = Vector2(400, 22)
-		corpse_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		corpse_label.add_theme_font_size_override('font_size', _hud_fs + 2)
-		corpse_label.add_theme_color_override('font_color', Color(1.0, 0.85, 0.42))
-		corpse_label.visible = false
-		hud.add_child(corpse_label)
-	var ci_near := raid.corpse_near(player_pos)
-	if ci_near >= 0 and not raid.is_over():
-		var n_stacks := (raid.corpses[ci_near]['drops'] as Array).size()
-		_set_label(corpse_label, '[%s] 搜索尸体 · %d 堆战利品'
-			% [_bag_key_hint(), n_stacks], '_cache_corpse')
-		corpse_label.visible = true
-	elif corpse_label.visible:
-		corpse_label.visible = false
-
-	# 短提示
-	if _toast_label != null:
-		var show := _time < _toast_until
-		if _toast_label.visible != show:
-			_toast_label.visible = show
-		if show:
-			_set_label(_toast_label, _toast_text, "_cache_toast")
-	# ⚠️ 提示必须按平台给（真机反馈：安卓上显示的是 WASD/J/K/L 键盘键位）
-	var hint := ("左摇杆移动 · 右摇杆瞄准 · ◉ 开火 · ⟳ 换弹 · ✚ 治疗"
-		if _is_touch
-		else "WASD 移动 · J/空格 开火 · K 换弹 · L 治疗 · Tab 视图 · R 重开 · F1~F4 无障碍 · M 静音")
-	_set_label(hint_label, hint, "_cache_hint")
-
-
-var _cache_hud := ""
-var _cache_view := ""
-var _cache_hint := ""
-var _cache_toast := ""
-var _cache_corpse := ""
-
-
-func _set_label(l: Label, txt: String, cache_key: String) -> void:
-	if l == null:
-		return
-	if get(cache_key) == txt:
-		return
-	set(cache_key, txt)
-	l.text = txt

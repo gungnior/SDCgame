@@ -211,12 +211,20 @@ func _test_hud_perf_metric() -> void:
 	# 查证：HUD 那一路还在用 `Performance.TIME_PROCESS`，
 	# 而它在 Android 上正是【已经被遥测判定为不可靠】并被换掉的那个。
 	# （同一个坑踩了两次：先修遥测、漏了 HUD。）
+	# ⚠️ HUD 的绘制代码已经搬到 `view/raid_hud.gd`（拆分 raid_scene.gd 上帝对象）。
+	#    所以断言要分别看两处：**场景里不许有**（防回退），**HUD 模块里必须有**。
+	#    （拆分让这条断言失效了一次 —— 这是好事：说明守卫确实盯着源码文本。）
 	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	var rh := FileAccess.get_file_as_string("res://view/raid_hud.gd")
 	# ⚠️ 只检查**实际调用** —— 注释里会提到它（说明为什么不能用），不算违规
 	_check(not rs.contains("get_monitor(Performance.TIME_PROCESS)"),
-		"HUD 不得再使用 Performance.TIME_PROCESS（Android 上会与 FPS 自相矛盾）")
-	_check(rs.contains("Tel.last_avg_ms()"), "HUD 用遥测的墙钟均值")
-	_check(rs.contains("Tel.last_worst_ms()"), "HUD 用遥测的墙钟最慢值")
+		"不得再使用 Performance.TIME_PROCESS（Android 上会与 FPS 自相矛盾）")
+	_check(not rh.contains("get_monitor(Performance.TIME_PROCESS)"),
+		"HUD 模块也不得使用它")
+	_check(rh.contains("Tel.last_avg_ms()"), "HUD 用遥测的墙钟均值")
+	_check(rh.contains("Tel.last_worst_ms()"), "HUD 用遥测的墙钟最慢值")
+	_check(rs.contains("raid_hud.refresh()"),
+		"场景把 HUD 刷新委托给 RaidHud（而不是把逻辑留回场景里）")
 	var tel := FileAccess.get_file_as_string("res://telemetry/telemetry.gd")
 	_check(tel.contains("func last_avg_ms"), "Tel 暴露 last_avg_ms")
 	_check(tel.contains("func last_worst_ms"), "Tel 暴露 last_worst_ms")

@@ -328,10 +328,12 @@ func _test_corpse_interaction_visible() -> void:
 	# 用户 PC 实测："和敌人尸体没法交互。（战利品系统呢）"
 	# 尸体其实已经生成、也能搜 —— 问题是【没有可见入口】。
 	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	var rh := FileAccess.get_file_as_string("res://view/raid_hud.gd")
 	_check(rs.contains("_spawn_corpse(tgt)"), "击杀后会生成尸体容器")
-	_check(rs.contains("corpse_label"), "HUD 有『附近有尸体』的提示")
-	_check(rs.contains("func _bag_key_hint()"), "提示里带按键（触屏/PC 文案不同）")
-	_check(rs.contains("raid.corpse_near(player_pos)"), "每帧检测附近尸体")
+	# ⚠️ 尸体提示的绘制已搬到 view/raid_hud.gd（拆分上帝对象）。
+	_check(rh.contains("corpse_label"), "HUD 有『附近有尸体』的提示")
+	_check(rh.contains("func bag_key_hint"), "提示里带按键（触屏/PC 文案不同）")
+	_check(rh.contains("raid.corpse_near(scene.player_pos)"), "每帧检测附近尸体")
 	# SettingsMenu 不能和 Object._get 撞名（踩过一次编译失败）
 	var sm := FileAccess.get_file_as_string("res://ui/settings_menu.gd")
 	_check(not sm.contains("func _get("),
