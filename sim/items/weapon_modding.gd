@@ -92,6 +92,9 @@ class Loadout extends RefCounted:
 		w.value = weapon.value + extra_value()
 		w.icon = weapon.icon
 		w.stage = weapon.stage
+		# ⚠️ 别忘了复制新字段 —— 漏了的话视野锥会一直用默认值，
+		#    "视野随枪械数值变化"就静默失效（实测踩过：步枪显示 50° 而不是 55°）
+		w.aim_cone_deg = weapon.aim_cone_deg
 		return w
 
 	## 相对裸枪的改动摘要（供 UI 显示 +/-）

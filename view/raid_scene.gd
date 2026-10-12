@@ -28,6 +28,12 @@ const TRACER_TTL := 0.13
 ## 现阶段要的是验证技术，不是打怪。每种敌人各 1 个、总数不超过 4 个足够暴露问题。
 ## 调成 0 表示不限制（恢复正式刷怪）。
 const MAX_TEST_ENEMIES := 4
+## 技术验证阶段：简化枪械。
+## 真机反馈 #2："不测试具体枪械系统，玩家开火不需要挂载后坐力之类的"。
+## 打开时：散布 = 0、后坐力 = 0、备弹给足（装弹/弹匣保留，那是核心循环的一部分）。
+const SIMPLE_WEAPON := true
+## 自动瞄准每秒最多转多少度。太快会像甩枪（手感很假）。
+const AUTO_AIM_TURN_DEG := 540.0
 ## 开局宽限期（秒）：这段时间内敌人不索敌。
 ## 实测：没有它时玩家 3.3 秒就死、0 击杀（安卓真机遥测）。
 ## 这不是"降低难度"，而是给玩家看懂地形与局势的时间 —— 搜打撤的前提是"能观察"。
@@ -84,11 +90,14 @@ var debug_mode := 0              ## 0 普通 1 流向场 2 房间图 3 声音范
 var fx: FxPool = null            ## CPUParticles2D 池（T-03）
 var touch: TouchControls = null  ## 双摇杆 + 动作按钮
 var flash_rect: ColorRect = null ## 受击闪白覆盖层
+var inventory_panel: InventoryPanel = null   ## 背包/搜索面板（#3 / #6）
 var result_overlay: ResultOverlay = null   ## 结算界面（含触屏重开按钮）
 var _prev_shots: Dictionary = {} ## agent.id -> 已开火数（用于播放枪声）
 var _step_accum := 0.0
 ## 听觉代价场缓存（共享给所有敌人）—— 见 HearingFieldCache 的说明
 var _hearing_cache := HearingFieldCache.new()
+## 锥形视野 + 锁定 + 自动瞄准（真机反馈 #4/#5）
+var auto_aim := AutoAim.new()
 var _last_hint_shown := false
 var _hitstop_events := 0         ## 本局触发过几次 hitstop（调试）
 
@@ -144,8 +153,10 @@ func _setup_sim() -> void:
 	#    早先这里写死 20261012，结果真机上"每局地图和出生点完全一样" ——
 	#    玩家反馈"并没有随机出生"。同种子可复现是开发期的需要，
 	#    正式游玩必须每局不同（T-32 的种子纪律：可复现 ≠ 写死）。
+	if Game != null:
+		Game.apply_accessibility()
 	if _raid_seed <= 0:
-		_raid_seed = randi() & 0x7FFFFFFF
+		_raid_seed = Game.raid_seed if (Game != null and Game.raid_seed > 0) else (randi() & 0x7FFFFFFF)
 	_rng = SimRng.new(_raid_seed)
 
 	gen = MapGenerator.new()
@@ -156,10 +167,14 @@ func _setup_sim() -> void:
 	flows = FlowFieldManager.new()
 	flows.setup(gen.grid)
 
-	# 藏身处（跨局持久）
+	# 藏身处：用 Game（autoload）里的**跨场景持久**实例
+	# 真机反馈 #7：死亡后要能真正回藏身处，所以它必须活在场景之外
+	if Game != null:
+		Game.ensure_loaded()
+		hideout = Game.hideout
+		reg = Game.reg if Game.reg != null else reg
 	if hideout == null:
 		hideout = Hideout.new(reg.items, 3000)
-		hideout.wallet += 5000
 		hideout.wallet += 5000
 
 	raid = RaidSession.new(reg.items, _rng, hideout.stash)
@@ -173,8 +188,17 @@ func _setup_sim() -> void:
 	# 玩家武器：步枪 + 自动装配件（展示 A 阶段改装系统）
 	var loadout := WeaponModding.create_loadout(reg.get_weapon("weapon_rifle"), WeaponModding.SLOTS_A)
 	WeaponModding.auto_fit(loadout, reg.attachments)
-	player_weapon = WeaponState.new(loadout.to_weapon_def(), 180)
-	print("[装填] %s" % loadout.summary())
+	var wdef := loadout.to_weapon_def()
+	# ── 技术验证阶段：不测枪械系统 ──
+	# 真机反馈 #2："现阶段不测试具体枪械系统，玩家开火不需要挂载后坐力之类的"。
+	# 所以去掉散布与后坐力，备弹给足；装弹/弹匣仍然保留（那是搜打撤核心循环的一部分）。
+	if SIMPLE_WEAPON:
+		wdef.spread_deg = 0.0
+		wdef.recoil_v = 0.0
+		wdef.recoil_h = 0.0
+	player_weapon = WeaponState.new(wdef, 9999 if SIMPLE_WEAPON else 180)
+	print("[装填] %s  视野锥 %.0f°%s" % [loadout.summary(), wdef.aim_cone_deg,
+		"（简化模式：无后坐力/散布）" if SIMPLE_WEAPON else ""])
 
 	var spawn := gen.spawn_room()
 	player_pos = Ballistics.cell_center(spawn.center)
@@ -316,11 +340,25 @@ func _setup_feel_and_touch() -> void:
 	# ── 结算界面（触屏可用的重开出口）──
 	result_overlay = ResultOverlay.new()
 	result_overlay.restart_requested.connect(_restart)
-	result_overlay.hideout_requested.connect(_restart)
+	# ⚠️ 真机反馈 #7：点回藏身处必须**真正切到藏身处场景**，
+	#    早先错误地接到了 _restart（等于原地重开一局），玩家根本回不去。
+	result_overlay.hideout_requested.connect(_go_hideout)
 	var ro_layer := CanvasLayer.new()
 	ro_layer.layer = 40
 	ro_layer.add_child(result_overlay)
 	add_child(ro_layer)
+
+	# ── 背包 / 搜索面板（#3 / #6）──
+	inventory_panel = InventoryPanel.new()
+	inventory_panel.action.connect(_on_panel_action)
+	inventory_panel.closed.connect(func():
+		if touch != null:
+			touch.set_controls_visible(true))
+	var inv_layer := CanvasLayer.new()
+	inv_layer.layer = 45
+	inv_layer.add_child(inventory_panel)
+	add_child(inv_layer)
+	touch.bag_pressed.connect(_open_bag)
 
 
 ## 载入程序化生成的 16x16 tile（art/tiles/，由 tools/art/gen_tiles.py 产出）
@@ -625,6 +663,9 @@ func _tick_player(delta: float) -> void:
 		if Sfx != null:
 			Sfx.play("reload_done")
 
+	# ── 锥形视野 + 锁定 + 自动瞄准/自动射击（真机反馈 #4/#5）──
+	_update_auto_aim(delta)
+
 	# 治疗推进
 	if medical.is_treating():
 		var res := medical.tick(delta, vitals)
@@ -721,7 +762,8 @@ func _try_fire() -> void:
 				fx.burst("kill", tgt.pos, shot_dir)
 		if died:
 			raid.register_kill()
-			_drop_loot(tgt)
+			# 真机反馈 #6：战利品进【尸体容器】而不是散落在地上，配合背包搜索
+			_spawn_corpse(tgt)
 			Tel.emit("kill", {"enemy": tgt.def.id, "part": part, "dmg": dmg,
 				"dist": snappedf(dist, 0.1), "kills": raid.enemies_killed})
 	else:
@@ -789,6 +831,22 @@ func _drop_loot(a: EnemyAgent) -> void:
 	var drops := LootRoller.roll_container(table, _rng, 2)
 	for d in drops:
 		drops_on_ground.append({"pos": a.pos, "item_id": d["item_id"], "count": int(d["count"])})
+
+
+## 敌人死亡 -> 生成一具【可搜索的尸体容器】（真机反馈 #6）
+## 「敌人死亡后会有战利品在尸体里，配合背包框架给玩家搜索」
+func _spawn_corpse(a: EnemyAgent) -> void:
+	var table: LootTableDef = reg.get_loot_table("loot_enemy_drop")
+	if table == null:
+		return
+	var drops := LootRoller.roll_container(table, _rng, 2)
+	var cid := raid.add_corpse(a.pos, a.def.id, drops)
+	if Tel != null:
+		var total := 0
+		for d in drops:
+			total += int(d["count"])
+		Tel.emit("corpse", {"id": cid, "enemy": a.def.id,
+			"stacks": drops.size(), "count": total})
 
 
 func _tick_enemies(delta: float) -> void:
@@ -1002,6 +1060,47 @@ func _try_heal() -> void:
 		Sfx.play("ui_deny")
 
 
+## 锥形视野 / 锁定 / 自动瞄准 / 自动射击
+##
+## 规格见 sim/combat/auto_aim.gd 的注释（用户真机反馈 #5 原文）。
+## 三个开关都在 Game（跨场景持久）里：
+##   auto_fire          自动射击（锁定最近敌人并自动开火）
+##   auto_aim           未开自动射击时，准心自动对准锁定目标
+##   vision_follows_lock 视野锥跟随锁定目标（而不是只跟摇杆）
+func _update_auto_aim(delta: float) -> void:
+	var w := player_weapon.def
+	var cone := w.aim_cone_deg
+	var rng_max := float(w.range_m)
+
+	# 视野锥的朝向：跟随锁定时用锁定方向，否则用玩家瞄准方向
+	var cone_dir := player_aim
+	if Game != null and Game.vision_follows_lock and auto_aim.has_lock():
+		var to_lock: Vector2 = auto_aim.locked_pos - player_pos
+		if to_lock.length() > 0.01:
+			cone_dir = to_lock.normalized()
+
+	_lock_info = auto_aim.update(delta, player_pos, cone_dir, cone,
+		rng_max, _aim_targets(), gen.grid)
+
+	# ① 自动瞄准：把准心平滑转到锁定目标
+	if Game != null and Game.auto_aim and auto_aim.has_lock():
+		var to_t: Vector2 = auto_aim.locked_pos - player_pos
+		if to_t.length() > 0.01:
+			# 每秒最多转 AUTO_AIM_TURN_DEG 度 —— 避免"瞬移式"甩枪（手感很假）
+			player_aim = AutoAim.turn_toward(player_aim, to_t, AUTO_AIM_TURN_DEG * delta)
+
+	# ② 自动射击：锁定即开火（优先最近，scan_nearest 已保证）
+	if Game != null and Game.auto_fire and auto_aim.has_lock():
+		if not medical.is_treating():
+			_try_fire()
+
+
+var _lock_info: Dictionary = {}
+
+
+## 视野锥半角（度）—— 供绘制与调试视图使用
+func aim_cone_deg() -> float:
+	return player_weapon.def.aim_cone_deg if player_weapon != null else 45.0
 ## HUD 短提示（2 秒）。手机上唯一的即时反馈渠道。
 var _toast_text := ""
 var _toast_until := 0.0
@@ -1013,6 +1112,89 @@ func _toast(msg: String, seconds: float = 2.0) -> void:
 	_toast_until = _time + seconds
 	if Tel != null:
 		Tel.emit("toast", {"msg": msg})
+
+
+## 真正返回藏身处（切场景），与再来一局是两条不同的路
+# ─────────────────── 背包 / 搜索面板（真机反馈 #3 / #6）───────────────────
+
+## 打开面板。附近有尸体就进入搜索模式，否则就是纯背包。
+func _open_bag() -> void:
+	if inventory_panel == null or raid.is_over():
+		return
+	var ci := raid.corpse_near(player_pos)
+	_corpse_open_idx = ci
+	var ctitle := ""
+	var container: Inventory = null
+	if ci >= 0:
+		container = _build_corpse_inv(ci)
+		ctitle = "尸体"
+	inventory_panel.open(reg.items, raid.carry, container, ctitle)
+	if touch != null:
+		touch.set_controls_visible(false)   # 面板打开时收起摇杆，避免抢触点
+	if Sfx != null:
+		Sfx.play("ui_click")
+
+
+## 把尸体当前的掉落物倒进一个临时 Inventory 供面板渲染。
+## ⚠️ 必须每次重新构建：`take_from_corpse` 是从【尸体】里扣的，
+##    临时 Inventory 只是个视图 —— 不重建的话面板会一直显示已拿走的东西。
+func _build_corpse_inv(idx: int) -> Inventory:
+	var inv := Inventory.new(20, reg.items, 999.0)
+	if idx < 0 or idx >= raid.corpses.size():
+		return inv
+	for d in (raid.corpses[idx]["drops"] as Array):
+		inv.add(str(d["item_id"]), int(d["count"]))
+	return inv
+
+
+## 面板里的动作。count=-1 表示"使用"，-2 表示"丢弃"，>0 表示从容器拿走。
+func _on_panel_action(item_id: String, count: int) -> void:
+	if item_id.is_empty():
+		return
+	if count == -1:
+		# 使用：只支持医疗品（其余交给后续的制造/消耗系统）
+		var d: ItemDef = reg.get_item(item_id)
+		if d != null and d.category == "medical":
+			var err := medical.start(d, vitals)
+			if err == "":
+				raid.carry.remove(item_id, 1)
+				_toast("开始治疗 · %s" % d.name)
+			else:
+				_toast(err)
+		else:
+			_toast("现在用不了：%s" % (d.name if d != null else item_id))
+		return
+	if count == -2:
+		var n := raid.carry.remove(item_id, 1)
+		if n > 0:
+			drops_on_ground.append({"pos": player_pos, "item_id": item_id, "count": n})
+			_toast("丢弃 %d 个" % n)
+		return
+	# count > 0：从搜到的容器里拿
+	if _corpse_open_idx >= 0:
+		var got := raid.take_from_corpse(_corpse_open_idx, item_id, count)
+		if got > 0:
+			if Sfx != null:
+				Sfx.play("pickup")
+			# 重建视图 —— 见 _build_corpse_inv 的说明
+			inventory_panel.open(reg.items, raid.carry,
+				_build_corpse_inv(_corpse_open_idx), "尸体")
+		elif Sfx != null:
+			Sfx.play("ui_deny")
+			_toast("背包放不下")
+
+
+var _corpse_open_idx := -1
+
+
+func _go_hideout() -> void:
+	if Feel != null:
+		Feel.reset()
+	Engine.time_scale = 1.0
+	if Game != null:
+		Game.go_to_hideout()
+	else:
+		_restart()
 
 
 func _restart() -> void:
@@ -1183,6 +1365,37 @@ func _draw() -> void:
 		draw_colored_polygon(PackedVector2Array([tip, s1, p - d * 3.0, s2]),
 			Color(1.0, 0.90, 0.52, 0.85 * t))
 		draw_circle(p + d * 6.0, 5.0 + 4.0 * t, Color(1.0, 0.78, 0.35, 0.55 * t))
+
+	# ── 锥形视野 + 锁定指示（真机反馈 #5）──
+	# 必须把视野范围画出来 —— 玩家要能看见自己锁到了谁。
+	# 锥角来自枪械数据（weapon.aim_cone_deg），所以换枪视野就变。
+	if player_weapon != null and not raid.is_over():
+		var pcz := player_pos * CELL_PX
+		var cone_r := float(player_weapon.def.range_m) * CELL_PX
+		var half := deg_to_rad(aim_cone_deg())
+		var base := player_aim.angle()
+		var has_lock := auto_aim.has_lock()
+		var cone_col := (Color(1.0, 0.55, 0.35, 0.085) if has_lock
+			else Color(0.55, 0.85, 1.0, 0.055))
+		var edge_col := (Color(1.0, 0.62, 0.38, 0.42) if has_lock
+			else Color(0.55, 0.85, 1.0, 0.20))
+		var segs := 18
+		var pts := PackedVector2Array()
+		pts.append(pcz)
+		for i in segs + 1:
+			var a := base - half + (2.0 * half) * (float(i) / float(segs))
+			pts.append(pcz + Vector2.from_angle(a) * cone_r)
+		draw_colored_polygon(pts, cone_col)
+		draw_line(pcz, pcz + Vector2.from_angle(base - half) * cone_r, edge_col, 1.5)
+		draw_line(pcz, pcz + Vector2.from_angle(base + half) * cone_r, edge_col, 1.5)
+		if has_lock:
+			var lp := auto_aim.locked_pos * CELL_PX
+			var s := 13.0
+			var lc := Color(1.0, 0.45, 0.35, 0.95)
+			draw_line(lp + Vector2(-s, -s), lp + Vector2(s, -s), lc, 2.0)
+			draw_line(lp + Vector2(s, -s), lp + Vector2(s, s), lc, 2.0)
+			draw_line(lp + Vector2(s, s), lp + Vector2(-s, s), lc, 2.0)
+			draw_line(lp + Vector2(-s, s), lp + Vector2(-s, -s), lc, 2.0)
 
 	# ── 玩家 ──
 	var pc := player_pos * CELL_PX

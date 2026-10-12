@@ -13,10 +13,11 @@
     "range_m": 35,
     "recoil_v": 0.8,
     "recoil_h": 0.6,
-    "weight": 1.10,
+    "weight": 1.1,
     "value": 250,
     "icon": "res://art/guns/weapon_pistol/base.png",
-    "stage": "B"
+    "stage": "B",
+    "aim_cone_deg": 42.0
   },
   {
     "id": "weapon_rifle",
@@ -32,10 +33,11 @@
     "range_m": 90,
     "recoil_v": 1.6,
     "recoil_h": 1.1,
-    "weight": 3.60,
+    "weight": 3.6,
     "value": 900,
     "icon": "res://art/guns/weapon_rifle/base.png",
-    "stage": "B"
+    "stage": "B",
+    "aim_cone_deg": 55.0
   },
   {
     "id": "weapon_shotgun",
@@ -51,9 +53,10 @@
     "range_m": 18,
     "recoil_v": 4.2,
     "recoil_h": 2.0,
-    "weight": 3.20,
+    "weight": 3.2,
     "value": 700,
     "icon": "res://art/guns/weapon_shotgun/base.png",
-    "stage": "B"
+    "stage": "B",
+    "aim_cone_deg": 34.0
   }
 ]

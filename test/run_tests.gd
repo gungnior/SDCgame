@@ -58,6 +58,11 @@ func _initialize() -> void:
 	_suite("性能回归：听觉代价场缓存", _test_hearing_cache)
 	_suite("真机修复3：白模与碰撞一致", _test_whitebox_matches_collision)
 	_suite("真机修复3：测试模式敌人上限", _test_enemy_count_test_mode)
+	_suite("真机修复3：#1 贴脸 hitbox", _test_hitbox_close_range)
+	_suite("真机修复3：#4/#5 自动瞄准", _test_auto_aim)
+	_suite("真机修复3：#5 视野锥随枪械变化", _test_weapon_aim_cone)
+	_suite("真机修复3：#6 尸体战利品", _test_corpse_loot)
+	_suite("真机修复3：#7 藏身处与设置", _test_game_state_settings)
 
 	print("")
 	if _failed == 0:
@@ -2316,3 +2321,204 @@ func _test_enemy_count_test_mode() -> void:
 	_check(text.contains("agents.size() >= MAX_TEST_ENEMIES"), "刷怪循环里确实做了钳制")
 	_check(text.contains("MAX_TEST_ENEMIES > 0"), "关掉测试模式能回到正式刷怪")
 
+
+
+# ─────────────────── 真机反馈第三轮：#1 hitbox / #4#5 auto-aim / #6 尸体 / #7 藏身处 ───────────────────
+
+func _test_hitbox_close_range() -> void:
+	# 真机反馈 #1："敌人 hitbox 有问题，贴脸很难命中敌人"
+	# 根因：早先只用角度锥判定。1 格外偏 0.3 格 = 17°，而锥半角只有 4.2° -> 永远打不中。
+	# 现在加"射线到实体中心的垂距 <= hit_radius"这条通路，并给足半径。
+	var g := _open_grid(20, 14)
+	var origin := Vector2(5.5, 5.5)
+
+	# 贴脸且明显偏离瞄准方向：必须能命中
+	var close := [{"id": "c", "pos": Vector2(6.5, 5.9), "faction": "enemy", "alive": true}]
+	var r := AimAssist.pick(origin, Vector2.RIGHT, 0.6, close, g, 4.2, 30.0)
+	_check(not r.is_empty(), "贴脸偏心目标也能命中（0.4 格偏移 / 1 格距离 = 21.8°）")
+
+	# 超出实体半径则不该命中
+	var far_off := [{"id": "f", "pos": Vector2(6.5, 6.9), "faction": "enemy", "alive": true}]
+	_check(AimAssist.pick(origin, Vector2.RIGHT, 0.6, far_off, g, 4.2, 30.0).is_empty(),
+		"横向偏移 1.4 格（远超实体半径）不命中")
+
+	# 实体半径可被数据覆盖（大体型敌人）
+	var big := [{"id": "b", "pos": Vector2(6.5, 6.9), "faction": "enemy", "alive": true,
+		"radius": 1.6}]
+	_check(not AimAssist.pick(origin, Vector2.RIGHT, 0.6, big, g, 4.2, 30.0).is_empty(),
+		"radius=1.6 的大体型目标能命中")
+
+	# ⭐ 偏折上限必须按【横向距离】而不是角度 —— 否则贴脸差几度永远打不中
+	var r2 := AimAssist.pick(origin, Vector2.RIGHT, 0.6, close, g, 4.2, 30.0)
+	var bent: Vector2 = r2["dir"]
+	var ang := absf(wrapf(bent.angle() - Vector2.RIGHT.angle(), -PI, PI))
+	_check(rad_to_deg(ang) > AimAssist.MAX_BEND_DEG,
+		"近距离允许超过旧角度上限的偏折（%.1f° > %.1f°）—— 这正是贴脸打不中的根因"
+		% [rad_to_deg(ang), AimAssist.MAX_BEND_DEG])
+	# 但横向偏移仍被限住
+	var lateral := rad_to_deg(ang) * PI / 180.0 * float(r2["dist"])
+	_check(lateral <= AimAssist.MAX_BEND_CELLS + 0.02,
+		"横向偏移仍受限（%.2f <= %.2f 格）" % [lateral, AimAssist.MAX_BEND_CELLS])
+
+	# 远距离仍然克制：10 格外只能偏一点点
+	var far := [{"id": "d", "pos": Vector2(15.5, 5.9), "faction": "enemy", "alive": true}]
+	var r3 := AimAssist.pick(origin, Vector2.RIGHT, 0.6, far, g, 4.2, 30.0)
+	if not r3.is_empty():
+		var a3 := absf(wrapf((r3["dir"] as Vector2).angle() - 0.0, -PI, PI))
+		_check(rad_to_deg(a3) < 6.0, "远距离偏折很小（%.2f°）" % rad_to_deg(a3))
+
+
+func _test_auto_aim() -> void:
+	# 真机反馈 #4/#5：锥形视野 + 锁定最近敌人 + 自动瞄准/自动射击
+	var g := _open_grid(24, 16)
+	var origin := Vector2(2.5, 8.5)
+	var targets := [
+		{"id": 1, "pos": Vector2(12.5, 8.5), "faction": "enemy", "alive": true},
+		{"id": 2, "pos": Vector2(6.5, 8.5), "faction": "enemy", "alive": true},   # 最近
+		{"id": 3, "pos": Vector2(2.5, 2.5), "faction": "enemy", "alive": true},   # 锥外
+	]
+
+	# ⭐ 优先锁定【最近的】
+	var f := AutoAim.scan_nearest(origin, Vector2.RIGHT, 55.0, 60.0, targets, g)
+	_check(not f.is_empty(), "锥内发现敌人")
+	_check_eq(int(f["target"]["id"]), 2, "锁定的是最近的敌人")
+	_check(absf(float(f["dist"]) - 4.0) < 0.01, "距离 4.0（实际 %.2f）" % float(f["dist"]))
+
+	# 锥角决定视野：把锥角缩到 2°，近处那个偏 0° 仍可见，远处也可见；
+	# 换成朝上的 3 号目标才该受锥角影响
+	var up := AutoAim.scan_nearest(origin, Vector2.UP, 55.0, 60.0, targets, g)
+	_check(not up.is_empty() and int(up["target"]["id"]) == 3, "朝上时锁定 3 号")
+
+	# 目标筛选：不锁同伴
+	var ally := [{"id": 9, "pos": Vector2(4.5, 8.5), "faction": "player", "alive": true}]
+	_check(AutoAim.scan_nearest(origin, Vector2.RIGHT, 55.0, 60.0, ally, g).is_empty(),
+		"不锁定同阵营")
+
+	# 已死目标不锁
+	var dead := [{"id": 8, "pos": Vector2(4.5, 8.5), "faction": "enemy", "alive": false}]
+	_check(AutoAim.scan_nearest(origin, Vector2.RIGHT, 55.0, 60.0, dead, g).is_empty(),
+		"不锁定已死目标")
+
+	# 视线遮挡
+	g.set_cell(Vector2i(4, 8), LogicalGrid.Cell.SOLID)
+	_check(AutoAim.scan_nearest(origin, Vector2.RIGHT, 55.0, 60.0, targets, g).is_empty()
+		or int(AutoAim.scan_nearest(origin, Vector2.RIGHT, 55.0, 60.0, targets, g)["target"]["id"]) != 2,
+		"隔墙后不再锁定 2 号")
+	g.set_cell(Vector2i(4, 8), LogicalGrid.Cell.FLOOR)
+
+	# ── 锁定粘性：目标暂时消失不会立刻脱锁（否则准心会疯狂切换）──
+	var aa := AutoAim.new()
+	var r1 := aa.update(0.1, origin, Vector2.RIGHT, 55.0, 60.0, targets, g)
+	_check(bool(r1["has_lock"]), "建立锁定")
+	_check_eq(aa.locked_id, 2, "锁的是 2 号")
+	var none: Array = []
+	var r2 := aa.update(0.1, origin, Vector2.RIGHT, 55.0, 60.0, none, g)
+	_check(bool(r2["has_lock"]), "目标消失后靠粘性保持锁定")
+	# 熬过粘性时间才脱锁
+	var t := 0.0
+	while t < AutoAim.LOCK_GRACE + 0.3:
+		aa.update(0.1, origin, Vector2.RIGHT, 55.0, 60.0, none, g)
+		t += 0.1
+	_check(not aa.has_lock(), "粘性耗尽后真正脱锁")
+
+	# 转向有角度上限（避免"甩枪"）
+	var turned := AutoAim.turn_toward(Vector2.RIGHT, Vector2.LEFT, 90.0)
+	_check(absf(rad_to_deg(absf(turned.angle()))) < 91.0,
+		"单次转向不超过 90°（实际 %.1f°）" % rad_to_deg(absf(turned.angle())))
+	_check(AutoAim.turn_toward(Vector2.ZERO, Vector2.RIGHT, 90.0) == Vector2.RIGHT,
+		"零向量输入不崩")
+
+
+func _test_weapon_aim_cone() -> void:
+	# 真机反馈 #5："这个视野会随着枪械具体数值来变化"
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+	var pistol: WeaponDef = reg.get_weapon("weapon_pistol")
+	var rifle: WeaponDef = reg.get_weapon("weapon_rifle")
+	var shotgun: WeaponDef = reg.get_weapon("weapon_shotgun")
+	_check(pistol.aim_cone_deg > 0.0, "手枪视野锥 %.0f°" % pistol.aim_cone_deg)
+	_check(rifle.aim_cone_deg != pistol.aim_cone_deg,
+		"不同枪的视野锥不同（步枪 %.0f° vs 手枪 %.0f°）" % [rifle.aim_cone_deg, pistol.aim_cone_deg])
+	_check(shotgun.aim_cone_deg < rifle.aim_cone_deg,
+		"霰弹枪视野最窄（%.0f° < %.0f°）" % [shotgun.aim_cone_deg, rifle.aim_cone_deg])
+
+	# ⚠️ 改装后的 WeaponDef 必须带上这个字段，否则"视野随枪械变化"会静默失效（踩过）
+	var lo := WeaponModding.create_loadout(rifle, WeaponModding.SLOTS_A)
+	var eff := lo.to_weapon_def()
+	_check(absf(eff.aim_cone_deg - rifle.aim_cone_deg) < 0.001,
+		"改装后的有效武器保留了视野锥（%.0f°）" % eff.aim_cone_deg)
+
+
+func _test_corpse_loot() -> void:
+	# 真机反馈 #6：敌人死亡后战利品在【尸体里】，配合背包搜索
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+	var gen := MapGenerator.new()
+	gen.generate(31337, reg.room_types)
+	var raid := RaidSession.new(reg.items, SimRng.new(1), Inventory.new(40, reg.items, 999.0))
+	raid.load_map(gen)
+	raid.start(120.0)
+
+	var drops := [{"item_id": "ammo_rifle", "count": 10},
+		{"item_id": "medical_bandage", "count": 2}]
+	var pos := raid.extract_points[0]
+	var cid := raid.add_corpse(pos, "enemy_scav", drops)
+	_check(cid >= 0, "登记了一具尸体")
+	_check_eq(raid.corpses.size(), 1, "尸体列表 1 具")
+
+	# 搜索范围
+	var near := raid.corpse_near(pos + Vector2(0.5, 0.0))
+	_check_eq(near, 0, "走到旁边能找到尸体")
+	_check_eq(raid.corpse_near(pos + Vector2(20, 0)), -1, "太远找不到")
+
+	# 搜索标记
+	var got := raid.search_corpse(0)
+	_check_eq(got.size(), 2, "搜到 2 堆物品")
+	_check(bool(raid.corpses[0]["searched"]), "标记为已搜索")
+
+	# 拿一部分
+	var n := raid.take_from_corpse(0, "ammo_rifle", 4)
+	_check_eq(n, 4, "拿走 4 发")
+	_check_eq(raid.carry.count_of("ammo_rifle"), 4, "背包收到 4 发")
+	_check_eq(int((raid.corpses[0]["drops"] as Array)[0]["count"]), 6, "尸体里剩 6 发")
+
+	# 拿光
+	var rest := raid.take_all_from_corpse(0)
+	_check_eq(rest.size(), 0, "全部拿得下")
+	_check(raid.carry.count_of("medical_bandage") >= 2, "绷带也拿到手")
+	_check((raid.corpses[0]["drops"] as Array).is_empty(), "尸体已被搜空")
+
+	# 搜空的尸体不再提示（避免按钮一直亮着）
+	_check_eq(raid.corpse_near(pos), -1, "搜空的尸体不再提示")
+
+	# 背包满时拿不下 —— 必须返回剩余而不是吞掉
+	var small := RaidSession.new(reg.items, SimRng.new(2), Inventory.new(40, reg.items, 999.0))
+	small.load_map(gen)
+	small.start(120.0)
+	small.carry = Inventory.new(1, reg.items, 999.0)     # 只 1 格
+	small.add_corpse(pos, "enemy_scav", [{"item_id": "armor_heavy", "count": 3}])
+	var rest2 := small.take_all_from_corpse(0)
+	_check_eq(rest2.size(), 1, "背包放不下时返回剩余")
+	_check_eq(int(rest2[0]["count"]), 2, "还剩 2 件没拿走")
+
+
+func _test_game_state_settings() -> void:
+	# #7：跨场景持久的设置项（藏身处 UI 里可切）
+	var s: GDScript = load("res://game/game_state.gd")
+	_check(s != null, "能载入 game_state.gd")
+	_check(s.get("RAID_SCENE") != null, "有突袭场景路径")
+	_check(s.get("HIDEOUT_SCENE") != null, "有藏身处场景路径")
+	_check(ResourceLoader.exists("res://view/hideout_scene.tscn"), "藏身处场景文件存在")
+	# 三个开关默认值
+	var hints := FileAccess.get_file_as_string("res://game/game_state.gd")
+	for key in ["auto_fire", "auto_aim", "vision_follows_lock"]:
+		_check(hints.contains("var " + key), "有设置项 %s" % key)
+	# 藏身处场景必须真的能拿到 Game（而不是自己 new 一个 Hideout）
+	var hs := FileAccess.get_file_as_string("res://view/hideout_scene.gd")
+	_check(hs.contains("Game.hideout"), "藏身处用 Game 里的持久实例")
+	_check(hs.contains("Game.start_raid"), "有『出发』入口")
+	# 突袭场景的「回藏身处」必须切场景，而不是重启战局（这是 #7 的原话）
+	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	_check(rs.contains("hideout_requested.connect(_go_hideout)"),
+		"回藏身处接的是切场景（不是 _restart）")
+	_check(rs.contains("Game.go_to_hideout()"), "确实调用了切场景")

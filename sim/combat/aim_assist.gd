@@ -32,6 +32,17 @@ const MIN_PUSH := 0.22
 const COUNTER_UNLOCK_DEG := 62.0
 ## 单次射击最大偏折角（防止"子弹拐弯"过于离谱）
 const MAX_BEND_DEG := 6.0
+## 默认实体半径（世界单位 = 逻辑格）。
+## 0.45 格 ≈ 21.6 世界像素，比敌人画出来的圆（半径 9px）宽松一倍多 ——
+## 这是**故意的**：移动端触屏瞄准精度远低于鼠标，判定要给足余量。
+## 真机反馈 #1"贴脸很难命中"就是判定太严导致的。
+const DEFAULT_HIT_RADIUS := 0.45
+## 单次射击的最大【横向】偏折量（格）。
+## 用横向距离而不是角度来限制 —— 见 pick() 里的说明。
+const MAX_BEND_CELLS := 0.55
+## 偏折权重的下限。命中判定由 pick() 决定，dir 只用来画曳光；
+## 若权重塌到接近 0，会出现"判定命中但曳光飞向别处"的矛盾观感（测试抓到过）。
+const MIN_BEND_WEIGHT := 0.55
 
 
 ## 按视口尺寸换算锥半角。
@@ -54,12 +65,20 @@ static func half_angle_for_viewport(viewport_width: float) -> float:
 ##   half_angle   锥半角（度），用 half_angle_for_viewport() 算
 ##   max_range    有效射程（与世界坐标同单位）
 ##   player_faction 玩家阵营，用于目标筛选
+##   hit_radius   **实体半径**（世界单位）。见下方说明。
+##
+## ⚠️ hit_radius 是修"贴脸打不中"的关键（真机反馈 #1）：
+##    早先只用【角度锥】判定，而角度在近距离会爆炸式放大：
+##    敌人在 1 格外偏 0.3 格 = 17°，远超 4.2° 的锥半角 -> 永远打不中。
+##    所以判定改成 **角度锥 OR 射线到实体中心的垂距 <= hit_radius**，
+##    这才是真正意义上的 hitbox。
 ##
 ## 返回 {} 或 {target, dir, weight, angle_deg, bend_deg}
 ##   dir 是【偏折后】的射击方向；准心方向不变（这就是"不抢控制权"）
 static func pick(origin: Vector2, aim_dir: Vector2, push: float,
 		targets: Array, grid: LogicalGrid, half_angle: float,
-		max_range: float, player_faction: String = "player") -> Dictionary:
+		max_range: float, player_faction: String = "player",
+		hit_radius: float = DEFAULT_HIT_RADIUS) -> Dictionary:
 
 	if push < MIN_PUSH or aim_dir == Vector2.ZERO or targets.is_empty():
 		return {}
@@ -86,8 +105,12 @@ static func pick(origin: Vector2, aim_dir: Vector2, push: float,
 
 		var dir_t := to_t / dist
 		var dot := aim.dot(dir_t)
-		if dot < cos_limit:
-			continue                     # 锥外
+		# 射线到实体中心的垂距（格）。角度判定在近距离不可靠，必须配合它。
+		var perp := absf(aim.cross(dir_t)) * dist
+		# 目标自身的半径（可被数据覆盖，例如大体型敌人）
+		var tr := float(t.get("radius", hit_radius))
+		if dot < cos_limit and perp > tr:
+			continue                     # 既不在锥内、也不在 hitbox 内
 
 		# ── 约束 3：视线/遮挡检查 ──
 		if grid != null and not Ballistics.has_line_of_sight(grid, origin, tp):
@@ -99,25 +122,43 @@ static func pick(origin: Vector2, aim_dir: Vector2, push: float,
 		if angle_deg > COUNTER_UNLOCK_DEG:
 			continue
 
-		# 打分：夹角越小越好，距离越近越好
-		var ang_w := 1.0 - (angle_deg / maxf(half_angle, 0.001))   # 0~1
+		# 打分：夹角越小越好、越接近实体中心越好、距离越近越好
+		# ⚠️ ang_w 必须夹到 0~1 —— 近距离的目标是【靠 hitbox】进来的，
+		#    它的夹角会远大于 half_angle，不夹的话权重会变成负数（实测踩过）。
+		var ang_w := clampf(1.0 - (angle_deg / maxf(half_angle, 0.001)), 0.0, 1.0)
+		var rad_w := clampf(1.0 - (perp / maxf(tr, 0.001)), 0.0, 1.0)
+		var center_w := maxf(ang_w, rad_w)
 		var dist_w := 1.0 - (dist / maxf(max_range, 0.001))        # 0~1
-		var score := ang_w * 0.72 + dist_w * 0.28
+		var score := center_w * 0.72 + dist_w * 0.28
 		if score > best_score:
 			best_score = score
 			best = {"target": t, "dir": dir_t, "angle_deg": angle_deg,
-				"dist": dist, "ang_w": ang_w}
+				"dist": dist, "ang_w": center_w}
 
 	if best.is_empty():
 		return {}
 
 	# ── 偏折量 ──
-	# 权重 = 夹角衰减 × 推力（推得越满辅助越弱 —— 硬原则 1）
-	var weight := float(best["ang_w"]) * clampf(1.0 - push * 0.45, 0.35, 1.0)
+	# 权重 = 居中程度 × 推力（推得越满辅助越弱 —— 硬原则 1）
+	#
+	# ⚠️ 权重必须设下限。命中判定是由本函数【接受目标】决定的，
+	#    而 dir 只用来画曳光 —— 若权重塌到接近 0，会出现
+	#    "判定命中了、但曳光明显朝别处飞"的矛盾观感（测试抓到过：权重 0.08）。
+	#    所以给一个 0.55 的下限，保证曳光至少大致指向目标。
+	#
+	# ⚠️ 上限必须用【横向距离】而不是【角度】。
+	#    只限角度会在近距离出问题：1 格外偏 0.3 格 = 17°，而角度上限只有 6°，
+	#    于是永远差几度打不中 —— 这正是真机反馈"贴脸很难命中"的根因之一。
+	#    改成限制"射线在目标处的横向偏移 <= MAX_BEND_CELLS"后，
+	#    近距离自动允许更大的角度（1 格时可偏 33°），远距离仍然很克制（10 格时仅 3°）。
+	var push_w := clampf(1.0 - push * 0.45, 0.35, 1.0)
+	var weight := maxf(MIN_BEND_WEIGHT, float(best["ang_w"])) * push_w
 	var angle := float(best["angle_deg"])
-	var bend := minf(angle, MAX_BEND_DEG) * weight
+	var d_now: float = maxf(float(best["dist"]), 0.25)
+	var max_bend_rad := asin(clampf(MAX_BEND_CELLS / d_now, 0.0, 0.95))
+	var bend := minf(deg_to_rad(angle), max_bend_rad) * weight
 	var target_dir: Vector2 = best["dir"]
-	var bent := _rotate_toward(aim, target_dir, deg_to_rad(bend))
+	var bent := _rotate_toward(aim, target_dir, bend)
 
 	return {
 		"target": best["target"],

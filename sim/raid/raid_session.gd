@@ -188,6 +188,89 @@ var lost_slots: int = 0
 var lost_value: int = 0
 
 
+# ─────────────────── 尸体容器（真机反馈 #6）───────────────────
+#
+# 「敌人死亡后会有战利品在尸体里，配合背包框架给玩家搜索」
+# 所以尸体不是"掉落在地上的一堆物品"，而是一个**可搜索的容器**：
+# 玩家走到旁边 -> 打开搜索界面 -> 逐个拿。
+# 这样才和背包框架形成闭环。
+
+## 尸体列表。每项 {id, pos, enemy_id, drops:[{item_id,count}], searched:bool}
+var corpses: Array = []
+var _next_corpse_id: int = 0
+
+
+## 敌人死亡时登记一具尸体。drops 是 LootRoller 抽出来的数组。
+func add_corpse(pos: Vector2, enemy_id: String, drops: Array) -> int:
+	var id := _next_corpse_id
+	_next_corpse_id += 1
+	var items: Array = []
+	for d in drops:
+		items.append({"item_id": str(d.get("item_id", "")), "count": int(d.get("count", 0))})
+	corpses.append({
+		"id": id, "pos": pos, "enemy_id": enemy_id,
+		"drops": items, "searched": false,
+	})
+	return id
+
+
+## 找到玩家搜索范围内最近的尸体索引（没有则 -1）
+func corpse_near(pos: Vector2, radius: float = 1.6) -> int:
+	var best := -1
+	var bd := radius
+	for i in corpses.size():
+		var c: Dictionary = corpses[i]
+		if c["drops"].is_empty() and bool(c["searched"]):
+			continue                      # 已搜空的尸体不再提示
+		var d := (c["pos"] as Vector2).distance_to(pos)
+		if d <= bd:
+			bd = d
+			best = i
+	return best
+
+
+## 搜索一具尸体：标记为已搜，返回其中的物品
+func search_corpse(idx: int) -> Array:
+	if idx < 0 or idx >= corpses.size():
+		return []
+	corpses[idx]["searched"] = true
+	return corpses[idx]["drops"]
+
+
+## 从尸体拿走若干。返回实际拿走的数量（背包放不下会少于请求量）。
+func take_from_corpse(idx: int, item_id: String, count: int) -> int:
+	if idx < 0 or idx >= corpses.size() or count <= 0:
+		return 0
+	var drops: Array = corpses[idx]["drops"]
+	for i in range(drops.size() - 1, -1, -1):
+		var d: Dictionary = drops[i]
+		if str(d["item_id"]) != item_id:
+			continue
+		var have := int(d["count"])
+		var want := mini(have, count)
+		var leftover := carry.add(item_id, want)
+		var taken := want - leftover
+		d["count"] = have - taken
+		if int(d["count"]) <= 0:
+			drops.remove_at(i)
+		return taken
+	return 0
+
+
+## 拿走一具尸体的全部（能塞多少塞多少），返回没塞下的部分
+func take_all_from_corpse(idx: int) -> Array:
+	if idx < 0 or idx >= corpses.size():
+		return []
+	var drops: Array = corpses[idx]["drops"]
+	var rest: Array = []
+	for d in drops:
+		var leftover := carry.add(str(d["item_id"]), int(d["count"]))
+		if leftover > 0:
+			rest.append({"item_id": str(d["item_id"]), "count": leftover})
+	corpses[idx]["drops"] = rest.duplicate()
+	return rest
+
+
 ## 主动撤离（也用于撤离进度走满时）
 func extract() -> bool:
 	if phase != Phase.ACTIVE:

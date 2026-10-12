@@ -23,6 +23,9 @@ var weight: float = 0.0
 var value: int = 0
 var icon: String = ""
 var stage: String = "B"
+## 锥形视野半角（度）。用于自动瞄准/自动射击的目标扫描。
+## 真机反馈 #5："这个视野会随着枪械具体数值来变化"
+var aim_cone_deg: float = 50.0
 
 
 static func from_dict(d: Dictionary) -> WeaponDef:
@@ -44,6 +47,7 @@ static func from_dict(d: Dictionary) -> WeaponDef:
 	o.value = int(d.get("value", 0))
 	o.icon = str(d.get("icon", ""))
 	o.stage = str(d.get("stage", "B"))
+	o.aim_cone_deg = float(d.get("aim_cone_deg", 50.0))
 	return o
 
 

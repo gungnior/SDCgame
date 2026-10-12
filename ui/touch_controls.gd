@@ -22,6 +22,8 @@ extends Control
 signal reload_pressed()
 signal heal_pressed()
 signal interact_pressed()
+## 打开背包 / 搜索（真机反馈 #3 / #6）
+signal bag_pressed()
 
 ## 输入动作名（同时在 project.godot 的 InputMap 里声明）
 const A_MOVE := ["move_left", "move_right", "move_up", "move_down"]
@@ -37,6 +39,7 @@ var aim_stick: VirtualJoystick
 var fire_btn: TouchButton
 var reload_btn: TouchButton
 var heal_btn: TouchButton
+var bag_btn: TouchButton
 
 var _safe := Rect2()                   ## 安全区内的可用矩形（视口坐标）
 
@@ -128,6 +131,8 @@ func _build() -> void:
 	fire_btn = _make_button("Fire", "◉", "开火", br, Color(1.0, 0.42, 0.34), true)
 	reload_btn = _make_button("Reload", "⟳", "换弹", br * 0.82, Color(0.55, 0.78, 1.0), false)
 	heal_btn = _make_button("Heal", "✚", "治疗", br * 0.82, Color(0.45, 0.88, 0.58), false)
+	bag_btn = _make_button("Bag", "▤", "背包", br * 0.82, Color(0.82, 0.72, 0.42), false)
+	bag_btn.pressed_down.connect(func(): bag_pressed.emit())
 	reload_btn.pressed_down.connect(func(): reload_pressed.emit())
 	heal_btn.pressed_down.connect(func(): heal_pressed.emit())
 
@@ -199,6 +204,7 @@ func _layout() -> void:
 	_place(fire_btn, Vector2(cx, b.y - br - short * 0.02), br)
 	_place(reload_btn, Vector2(cx, b.y - br * 2.0 - short * 0.075), br * 0.78)
 	_place(heal_btn, Vector2(cx, b.y - br * 2.0 - short * 0.23), br * 0.78)
+	_place(bag_btn, Vector2(cx, b.y - br * 3.2 - short * 0.40), br * 0.78)
 
 
 func _place(btn: TouchButton, center: Vector2, r: float) -> void:
@@ -241,7 +247,7 @@ func is_firing() -> bool:
 
 
 func release_all() -> void:
-	for b in [fire_btn, reload_btn, heal_btn]:
+	for b in [fire_btn, reload_btn, heal_btn, bag_btn]:
 		if b != null:
 			b.force_release()
 

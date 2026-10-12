@@ -66,3 +66,5 @@ Sfx="*res://audio/sfx.gd"
 Feel="*res://feel/feel.gd"
 ; 遥测：结构化日志 -> logcat -> 主机端 tools/monitor_game.py
 Tel="*res://telemetry/telemetry.gd"
+; 跨场景持久状态（藏身处 / 玩家设置）
+Game="*res://game/game_state.gd"
