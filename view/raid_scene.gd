@@ -508,9 +508,13 @@ func _process(delta: float) -> void:
 	_time += delta
 
 	if not raid.is_over():
+		Tel.mark("player")
 		_tick_player(delta)
+		Tel.mark("enemies")
 		_tick_enemies(delta)
+		Tel.mark("tracers")
 		_tick_tracers(delta)
+		Tel.mark("raid")
 		raid.tick(delta, player_pos)
 		raid.hp = vitals.hp
 		if vitals.dead:
@@ -522,10 +526,31 @@ func _process(delta: float) -> void:
 		if Engine.time_scale <= 0.0:
 			Engine.time_scale = 1.0
 
+	Tel.mark("camera")
 	_update_camera()
+	Tel.mark("hud")
 	_update_hud()
+	Tel.mark("flash")
 	_update_flash()
+	Tel.push_stat("hp", vitals.hp)
+	Tel.push_stat("armor", vitals.armor)
+	Tel.push_stat("enemies_total", agents.size())
+	Tel.push_stat("enemies_alive", _alive_count())
+	Tel.push_stat("ammo", player_weapon.ammo_in_mag)
+	Tel.push_stat("kills", raid.enemies_killed)
+	Tel.push_stat("phase", raid.phase_name())
+	Tel.push_stat("seed", _raid_seed)
+	Tel.push_stat("spawn_safe", MapGenerator.SPAWN_SAFE_GRAPH_DIST)
+	Tel.mark("redraw")
 	queue_redraw()
+
+
+func _alive_count() -> int:
+	var n := 0
+	for a in agents:
+		if a.is_alive():
+			n += 1
+	return n
 
 
 ## 结算只弹一次（避免每帧重建文本）
@@ -546,6 +571,14 @@ func _show_result_once() -> void:
 	lines.append("击杀 %d   搜刮容器 %d" % [raid.enemies_killed, raid.containers_looted])
 	lines.append("地图种子 %d" % _raid_seed)
 	result_overlay.show_result(win, lines)
+	Tel.emit("raid_end", {
+		"win": win, "reason": raid.death_reason,
+		"kills": raid.enemies_killed, "looted": raid.containers_looted,
+		"hp": raid.hp, "seed": _raid_seed,
+		"time_used": snappedf(raid.raid_seconds - raid.time_left, 0.1),
+		"brought_value": int(rep.get("brought_out_value", 0)),
+		"lost_slots": int(rep.get("lost_slots", 0)),
+	})
 	# 结算时把摇杆/按钮整体收起（否则会透过结算遮罩露出来）
 	if touch != null:
 		touch.set_controls_visible(false)
@@ -647,6 +680,7 @@ func _try_fire() -> void:
 	player_weapon.fire()
 	# 开枪声很大
 	noises.append({"pos": player_pos, "loudness_m": NOISE_LOUD})
+	Tel.mark("fire")
 
 	var w := player_weapon.def
 
@@ -705,6 +739,8 @@ func _try_fire() -> void:
 		if died:
 			raid.register_kill()
 			_drop_loot(tgt)
+			Tel.emit("kill", {"enemy": tgt.def.id, "part": part, "dmg": dmg,
+				"dist": snappedf(dist, 0.1), "kills": raid.enemies_killed})
 	else:
 		# 打空：子弹打到墙或射程边缘
 		var wall: Variant = Ballistics.first_blocking_cell(gen.grid, player_pos, shot_to)
@@ -1002,6 +1038,8 @@ func _cell_rect(c: Vector2i) -> Rect2:
 func _draw() -> void:
 	if gen == null:
 		return
+	if Tel != null:
+		Tel.mark("draw_body")
 	var g := gen.grid
 
 	# ── 地形：一次画完整张烘焙图（nearest 放大 16 倍）──

@@ -98,6 +98,51 @@
 
 ---
 
+## 3.5 真机联调 —— **遥测直连，不用口述**
+
+> **为什么新增这一节**：玩家口述的信息损失极大——"有点卡"、"按钮不灵"无法定位。
+> 前两轮真机反馈里有 4 个问题都只能靠反复猜。
+> 现在改成**游戏直接把数据打到主机**。
+
+⚠️ 走 USB 调试通道（adb logcat），**不需要 `INTERNET` 权限**，与 D-16「不联网」不冲突。
+
+### 游戏侧：`telemetry/telemetry.gd`（autoload `Tel`）
+
+| 输出 | 频率 | 内容 |
+|---|---|---|
+| `stats` | 2 Hz | FPS / 平均帧 / 最差帧 / 节点数 / 孤儿节点 / 绘制调用 / 内存 **+ 业务字段**（血量/护甲/敌人数/弹药/击杀/阶段/种子） |
+| `spike` | 每帧 >33ms | 帧耗时 **+ `ctx`**（`fire` / `enemies` / `draw` / `hud`…）|
+| `kill` / `raid_end` | 即时 | 击杀详情 / 死因 / 战果 |
+
+> ⭐ **`ctx` 是关键**：光知道"卡了 48ms"没用，**要知道卡在哪一帧**。
+> `Tel.mark("fire")` 这类埋点让每条卡顿记录都带上下文。
+
+### 主机侧：`tools/monitor_game.py`
+
+```powershell
+$py = "C:\Users\xxx\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+
+# 实时监听 + 自动启动游戏 + 每 6 秒抓一张设备截图
+& $py tools\monitor_game.py --launch --shots art\_raw\device --shot-every 6
+
+# 离线分析（一份日志可反复看，不用一直连着设备）
+& $py tools\monitor_game.py --replay _nightrun\device_telemetry.jsonl
+```
+
+退出时打印**诊断摘要**：帧率分布 / 帧率趋势 / 卡顿帧按场景分类 / 最严重的 10 帧 / 事件统计。
+
+### 这一步替代掉的问答
+
+| 之前要问玩家 | 现在直接读到 |
+|---|---|
+| "卡不卡？" | FPS 分布、帧率趋势、最差单帧 |
+| "哪里卡？" | 卡顿帧的 `ctx` 分类直方图 |
+| "敌人多吗？" | `enemies_alive` / `enemies_total` |
+| "你走到哪了？" | `seed` + 地图种子可完整复现 |
+| "怎么死的？" | `raid_end` 事件带死因/血量/击杀/掉落价值 |
+
+---
+
 ## 4. 递进路线（详见 `roadmap-bac.md`）
 
 | 阶段 | 内容 | 工期（兼职 15h/周） | 工期（全职） |

@@ -61,3 +61,5 @@ locale/include_text_server_data=true
 ; 手感与音频总线（specs/tech-stack.md §7.3）
 Sfx="*res://audio/sfx.gd"
 Feel="*res://feel/feel.gd"
+; 遥测：结构化日志 -> logcat -> 主机端 tools/monitor_game.py
+Tel="*res://telemetry/telemetry.gd"
