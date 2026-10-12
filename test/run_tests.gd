@@ -52,6 +52,9 @@ func _initialize() -> void:
 	_suite("真机修复：出生安全区", _test_spawn_safety)
 	_suite("真机修复：死亡结算", _test_death_settlement)
 	_suite("真机修复：结算界面与触屏接口", _test_result_overlay_exists)
+	_suite("真机修复2：触屏输入隔离", _test_touch_input_isolation)
+	_suite("真机修复2：hitstop 频率配额", _test_hitstop_frequency_limit)
+	_suite("真机修复2：白模渲染", _test_whitebox_render)
 
 	print("")
 	if _failed == 0:
@@ -1994,3 +1997,114 @@ func _test_result_overlay_exists() -> void:
 	_check(tc.has_method("move_vector") and tc.has_method("aim_vector"), "有移动/瞄准读取接口")
 	_check(tc.has_method("aim_push"), "有 aim_push（aim assist 靠它判断推力）")
 	tc.queue_free()
+
+
+# ─────────────────── 触屏输入隔离 / 卡顿 / 白模（第二轮真机反馈）───────────────────
+
+func _test_touch_input_isolation() -> void:
+	# ⚠️ 安卓真机反馈的三个问题（按右侧任意处开火 / 点瞄准摇杆开火 / 按治疗也开火）
+	#    根因是同一个：raid_scene 的 _input 里还留着【没有触屏控件时代】的
+	#    全局触摸开火代码，它和 VirtualJoystick / TouchButton 抢输入。
+	#
+	#    这类"遗留代码抢输入"很容易在后续迭代里被无意加回来，
+	#    所以这里做**源码级守卫**。
+	var src := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	_check(not src.is_empty(), "能读到 raid_scene.gd")
+	_check(not src.contains("is InputEventScreenTouch"),
+		"raid_scene 不再自己处理触摸事件（交给 VirtualJoystick / TouchButton）")
+	_check(not src.contains("_touch_move_id"), "遗留的自绘摇杆状态已清除")
+	_check(src.contains("touch.is_firing()"),
+		"开火状态确实读取了触屏开火按钮（否则按钮点了没反应）")
+	_check(src.contains("touch.move_vector()"), "移动读取触屏摇杆")
+	_check(src.contains("touch.aim_vector()"), "瞄准读取触屏摇杆")
+
+	# 触屏按钮必须按 finger index 分别记录（T-12）
+	var btn := FileAccess.get_file_as_string("res://ui/touch_button.gd")
+	_check(btn.contains("_finger"), "TouchButton 按 finger index 记录触点（T-12）")
+	_check(btn.contains("t.index == _finger"),
+		"抬起时只清【该 index】—— 无脑清空会导致别的按钮同时归零")
+
+
+func _test_hitstop_frequency_limit() -> void:
+	# ⚠️ 安卓真机反馈"自动开火有很强的卡顿"。
+	#    根因：轻击档曾配 30ms hitstop，600 RPM = 每 100ms 一发，
+	#    每发都冻 30ms => 每秒 300ms 在冻结 = 30% 的时间画面不动。
+	var f_script: GDScript = load("res://feel/feel.gd")
+	var f: Node = f_script.new()
+	root.add_child(f)
+	f.reset()
+	f.shake_enabled = true
+
+	# ① 轻击档不得冻结（全自动武器下每发都停会退化成持续卡顿）
+	_check_eq(float(f.LEVELS["light"]["hitstop_ms"]), 0.0,
+		"轻击档 hitstop = 0（反馈交给音效与粒子，不占用冻结）")
+	# ② 真正有分量的档位保留冻结
+	_check(float(f.LEVELS["heavy"]["hitstop_ms"]) > 0.0, "重击仍冻结")
+	_check(float(f.LEVELS["crit"]["hitstop_ms"]) > float(f.LEVELS["heavy"]["hitstop_ms"]),
+		"暴击冻结比重击长")
+	_check(float(f.LEVELS["kill"]["hitstop_ms"]) >= float(f.LEVELS["crit"]["hitstop_ms"]),
+		"击杀冻结最长")
+
+	# ③ 频率配额：连续狂点也不能一直在冻结
+	f.reset()
+	var fired := 0
+	for _i in 30:
+		f.hitstop(60.0)
+		fired += 1
+	_check_eq(f.hitstop_count, 1, "连续 30 次 hitstop 请求只生效 1 次（频率配额）")
+	_check(f._hitstop_suppressed >= 29, "其余被配额压掉（%d 次）" % f._hitstop_suppressed)
+
+	# ④ 但隔开足够时间后应当能再次生效
+	f.reset()
+	f.hitstop(60.0)
+	_check_eq(f.hitstop_count, 1, "第一次生效")
+	f._last_hitstop_ms = Time.get_ticks_msec() - int(f.HITSTOP_MIN_INTERVAL_MS) - 5
+	f.hitstop(60.0)
+	_check_eq(f.hitstop_count, 2, "超过最小间隔后可再次生效")
+
+	# ⑤ 单次时长仍受 60~120ms 硬上限约束
+	f.reset()
+	f.hitstop(5000.0)
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 180:
+		pass
+	f._process(0.016)
+	_check(not f.is_frozen(), "超长请求被夹到 <=120ms 并已恢复")
+
+	f.reset()
+	Engine.time_scale = 1.0
+	f.queue_free()
+
+
+func _test_whitebox_render() -> void:
+	# 技术验证阶段默认白模（用户建议 + 真机"看不出哪能走"）
+	var src := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	_check(src.contains("RENDER_WHITEBOX"), "有白模渲染模式")
+	_check(src.contains("RENDER_ART"), "保留美术 tile 模式（可切换）")
+	_check(src.contains("var render_mode := RENDER_WHITEBOX"),
+		"默认是白模（技术验证优先『能读懂』而非『好看』）")
+	_check(src.contains("_build_whitebox"), "有白模烘焙函数")
+	# 白模的语义必须极端简单：亮 = 可走，暗 + 描边 = 阻挡
+	_check(src.contains("WB_FLOOR") and src.contains("WB_WALL"),
+		"白模区分地板与墙的配色")
+	_check(src.contains("WB_WALL_EDGE"), "墙有高亮描边（一眼可辨）")
+
+	# 白模烘焙必须真的能跑出图（不崩、尺寸对）
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+	var gen := MapGenerator.new()
+	_check(gen.generate(4242, reg.room_types), "地图生成成功")
+	var g := gen.grid
+	var te := g.tile_extents()
+	_check(te.x > 0 and te.y > 0, "tile 尺寸 %s" % str(te))
+	# 直接调静态语义：可走格与阻挡格在数据层确实是分开的
+	_check(g.is_walkable(gen.spawn_room().center), "出生点房间中心可走")
+	var solid_found := false
+	for y in g.height:
+		for x in g.width:
+			if not g.is_walkable(Vector2i(x, y)):
+				solid_found = true
+				break
+		if solid_found:
+			break
+	_check(solid_found, "地图里确实存在阻挡格（白模要把它画出来）")

@@ -62,10 +62,7 @@ var player_weapon: WeaponState
 
 # ─── 输入 ───
 var _move_input := Vector2.ZERO
-var _touch_move_id := -1
-var _touch_move_origin := Vector2.ZERO
 var _firing := false
-var _aim_dir := Vector2.RIGHT
 
 # ─── 视图 ───
 var camera: Camera2D
@@ -109,6 +106,14 @@ const TILE_NAMES := {
 var _tiles: Dictionary = {}          # 名字 -> Array[Image]（原始像素数据）
 var _map_tex: ImageTexture = null
 var _map_tex_size := Vector2i.ZERO
+
+# ─── 渲染模式 ───
+## 0 = 白模（技术验证阶段默认）；1 = 美术 tile
+## ⚠️ 默认白模是刻意的：当前美术 tile 的墙/地板对比度太低，
+##    玩家看不出哪能走（安卓真机反馈）。技术验证优先"能读懂"。
+const RENDER_WHITEBOX := 0
+const RENDER_ART := 1
+var render_mode := RENDER_WHITEBOX
 
 
 func _ready() -> void:
@@ -289,35 +294,135 @@ func _build_map_texture() -> void:
 	var te := gen.grid.tile_extents()      # 81 x 81 tile
 	_map_tex_size = te
 	var img := Image.create(te.x, te.y, false, Image.FORMAT_RGBA8)
-	img.fill(Color(0.08, 0.09, 0.11))
+	img.fill(Color(0.04, 0.05, 0.07))
 
+	if render_mode == RENDER_WHITEBOX:
+		_build_whitebox(img)
+	else:
+		_build_tiles(img)
+
+	_map_tex = ImageTexture.create_from_image(img)
+
+
+# ─────────── 白模（技术验证阶段的默认渲染）───────────
+#
+# ⚠️ 为什么默认用白模（安卓真机反馈 + 用户建议）：
+#   带了美术 tile 之后，墙和地板都是暗灰，玩家**看不出哪能走**。
+#   技术验证阶段要的是"能读懂"，不是"好看"。
+#   白模的语义极简单：**亮 = 可走，暗 + 描边 = 阻挡**。
+#   美术资源留着，`render_mode` 一改就切回来（frameworks 已就位）。
+const WB_FLOOR := Color(0.42, 0.46, 0.52)        ## 可走：亮
+const WB_CORRIDOR := Color(0.34, 0.37, 0.42)     ## 走廊：略暗一档
+const WB_WALL := Color(0.07, 0.08, 0.10)         ## 阻挡：近黑
+const WB_WALL_EDGE := Color(0.62, 0.68, 0.78)    ## 墙的描边：亮，一眼可辨
+const WB_DOOR := Color(0.82, 0.68, 0.24)
+const WB_GRID := Color(1, 1, 1, 0.035)           ## 格子网格：几乎不可见但帮助判距
+const WB_SPAWN_TINT := Color(0.20, 0.85, 0.42)
+const WB_EXTRACT_TINT := Color(1.0, 0.72, 0.20)
+
+
+func _build_whitebox(img: Image) -> void:
+	var g := gen.grid
+	var n := LogicalGrid.CELL_SIZE_TILES
+
+	# ① 铺底：按格子类型刷平色
+	for cy in g.height:
+		for cx in g.width:
+			var cell := Vector2i(cx, cy)
+			var v := g.get_cell(cell)
+			var col := WB_WALL
+			if v == LogicalGrid.Cell.FLOOR:
+				col = WB_FLOOR
+			elif v == LogicalGrid.Cell.CORRIDOR:
+				col = WB_CORRIDOR
+			elif v == LogicalGrid.Cell.DOOR:
+				col = WB_DOOR
+			var o := g.cell_to_tile_origin(cell)
+			for ty in n:
+				for tx in n:
+					img.set_pixel(o.x + tx, o.y + ty, col)
+
+	# ② 墙的描边：只画【朝向可走格】的那一侧（内部不画线，读起来才干净）
+	var dirs: Array[Vector2i] = [
+		Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+	for cy in g.height:
+		for cx in g.width:
+			var cell := Vector2i(cx, cy)
+			if g.is_walkable(cell):
+				continue
+			var o := g.cell_to_tile_origin(cell)
+			for d in dirs:
+				if g.is_walkable(cell + d):
+					_draw_seam(img, o, d, n, WB_WALL_EDGE, 0, 1)
+
+	# ③ 房间轮廓 + 类型着色
+	for r in gen.graph.rooms:
+		var tint := Color(1, 1, 1, 0.16)
+		if r.room_type == "spawn":
+			tint = WB_SPAWN_TINT
+		elif r.room_type == "extract":
+			tint = WB_EXTRACT_TINT
+		_outline_rect(img, r.rect, n, tint)
+
+	# ④ 每个逻辑格画一条极淡的网格线，帮助判断距离
+	for cy in g.height:
+		for cx in g.width:
+			var o := g.cell_to_tile_origin(Vector2i(cx, cy))
+			for i in n:
+				_blend_px(img, o.x + i, o.y, WB_GRID)
+				_blend_px(img, o.x, o.y + i, WB_GRID)
+
+
+## 在逻辑格级别给矩形描边（cell 坐标 -> tile 坐标）
+func _outline_rect(img: Image, rect: Rect2i, n: int, col: Color) -> void:
+	var x0 := rect.position.x * n
+	var y0 := rect.position.y * n
+	var x1 := (rect.position.x + rect.size.x) * n - 1
+	var y1 := (rect.position.y + rect.size.y) * n - 1
+	var iw := img.get_width()
+	var ih := img.get_height()
+	for x in range(x0, x1 + 1):
+		_blend_px(img, x, y0, col)
+		_blend_px(img, x, y1, col)
+	for y in range(y0, y1 + 1):
+		_blend_px(img, x0, y, col)
+		_blend_px(img, x1, y, col)
+
+
+func _blend_px(img: Image, x: int, y: int, col: Color) -> void:
+	if x < 0 or y < 0 or x >= img.get_width() or y >= img.get_height():
+		return
+	if col.a >= 1.0:
+		img.set_pixel(x, y, col)
+	else:
+		img.set_pixel(x, y, img.get_pixel(x, y).lerp(col, col.a))
+
+
+## 美术 tile 版（render_mode == RENDER_ART 时用）
+func _build_tiles(img: Image) -> void:
+	var g := gen.grid
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20261012
+	var n := LogicalGrid.CELL_SIZE_TILES
 
-	for cy in gen.grid.height:
-		for cx in gen.grid.width:
+	for cy in g.height:
+		for cx in g.width:
 			var cell := Vector2i(cx, cy)
-			var walkable := gen.grid.is_walkable(cell)
+			var walkable := g.is_walkable(cell)
 			var key := _tile_key_for(cell, walkable)
 			var variants: Array = _tiles.get(key, [])
 			if variants.is_empty():
 				continue
-			# 每个 tile 位置按坐标哈希挑变体 —— 避免整片地板长得一模一样
-			var origin := gen.grid.cell_to_tile_origin(cell)
-			for ty in LogicalGrid.CELL_SIZE_TILES:
-				for tx in LogicalGrid.CELL_SIZE_TILES:
-					var idx: int = abs(hash(Vector2i(origin.x + tx, origin.y + ty))) % variants.size()
+			var origin := g.cell_to_tile_origin(cell)
+			for ty in n:
+				for tx in n:
+					var idx: int = abs(int(hash(Vector2i(origin.x + tx, origin.y + ty)))) % variants.size()
 					var v: Image = variants[idx]
 					img.blit_rect(v, Rect2i(Vector2i.ZERO, Vector2i(TILE_PX, TILE_PX)),
 						Vector2i(origin.x + tx, origin.y + ty))
 
-	# ── 结构层：在【逻辑格】级别画墙的轮廓 + 贴墙阴影 ──
-	# 为什么不在 16x16 砖里做：一个逻辑格要铺 3x3 块砖，
-	# 每块砖都带边会在一个格子里堆出 3 条横杠（实测踩过）。
-	# 结构信息属于逻辑格，不属于砖 —— 这是分层的关键。
+	# 结构层：逻辑格级别的墙轮廓 + 贴墙 AO
 	_bake_structure(img)
-
-	_map_tex = ImageTexture.create_from_image(img)
 
 
 func _bake_structure(img: Image) -> void:
@@ -517,8 +622,11 @@ func _tick_player(delta: float) -> void:
 		if bool(res.get("done", false)):
 			raid.carry.remove(medical.active_item_id if medical.active_item_id != "" else "medical_bandage", 1)
 
-	# 开火
-	if _firing and not medical.is_treating():
+	# 开火：键盘或触屏开火按钮（两者并联）
+	# ⚠️ 早先只读 _firing（键盘），触屏开火按钮的 is_down 根本没人读 ——
+	#    表现为"必须按屏幕任意处才能开火"（真机反馈）。
+	var want_fire := _firing or (touch != null and touch.is_firing())
+	if want_fire and not medical.is_treating():
 		_try_fire()
 
 	# 流血
@@ -758,41 +866,16 @@ func _read_move_input() -> Vector2:
 	return v
 
 
-func _touch_move_vector() -> Vector2:
-	# 触屏：左半屏拖动当摇杆
-	if _touch_move_id < 0:
-		return Vector2.ZERO
-	for i in Input.get_connected_joypads():
-		pass
-	var d := _last_touch_pos - _touch_move_origin
-	if d.length() < 12.0:
-		return Vector2.ZERO
-	return d.normalized()
-
-
-var _last_touch_pos := Vector2.ZERO
-
-
 func _input(event: InputEvent) -> void:
-	if event is InputEventScreenTouch:
-		var t := event as InputEventScreenTouch
-		var half := get_viewport_rect().size.x * 0.5
-		if t.pressed and t.position.x < half and _touch_move_id < 0:
-			_touch_move_id = t.index
-			_touch_move_origin = t.position
-			_last_touch_pos = t.position
-		elif t.pressed:
-			_firing = true
-		else:
-			if t.index == _touch_move_id:
-				_touch_move_id = -1
-			else:
-				_firing = false
-	elif event is InputEventScreenDrag:
-		var d := event as InputEventScreenDrag
-		if d.index == _touch_move_id:
-			_last_touch_pos = d.position
-	elif event is InputEventKey:
+	# ⚠️ 这里【故意不处理 InputEventScreenTouch】。
+	#    早先（还没有触屏控件时）本函数把"右半屏任意触摸"当作开火，
+	#    真机反馈的三个问题全是它导致的：
+	#      ① 按右侧任意位置就开火
+	#      ② 点瞄准摇杆就开火（它就在右半屏）
+	#      ③ 按"治疗"也开火 -> 治疗永远点不到
+	#    现在摇杆（VirtualJoystick）与按钮（TouchButton）各自通过 GUI 系统接管触摸，
+	#    这里只留键盘。
+	if event is InputEventKey:
 		var k := event as InputEventKey
 		if not k.pressed or k.echo:
 			return
@@ -805,6 +888,12 @@ func _input(event: InputEvent) -> void:
 				_try_heal()
 			KEY_TAB:
 				debug_mode = (debug_mode + 1) % 4
+			KEY_F5:
+				# 白模 <-> 美术 tile 切换（技术验证期间主要看白模）
+				render_mode = RENDER_ART if render_mode == RENDER_WHITEBOX else RENDER_WHITEBOX
+				_build_map_texture()
+				if Sfx != null:
+					Sfx.play("ui_click")
 			KEY_R:
 				_restart()
 			# ── 无障碍开关（spec §7.3 第 4 条：务必提供关闭/降低震动的选项）──
@@ -1046,26 +1135,40 @@ func _update_hud() -> void:
 		raid.enemies_killed, vitals.total_damage_taken, medical.status_text()])
 	lines.append("小队警戒 %.2f   %s" % [
 		squad.alert_level, "交战中" if squad.is_engaged() else ("警觉" if squad.is_alerted() else "放松")])
-	if raid.is_over():
-		lines.append("")
-		lines.append("═══ %s ═══" % raid.phase_name())
-		if raid.phase_name() == "EXTRACTED":
-			lines.append("撤离成功！按 R 再来一局")
-		else:
-			lines.append("阵亡：%s（装备已丢失）按 R 重开" % raid.death_reason)
+	# 性能读数（真机排障用：卡顿时可以直接报数字）
+	lines.append("FPS %d   帧 %.1f ms   敌 %d   音频掉 %d" % [
+		int(Engine.get_frames_per_second()),
+		Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+		agents.size(),
+		0 if Sfx == null else Sfx.dropped_count])
 
 	var dbg := ["普通", "流场方向", "房间图", "声音范围"]
-	# 结算界面弹出时藏掉 HUD 正文（否则会和结算文字叠在一起，真机截图里很难看）
+	# 结算界面弹出时藏掉 HUD 正文（否则会和结算文字叠在一起）
 	var over := result_overlay != null and result_overlay.is_shown()
 	hud_label.visible = not over
 	hint_label.visible = not over
 	view_label.visible = not over
 	if over:
 		return
-	hud_label.text = "\n".join(lines)
-	view_label.text = "[视图] %s" % dbg[debug_mode]
+	# ⚠️ 只在文本变化时才赋值。
+	#    Godot 里给 Label.text 赋值（哪怕值相同）也会触发 update_minimum_size -> 布局重算，
+	#    每帧都设是移动端常见的隐形开销（真机"自动开火卡顿"的次要来源）。
+	_set_label(hud_label, "\n".join(lines), "_cache_hud")
+	_set_label(view_label, "[视图] %s" % dbg[debug_mode], "_cache_view")
 	# ⚠️ 提示必须按平台给（真机反馈：安卓上显示的是 WASD/J/K/L 键盘键位）
-	if _is_touch:
-		hint_label.text = "左摇杆移动 · 右摇杆瞄准 · ◉ 开火 · ⟳ 换弹 · ✚ 治疗"
-	else:
-		hint_label.text = "WASD 移动 · J/空格 开火 · K 换弹 · L 治疗 · Tab 视图 · R 重开 · F1~F4 无障碍 · M 静音"
+	var hint := ("左摇杆移动 · 右摇杆瞄准 · ◉ 开火 · ⟳ 换弹 · ✚ 治疗"
+		if _is_touch
+		else "WASD 移动 · J/空格 开火 · K 换弹 · L 治疗 · Tab 视图 · R 重开 · F1~F4 无障碍 · M 静音")
+	_set_label(hint_label, hint, "_cache_hint")
+
+
+var _cache_hud := ""
+var _cache_view := ""
+var _cache_hint := ""
+
+
+func _set_label(l: Label, txt: String, cache_key: String) -> void:
+	if get(cache_key) == txt:
+		return
+	set(cache_key, txt)
+	l.text = txt

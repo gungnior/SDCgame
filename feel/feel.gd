@@ -27,19 +27,24 @@ extends Node
 #    射击 = 小震动 + 零闪白（不能每枪都闪）
 const LEVELS := {
 	"light": {       # 轻击：擦到
-		"hitstop_ms": 30.0, "trauma": 0.10, "flash": 0.00, "sfx": "hit_flesh",
+		# ⚠️ hitstop_ms = 0 —— 这是**性能与手感的关键**。
+		#    早先配 30ms。全自动步枪 600 RPM = 每 100ms 一发，
+		#    每发都冻 30ms => 每秒 300ms 处于冻结 = **30% 的时间画面不动**。
+		#    安卓真机反馈"自动开火有很强的卡顿"，根因就在这里。
+		#    轻击的反馈交给音效 + 血雾粒子即可，不占用冻结。
+		"hitstop_ms": 0.0, "trauma": 0.10, "flash": 0.00, "sfx": "hit_flesh",
 		"flash_color": Color(1, 1, 1),
 	},
 	"heavy": {       # 重击：打实了
-		"hitstop_ms": 65.0, "trauma": 0.22, "flash": 0.08, "sfx": "hit_flesh",
+		"hitstop_ms": 60.0, "trauma": 0.22, "flash": 0.08, "sfx": "hit_flesh",
 		"flash_color": Color(1, 1, 1),
 	},
 	"crit": {        # 暴击：打中要害
-		"hitstop_ms": 90.0, "trauma": 0.34, "flash": 0.18, "sfx": "hit_crit",
+		"hitstop_ms": 85.0, "trauma": 0.34, "flash": 0.18, "sfx": "hit_crit",
 		"flash_color": Color(1.0, 0.94, 0.72),
 	},
 	"kill": {        # 击杀：最后一击
-		"hitstop_ms": 120.0, "trauma": 0.30, "flash": 0.14, "sfx": "kill_confirm",
+		"hitstop_ms": 110.0, "trauma": 0.30, "flash": 0.14, "sfx": "kill_confirm",
 		"flash_color": Color(1.0, 0.92, 0.66),
 	},
 	"player_hurt": { # 自己受伤：大反馈但【不打断操作】
@@ -62,6 +67,11 @@ const LEVELS := {
 
 ## 受伤闪白的最小间隔 —— 否则被连续射击时闪白会一直挂着（实测踩过）
 const DAMAGE_FLASH_COOLDOWN_MS := 180
+## hitstop 最小间隔。
+## ⚠️ spec 只给了【单次时长】上限（60~120ms），但**没限制频率**。
+##    全自动武器下"每次命中都冻"会退化成持续卡顿 —— 安卓真机实测到了。
+##    这里用配额把频率也管住（与震动配额同样的思路）。
+const HITSTOP_MIN_INTERVAL_MS := 110
 
 # ─────────────────── 参数 ───────────────────
 const MAX_OFFSET_PX := 7.0        ## trauma=1 时的最大位移（像素）
@@ -81,6 +91,8 @@ var _hitstop_until_ms := 0
 var _flash := 0.0                 ## 当前闪白强度（0~1）
 var _flash_color := Color(1, 1, 1)
 var _last_damage_flash_ms := -99999
+var _last_hitstop_ms := -99999
+var _hitstop_suppressed := 0
 var _shake_budget := SHAKE_BUDGET_PER_SEC
 var _shake_suppressed := 0        ## 被配额压掉的次数（调试用）
 var _time := 0.0
@@ -170,11 +182,16 @@ func hitstop(ms: float) -> void:
 		return
 	# 硬上限：spec 明确 60~120ms，超了就是"卡"
 	ms = clampf(ms, 0.0, 120.0)
-	var until := Time.get_ticks_msec() + int(ms)
-	# 已有更长的冻结就不缩短
-	if until > _hitstop_until_ms:
-		_hitstop_until_ms = until
-		Engine.time_scale = 0.0
+	if ms <= 0.0:
+		return                       # 0 = 本档不冻结（如轻击）
+	# ⚠️ 频率上限：全自动武器每发都冻会变成持续卡顿（安卓真机实测）
+	var now := Time.get_ticks_msec()
+	if now - _last_hitstop_ms < HITSTOP_MIN_INTERVAL_MS:
+		_hitstop_suppressed += 1
+		return
+	_last_hitstop_ms = now
+	_hitstop_until_ms = now + int(ms)
+	Engine.time_scale = 0.0
 	hitstop_count += 1
 
 
@@ -255,7 +272,10 @@ func reset() -> void:
 	# 计数也要清 —— "reset" 就该是彻底复位（测试与重开局都依赖这个语义）
 	hitstop_count = 0
 	_shake_suppressed = 0
+	_hitstop_suppressed = 0
 	_last_damage_flash_ms = -99999
+	# ⚠️ 连"上次触发时间"也要清 —— 否则重开局后的第一个 hitstop 会被频率配额误吞
+	_last_hitstop_ms = -99999
 
 
 func stats() -> String:
