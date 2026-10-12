@@ -80,6 +80,8 @@ var fx: FxPool = null            ## CPUParticles2D 池（T-03）
 ## 世界绘制器（view/raid_drawer.gd）。
 ## 场景不再自己 _draw —— 所有世界图形都在 drawer 里。
 var drawer: RaidDrawer = null
+## 键盘输入分派器（view/raid_input.gd）—— 加键位只改那里
+var raid_input: RaidInput = null
 var touch: TouchControls = null  ## 双摇杆 + 动作按钮
 var flash_rect: ColorRect = null ## 受击闪白覆盖层
 var inventory_panel: InventoryPanel = null   ## 背包/搜索面板（#3 / #6）
@@ -292,6 +294,10 @@ func _setup_view() -> void:
 	drawer = RaidDrawer.new()
 	drawer.scene = self
 	add_child(drawer)
+
+	# 键盘分派器（加键位改 view/raid_input.gd，不碰这个文件）
+	raid_input = RaidInput.new()
+	raid_input.scene = self
 
 	_setup_feel_and_touch()
 
@@ -887,70 +893,14 @@ func _read_move_input() -> Vector2:
 
 
 func _input(event: InputEvent) -> void:
-	# ⚠️ 这里【故意不处理 InputEventScreenTouch】。
-	#    早先（还没有触屏控件时）本函数把"右半屏任意触摸"当作开火，
-	#    真机反馈的三个问题全是它导致的：
-	#      ① 按右侧任意位置就开火
-	#      ② 点瞄准摇杆就开火（它就在右半屏）
-	#      ③ 按"治疗"也开火 -> 治疗永远点不到
-	#    现在摇杆（VirtualJoystick）与按钮（TouchButton）各自通过 GUI 系统接管触摸，
-	#    这里只留键盘。
-	if event is InputEventKey:
-		var k := event as InputEventKey
-		if not k.pressed or k.echo:
-			return
-		# ── 键位（用户第三轮 PC 实测指定：R 装弹 / K 重开 / T 治疗）──
-		# 完整说明在 ESC 设置菜单里（用户："f1 到 f4 没有说明"）
-		# ESC 由 SettingsMenu 独占处理（见 ui/settings_menu.gd 的 _input），
-		# 这里不能也处理，否则会 toggle 两次等于没开。
-		match k.keycode:
-			KEY_J, KEY_SPACE:
-				_firing = true
-			KEY_R:
-				player_weapon.start_reload()
-			KEY_T:
-				_try_heal()
-			KEY_B:
-				_open_bag()
-			KEY_K:
-				_restart()
-			KEY_TAB:
-				debug_mode = (debug_mode + 1) % 4
-			KEY_F5:
-				# 白模 <-> 美术 tile 切换（技术验证期间主要看白模）
-				render_mode = RENDER_ART if render_mode == RENDER_WHITEBOX else RENDER_WHITEBOX
-				_build_map_texture()
-				if Sfx != null:
-					Sfx.play("ui_click")
-			# ── 无障碍开关（spec §7.3 第 4 条：务必提供关闭/降低震动的选项）──
-			KEY_F1:
-				Feel.shake_enabled = not Feel.shake_enabled
-				if Sfx != null:
-					Sfx.play("ui_click")
-			KEY_F2:
-				Feel.hitstop_enabled = not Feel.hitstop_enabled
-				if not Feel.hitstop_enabled:
-					Engine.time_scale = 1.0
-				if Sfx != null:
-					Sfx.play("ui_click")
-			KEY_F3:
-				Feel.flash_enabled = not Feel.flash_enabled
-				if Sfx != null:
-					Sfx.play("ui_click")
-			KEY_F4:
-				Feel.intensity = 0.0 if Feel.intensity > 0.5 else 1.0
-				if Sfx != null:
-					Sfx.play("ui_click")
-			KEY_M:
-				if Sfx != null:
-					Sfx.enabled = not Sfx.enabled
+	# 键盘分派全在 view/raid_input.gd（加键位改那里，不碰这个 1200 行的文件）
+	if raid_input != null:
+		raid_input.handle_key(event)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	if event is InputEventKey and not (event as InputEventKey).pressed:
-		var k := event as InputEventKey
-		if k.keycode == KEY_J or k.keycode == KEY_SPACE:
-			_firing = false
+	if raid_input != null:
+		raid_input.handle_key_release(event)
 
 
 func _try_heal() -> void:

@@ -123,10 +123,18 @@ func _test_whitebox_render() -> void:
 func _test_keybindings() -> void:
 	# 用户 PC 实测："修改 pc 按键 r 为装弹 k 为重启 t 为治疗"
 	#           "f1 到 f4 没有说明 应该加入 esc 设置菜单"
+	# ⚠️ 键位分派已搬到 view/raid_input.gd（拆分上帝对象，第 5 处）。
+	#    这已是本次重构中第 5 次遇到"源码文本断言因代码搬家而失效"——
+	#    它把「代码在哪」和「代码对不对」绑在了一起。
+	#    修法不是简单换文件名，而是**查该查的地方**：
+	#      · 键位分派 -> raid_input.gd
+	#      · 「场景把输入委托出去」-> raid_scene.gd
+	#      · ESC 归属     -> 两个文件都不能处理
+	var ri := FileAccess.get_file_as_string("res://view/raid_input.gd")
 	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
-	var i := rs.find("func _input(event: InputEvent)")
-	_check(i > 0, "找到 _input")
-	var seg := rs.substr(i, 1400)
+	var i := ri.find("func handle_key(event: InputEvent)")
+	_check(i > 0, "找到 handle_key")
+	var seg := ri.substr(i, 1600)
 	_check(seg.contains("KEY_R:") and seg.contains("start_reload()"),
 		"R = 装弹")
 	_check(seg.contains("KEY_T:") and seg.contains("_try_heal()"),
@@ -135,9 +143,15 @@ func _test_keybindings() -> void:
 		"B = 背包/搜索（PC 上必须有键，否则尸体搜不了）")
 	_check(seg.contains("KEY_K:"), "K 已绑定（重开）")
 	_check(not seg.contains("KEY_L:"), "旧的 L 键已移除")
-	# ESC 不能在 raid_scene 里处理，否则和 SettingsMenu 撞车（toggle 两次 = 没反应）
+	# ESC 不能在 raid_input / raid_scene 里处理，
+	# 否则和 SettingsMenu 撞车（toggle 两次 = 没反应）
 	_check(not seg.contains("KEY_ESCAPE"),
-		"ESC 不由 raid_scene 处理（交给 SettingsMenu 独占）")
+		"ESC 不由 raid_input 处理（交给 SettingsMenu 独占）")
+	_check(not rs.contains("KEY_ESCAPE"),
+		"ESC 也不由 raid_scene 处理")
+	# 防回流：场景必须把输入委托出去
+	_check(rs.contains("raid_input.handle_key(event)"),
+		"场景把 _input 委托给 RaidInput（防代码回流）")
 	var sm := FileAccess.get_file_as_string("res://ui/settings_menu.gd")
 	_check(sm.contains('is_action_pressed("ui_cancel")'), "ESC 走 ui_cancel")
 	_check(sm.contains("NOTIFICATION_WM_GO_BACK_REQUEST"), "安卓返回键也接上了")
