@@ -28,7 +28,9 @@ from pathlib import Path
 
 PREFIX = "DSHTEL|"
 PKG = "com.aaaaadsh.soudache"
-ACTIVITY = "org.godotengine.godot.GodotActivity"
+# ⚠️ Godot 4 的 Android 启动 Activity 是 GodotAppLauncher，
+#    不是 GodotActivity（后者是 3.x 的写法；用错会报 "Error type 3"）。
+ACTIVITY = "com.godot.game.GodotAppLauncher"
 
 DEFAULT_ADB_CANDIDATES = [
     os.path.expandvars(r"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"),
@@ -258,8 +260,13 @@ def main():
 
     sh(adb, "-s", dev, "logcat", "-c")
 
+    # ⚠️ 必须显式指定 `godot:V *:S`。
+    #    实测（vivo / Android 16）：不加过滤器时 Godot 的 INFO 日志会被 ROM 的
+    #    默认日志级别挡掉；而且 logcat 环形缓冲区只有 2 MiB，这台设备日志量极大，
+    #    godot 的行会在 `logcat -d` 之前就被淘汰 —— 看起来就像"游戏完全没输出"。
+    #    显式 `godot:V` 同时解决这两个问题。
     proc = subprocess.Popen(
-        [adb, "-s", dev, "logcat", "-v", "brief"],
+        [adb, "-s", dev, "logcat", "-v", "brief", "godot:V", "*:S"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
     rep = Report()

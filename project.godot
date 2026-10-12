@@ -24,7 +24,10 @@ run/main_scene="res://view/raid_scene.tscn"
 window/size/viewport_width=640
 window/size/viewport_height=360
 window/stretch/mode="canvas_items"
-window/stretch/aspect="keep"
+; ⚠️ expand 而不是 keep。真机实测：keep 在 20:9 手机上左右各留 415px 黑边，
+;    游戏只占屏宽 70%（2750x1260 屏，16:9 视口）。expand 让视口随屏扩展、
+;    多看到的是地图而不是黑边 —— 俯视射击正需要更宽的视野。
+window/stretch/aspect="expand"
 window/stretch/scale_mode="integer"
 
 [rendering]

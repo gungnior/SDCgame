@@ -55,6 +55,7 @@ func _initialize() -> void:
 	_suite("真机修复2：触屏输入隔离", _test_touch_input_isolation)
 	_suite("真机修复2：hitstop 频率配额", _test_hitstop_frequency_limit)
 	_suite("真机修复2：白模渲染", _test_whitebox_render)
+	_suite("性能回归：听觉代价场缓存", _test_hearing_cache)
 
 	print("")
 	if _failed == 0:
@@ -2108,3 +2109,97 @@ func _test_whitebox_render() -> void:
 		if solid_found:
 			break
 	_check(solid_found, "地图里确实存在阻挡格（白模要把它画出来）")
+
+
+# ─────────────────── 性能回归：听觉代价场缓存 ───────────────────
+
+func _test_hearing_cache() -> void:
+	# ⚠️ 背景（安卓 profiler 实测）：
+	#   敌人 AI 阶段单帧冲到 **257 ms**。根因是每个敌人对每个噪声都跑一次
+	#   全网格 Dijkstra（Perception.hearing_cost），并且每次都重新分配数组。
+	#   本测试把这个坑钉死：缓存版必须显著快于逐次调用版。
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+	var gen := MapGenerator.new()
+	_check(gen.generate(7777, reg.room_types), "地图生成成功")
+	var g := gen.grid
+
+	# ── 正确性：缓存查表 与 单次 Dijkstra 结果必须一致 ──
+	var listener := Ballistics.cell_center(gen.spawn_room().center)
+	var field := Perception.hearing_field(g, listener)
+	_check(not field.is_empty(), "听觉场已构建")
+	var probes: Array[Vector2i] = [
+		gen.spawn_room().center,
+		Vector2i(1, 1), Vector2i(g.width - 2, g.height - 2), Vector2i(g.width / 2, g.height / 2),
+	]
+	for c in probes:
+		var p := Ballistics.cell_center(c)
+		var a := Perception.cost_at(field, g, p)
+		var b := Perception.hearing_cost(g, listener, p)
+		_check_eq(a, b, "格 %s 的代价：场查表(%d) == Dijkstra(%d)" % [str(c), a, b])
+
+	# 对称性（缓存能成立的前提）
+	var n1 := Vector2i(3, 3)
+	var n2 := Vector2i(g.width - 4, g.height - 4)
+	var d_ab := Perception.hearing_cost(g, Ballistics.cell_center(n1), Ballistics.cell_center(n2))
+	var d_ba := Perception.hearing_cost(g, Ballistics.cell_center(n2), Ballistics.cell_center(n1))
+	_check_eq(d_ab, d_ba, "代价函数对称（%d == %d）—— 这是「从听者跑一次场」的前提" % [d_ab, d_ba])
+
+	# ── 缓存命中行为 ──
+	var cache := HearingFieldCache.new()
+	var f1 := cache.field_for(g, listener)
+	cache.field_for(g, listener)
+	cache.field_for(g, listener)
+	_check_eq(cache.builds, 1, "同格重复取场只构建 1 次")
+	_check(cache.hits >= 2, "命中 %d 次" % cache.hits)
+	# 移动半格（未跨格）不应重建
+	cache.field_for(g, listener + Vector2(0.3, 0.3))
+	_check_eq(cache.builds, 1, "未跨格不重建")
+	# 跨格应重建
+	cache.field_for(g, listener + Vector2(3.0, 0.0))
+	_check_eq(cache.builds, 2, "跨格后重建")
+	# 清空
+	cache.clear()
+	_check_eq(cache.size(), 0, "clear 后缓存为空")
+
+	# ── 性能对比（本测试的核心价值：防性能回退）──
+	var centre := Ballistics.cell_center(gen.spawn_room().center)
+	var agents: Array = []
+	var scav: EnemyDef = reg.get_enemy("enemy_scav")
+	for i in 28:
+		var a := EnemyAgent.new(i, scav, centre)
+		agents.append(a)
+	# 12 个噪声铺满地图（模拟交火中多个枪声 + 脚步）
+	var noises: Array = []
+	for i in 12:
+		noises.append({
+			"pos": Ballistics.cell_center(Vector2i(2 + i * 2, 2 + (i * 3) % (g.height - 4))),
+			"loudness_m": 22.0,
+		})
+
+	# ① 逐次 Dijkstra（旧路径）：只跑 4 个敌人做代表，否则测试太慢
+	var t0 := Time.get_ticks_usec()
+	for i in 4:
+		agents[i]._find_audible_noise(g, noises, null)
+	var per_enemy_us := float(Time.get_ticks_usec() - t0) / 4.0
+
+	# ② 缓存路径：28 个敌人（第 1 个构建场，其余全命中）
+	var c2 := HearingFieldCache.new()
+	var t1 := Time.get_ticks_usec()
+	for a in agents:
+		a._find_audible_noise(g, noises, c2)
+	var cached_total_us := float(Time.get_ticks_usec() - t1)
+
+	_check_eq(c2.builds, 1, "28 个敌人同格 -> 只构建 1 次场（实际 %d）" % c2.builds)
+	# 缓存版 28 个敌人的总耗时必须低于旧版【4 个】敌人的总耗时
+	_check(cached_total_us < per_enemy_us * 4.0,
+		"缓存版 28 敌 %.2fms < 逐次版 4 敌 %.2fms —— 约 %.0f 倍加速"
+		% [cached_total_us / 1000.0, per_enemy_us * 4.0 / 1000.0,
+		   (per_enemy_us * 4.0) / maxf(1.0, cached_total_us)])
+
+	# 听觉语义不能坏：贴脸开枪必须听得见，极远处必须听不见
+	var near_field := Perception.hearing_field(g, centre)
+	_check(Perception.can_hear_at(near_field, g, centre + Vector2(1, 0), 22.0),
+		"1 格外的枪声听得见")
+	_check(not Perception.can_hear_at(near_field, g, centre + Vector2(400, 400), 22.0),
+		"400 格外听不见")

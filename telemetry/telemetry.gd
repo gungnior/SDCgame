@@ -36,9 +36,32 @@ var _spikes: Array = []
 var _event_count := 0
 var _run_started_ms := 0
 
+## ⚠️ 帧耗时必须自己用墙钟测。
+##    早先用 `Performance.TIME_PROCESS` —— 在 Android 上它给出的值前后矛盾：
+##    报告了 1787 次"80ms 卡顿"，而同一时段 avg_ms = 16.13ms（正好 60fps）。
+##    两者不可能同时成立。改用 `Time.get_ticks_usec()` 的相邻差，语义无歧义。
+var _last_usec := 0
+## 本采样窗内的卡顿计数（早先错报成环形缓冲区大小，永远是 60）
+var _spike_window := 0
+var _spike_total := 0
+## 卡顿日志限流 —— 否则"卡顿 -> 打日志 -> 更卡"会形成正反馈
+const SPIKE_PRINT_PER_SEC := 5
+var _spike_print_sec := 0
+var _spike_prints := 0
+var _window_t0_usec := 0
+
 ## 游戏侧调 mark() 记录"此刻在做什么"，卡顿帧会带上它
+##
+## ⚠️ 只记"最后一个标记"是不够的 —— 实测踩过：
+##    卡顿帧全都报 ctx=draw_body，但 ctx_age_ms 只有 2~3ms，
+##    说明 80ms 其实花在 _draw 之前的某个阶段，draw_body 只是最后一个标记。
+##    所以这里改成**逐阶段计时**：记录每个阶段的耗时，上报最慢的三个。
 var _ctx := "idle"
 var _ctx_ms := 0
+var _phase_name := ""
+var _phase_t0 := 0
+var _phase_max: Dictionary = {}
+var _phase_sum: Dictionary = {}
 
 
 func _ready() -> void:
@@ -57,28 +80,54 @@ func _ready() -> void:
 	})
 
 
-## 标记"此刻在做什么"。卡顿帧的诊断价值全在这里 ——
-## 光知道"卡了 48ms"没用，要知道"卡在开枪那一帧"。
+## 标记阶段切换。会结算【上一个阶段】的耗时并记入统计。
 func mark(ctx: String) -> void:
+	var now := Time.get_ticks_usec()
+	if _phase_name != "":
+		var dt := float(now - _phase_t0) / 1000.0
+		if dt > float(_phase_max.get(_phase_name, 0.0)):
+			_phase_max[_phase_name] = dt
+		_phase_sum[_phase_name] = float(_phase_sum.get(_phase_name, 0.0)) + dt
+	_phase_name = ctx
+	_phase_t0 = now
 	_ctx = ctx
 	_ctx_ms = Time.get_ticks_msec()
+
+
+## 取本窗最慢的几个阶段（名字, 最慢ms, 累计ms）
+func _top_phases(n: int = 3) -> Array:
+	var arr: Array = []
+	for k in _phase_max:
+		arr.append([k, snappedf(float(_phase_max[k]), 0.01),
+			snappedf(float(_phase_sum.get(k, 0.0)), 0.01)])
+	arr.sort_custom(func(a, b): return a[1] > b[1])
+	return arr.slice(0, n)
 
 
 func _process(delta: float) -> void:
 	if not enabled:
 		return
 	_frames += 1
-	var ms := delta * 1000.0
 
-	# 单调时钟下的真实帧耗时（delta 会被 time_scale 影响，所以另取 Performance）
-	var frame_ms: float = Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+	# 自己测墙钟帧间隔（不依赖 Performance，见字段注释）
+	var now_usec := Time.get_ticks_usec()
+	if _last_usec == 0:
+		_last_usec = now_usec
+		_window_t0_usec = now_usec
+		return
+	var frame_ms := float(now_usec - _last_usec) / 1000.0
+	_last_usec = now_usec
+
 	if frame_ms > _worst_ms:
 		_worst_ms = frame_ms
 		_worst_ctx = _ctx
 
-	if frame_ms >= SPIKE_MS and Engine.time_scale > 0.0:
-		# hitstop 期间冻结是【故意的】，不算卡顿
-		_note_spike(frame_ms)
+	# ⚠️ hitstop 期间 delta 为 0，是【故意冻结】，不算卡顿
+	var frozen := delta <= 0.0001 or Engine.time_scale <= 0.0
+	if frame_ms >= SPIKE_MS and not frozen:
+		_spike_window += 1
+		_spike_total += 1
+		_maybe_log_spike(frame_ms)
 
 	_acc += delta
 	if _acc >= SAMPLE_INTERVAL:
@@ -87,6 +136,22 @@ func _process(delta: float) -> void:
 		_frames = 0
 		_worst_ms = 0.0
 		_worst_ctx = ""
+		_spike_window = 0
+		_phase_max.clear()
+		_phase_sum.clear()
+		_window_t0_usec = Time.get_ticks_usec()
+
+
+## 卡顿日志限流（每秒最多 N 条）
+func _maybe_log_spike(ms: float) -> void:
+	var sec := Time.get_ticks_msec() / 1000
+	if sec != _spike_print_sec:
+		_spike_print_sec = sec
+		_spike_prints = 0
+	if _spike_prints >= SPIKE_PRINT_PER_SEC:
+		return
+	_spike_prints += 1
+	_note_spike(ms)
 
 
 func _note_spike(ms: float) -> void:
@@ -110,14 +175,23 @@ func _note_spike(ms: float) -> void:
 
 func _flush_stats() -> void:
 	var fps := Engine.get_frames_per_second()
+	# ⚠️ avg_ms 必须用【真实墙钟】算。
+	#    早先用 SAMPLE_INTERVAL/_frames 假设窗口正好 0.5 秒，
+	#    但 hitstop 期间 delta=0，窗口实际会拖得更长，avg_ms 就被高估了。
+	var wall := 0.0
+	if _window_t0_usec > 0:
+		wall = float(Time.get_ticks_usec() - _window_t0_usec) / 1000.0
 	var d := {
 		"k": "stats",
 		"t": _now(),
 		"fps": int(fps),
-		"avg_ms": snappedf((SAMPLE_INTERVAL * 1000.0) / maxf(1.0, float(_frames)), 0.01),
+		"avg_ms": snappedf(wall / maxf(1.0, float(_frames)), 0.01),
 		"worst_ms": snappedf(_worst_ms, 0.01),
 		"worst_ctx": _worst_ctx,
-		"spikes": _spikes.size(),
+		"spikes": _spike_window,
+		"spikes_total": _spike_total,
+		# 最慢的三个阶段：名字 / 最慢ms / 累计ms
+		"phases": _top_phases(3),
 		"nodes": Performance.get_monitor(Performance.OBJECT_NODE_COUNT),
 		"orphans": Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT),
 		"draws": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),

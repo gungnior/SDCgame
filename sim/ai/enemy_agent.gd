@@ -118,6 +118,18 @@ func tick(delta: float, ctx: Dictionary) -> void:
 	if weapon != null:
 		weapon.tick(delta)
 
+	# ── ⭐ 出生宽限期 ──
+	# 实测（安卓真机 + 遥测）：玩家 3.3 秒就死了，0 击杀。
+	# 原因：出生安全区只挡住了【生成位置】，没挡住【视野】——
+	#   scav 视距 22 格，而地图只有 27x27，出生点几乎全图都在敌人视野内。
+	#   5 个敌人同时开火 => 约 4.5 次命中/秒 => 15 发打死 => 3.3 秒。
+	#   计算：100HP + 40 护甲 ≈ 挨 15 发；15 / 4.5 = 3.3 秒（与实测吻合）。
+	# 所以开局给一段"敌人还没注意到你"的时间，让玩家能先看清地形。
+	if bool(ctx.get("grace", false)):
+		if state == State.COMBAT or state == State.ALERT:
+			state = State.IDLE
+		return
+
 	# ── 感知：先看，再听 ──
 	var seen := _find_visible_target(grid, targets)
 	if not seen.is_empty():
@@ -139,7 +151,8 @@ func tick(delta: float, ctx: Dictionary) -> void:
 
 	# ── 听觉（只在非交战时才需要，交战中已经知道位置）──
 	if state != State.COMBAT and state != State.SEARCH:
-		var noise := _find_audible_noise(grid, ctx.get("noises", []))
+		var noise := _find_audible_noise(grid, ctx.get("noises", []),
+			ctx.get("hearing_cache"))
 		if not noise.is_empty():
 			var np: Vector2 = noise["pos"]
 			last_seen_pos = np
@@ -190,13 +203,34 @@ func _find_visible_target(grid: LogicalGrid, targets: Array) -> Dictionary:
 	return {}
 
 
-func _find_audible_noise(grid: LogicalGrid, noises: Array) -> Dictionary:
-	for nz in noises:
-		var np: Vector2 = nz.get("pos", Vector2.ZERO)
-		var loud: float = nz.get("loudness_m", 0.0)
-		if Perception.hears_noise(grid, def, np, pos, loud):
-			return nz
-	return {}
+func _find_audible_noise(grid: LogicalGrid, noises: Array,
+		cache: HearingFieldCache = null) -> Dictionary:
+	if noises.is_empty():
+		return {}
+	# ⭐ 首选路径：噪声侧已经预先建好代价场（场景每帧挂在 noise["field"] 上），
+	#    这里对每个噪声只做一次 O(1) 查表。
+	#    （安卓 profiler 实测：不这样做时单帧 AI 阶段 257ms）
+	if noises[0].get("field") != null:
+		for nz in noises:
+			var f: PackedInt32Array = nz.get("field")
+			if f.is_empty():
+				continue
+			var loud: float = float(nz.get("loudness_m", 0.0))
+			var reach := minf(float(def.hear_range_m), loud) if def != null else loud
+			if Perception.can_hear_at(f, grid, pos, reach):
+				return nz
+		return {}
+
+	# 退化路径（测试/工具）：单次全图 Dijkstra。**只对第一个噪声做**，避免退化爆炸。
+	var nz0: Dictionary = noises[0]
+	var np0: Vector2 = nz0.get("pos", Vector2.ZERO)
+	var loud0: float = float(nz0.get("loudness_m", 0.0))
+	var reach0 := minf(float(def.hear_range_m), loud0) if def != null else loud0
+	if cache != null:
+		var field := cache.field_for(grid, np0)
+		return nz0 if Perception.can_hear_at(field, grid, pos, reach0) else {}
+	var f0 := Perception.hearing_field(grid, np0)
+	return nz0 if Perception.can_hear_at(f0, grid, pos, reach0) else {}
 
 
 # ─────────────────── 战斗 ───────────────────

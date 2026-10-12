@@ -24,6 +24,10 @@ const NOISE_QUIET := 7.0       ## 走路的响度
 ## 曳光存活时间。
 ## ⚠️ 早先只有 0.06s（约 3.6 帧），安卓真机反馈"开火只听到声音看不到子弹"。
 const TRACER_TTL := 0.13
+## 开局宽限期（秒）：这段时间内敌人不索敌。
+## 实测：没有它时玩家 3.3 秒就死、0 击杀（安卓真机遥测）。
+## 这不是"降低难度"，而是给玩家看懂地形与局势的时间 —— 搜打撤的前提是"能观察"。
+const GRACE_SECONDS := 6.0
 
 # ─── 颜色 ───
 const C_WALL := Color(0.13, 0.14, 0.18)
@@ -79,6 +83,8 @@ var flash_rect: ColorRect = null ## 受击闪白覆盖层
 var result_overlay: ResultOverlay = null   ## 结算界面（含触屏重开按钮）
 var _prev_shots: Dictionary = {} ## agent.id -> 已开火数（用于播放枪声）
 var _step_accum := 0.0
+## 听觉代价场缓存（共享给所有敌人）—— 见 HearingFieldCache 的说明
+var _hearing_cache := HearingFieldCache.new()
 var _last_hint_shown := false
 var _hitstop_events := 0         ## 本局触发过几次 hitstop（调试）
 
@@ -213,14 +219,19 @@ func _setup_view() -> void:
 	hud_label.add_theme_color_override("font_color", Color(0.92, 0.94, 0.96))
 	hud.add_child(hud_label)
 
+	# ⚠️ 底部两行必须【锚定到左下】而不是写死 y 坐标。
+	#    改成 stretch/aspect="expand" 后，视口高度会随设备比例变化，
+	#    写死 342 在长屏上会飘到屏幕中间（真机踩过）。
 	hint_label = Label.new()
-	hint_label.position = Vector2(10, 342)
+	hint_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	hint_label.position = Vector2(10, -20)
 	hint_label.add_theme_font_size_override("font_size", fs - 2)
 	hint_label.add_theme_color_override("font_color", Color(0.6, 0.65, 0.72))
 	hud.add_child(hint_label)
 
 	view_label = Label.new()
-	view_label.position = Vector2(10, 328)
+	view_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	view_label.position = Vector2(10, -38)
 	view_label.add_theme_font_size_override("font_size", fs - 2)
 	view_label.add_theme_color_override("font_color", Color(0.75, 0.80, 0.88))
 	hud.add_child(view_label)
@@ -685,16 +696,20 @@ func _try_fire() -> void:
 	var w := player_weapon.def
 
 	# ── 枪械表现：音效 + 枪口火光 + 抛壳 ──
+	Tel.mark("fire_sfx")
 	if Sfx != null:
 		Sfx.play("gun_%s_player" % _weapon_kind(w))
+	Tel.mark("fire_fx")
 	if fx != null:
 		fx.burst("muzzle", player_pos + player_aim * 0.34, player_aim)
 		var side := Vector2(-player_aim.y, player_aim.x)
 		fx.burst("casing", player_pos + side * 0.22 + player_aim * 0.1, side, 1.0)
 	# 自己开枪只给最轻的 kick（spec §7.3：不能每枪都大震）
+	Tel.mark("fire_feel")
 	Feel.hit("player_shoot")
 
 	# ── 子弹磁性（T-56 首选：射线加粗，**不改准心**）──
+	Tel.mark("fire_aim")
 	var push := _aim_push()
 	var half_angle := AimAssist.half_angle_for_viewport(get_viewport_rect().size.x)
 	var assist := AimAssist.pick(player_pos, player_aim, push,
@@ -704,6 +719,7 @@ func _try_fire() -> void:
 	if not assist.is_empty():
 		shot_dir = assist["dir"]
 		tgt = assist["target"].get("agent")
+	Tel.mark("fire_damage")
 
 	var dist := float(w.range_m)
 	if tgt != null:
@@ -809,14 +825,28 @@ func _drop_loot(a: EnemyAgent) -> void:
 
 
 func _tick_enemies(delta: float) -> void:
+	# 出生宽限期：开局这几秒敌人不索敌（让玩家先看清地形）
+	# 实测：没有它时玩家 3.3 秒就死，0 击杀（安卓真机遥测）
+	var grace := _time < GRACE_SECONDS
 	var ctx := {
 		"grid": gen.grid,
 		"flows": flows,
 		"targets": [{"id": "player", "pos": player_pos, "hp": vitals.hp}],
 		"rng": _rng,
 		"now": _time,
-		"noises": noises,
+		"noises": noises if not grace else [],
+		"grace": grace,
+		"hearing_cache": _hearing_cache,
 	}
+	# ⚠️ 听觉：**按「噪声」建代价场**，而不是按敌人。
+	#    噪声每帧只有 1~3 个且位置固定 -> 缓存命中率极高；
+	#    敌人有 20+ 个且一直在动 -> 按敌人建场会不断重建。
+	#    于是 28 个场/帧 变成 2~3 个场/帧，其余全是 O(1) 查表。
+	#    （安卓 profiler 实测：未优化时 AI 阶段单帧 257ms）
+	#    直接挂在噪声字典上，agent 侧接口不变（没有 field 时自动走退化路径）。
+	if not grace:
+		for nz in noises:
+			nz["field"] = _hearing_cache.field_for(gen.grid, nz.get("pos", Vector2.ZERO))
 	for a in agents:
 		if not a.is_alive():
 			continue
@@ -828,8 +858,10 @@ func _tick_enemies(delta: float) -> void:
 			_prev_shots[a.id] = a.shots_fired
 			# 目前所有远程敌人都装的手枪（见 _setup_sim 的 equip 调用）
 			var kind := _weapon_kind(a.weapon.def) if a.weapon != null else "pistol"
+			Tel.mark("enemy_sfx")
 			if Sfx != null:
 				Sfx.play_at("gun_%s_enemy" % kind, a.pos, player_pos, 7.0, 30.0)
+			Tel.mark("enemy_fx")
 			if fx != null:
 				fx.burst("muzzle", a.pos + a.facing * 0.3, a.facing, 0.8)
 			# 敌人开火也要看得见曳光（真机反馈：只听到声音看不到子弹）
@@ -839,6 +871,7 @@ func _tick_enemies(delta: float) -> void:
 				e_to = Vector2(e_wall.x + 0.5, e_wall.y + 0.5)
 			bullets.append({"from": a.pos, "to": e_to, "ttl": TRACER_TTL, "own": false})
 			muzzle_flash.append({"pos": a.pos, "dir": a.facing, "ttl": 0.06})
+	Tel.mark("enemy_done")
 
 	# 敌人造成的伤害回写到 vitals
 	var target_hp := int((ctx["targets"][0] as Dictionary)["hp"])
@@ -989,6 +1022,8 @@ func _restart() -> void:
 	if Feel != null:
 		Feel.reset()
 	Engine.time_scale = 1.0
+	# 地图换了，听觉场缓存必须清空（否则会用上一张图的代价场）
+	_hearing_cache.clear()
 	if result_overlay != null:
 		result_overlay.hide_result()
 	if touch != null:
@@ -1155,6 +1190,12 @@ func _draw() -> void:
 		for nz in noises:
 			draw_arc((nz["pos"] as Vector2) * CELL_PX, float(nz["loudness_m"]) * CELL_PX * 0.25,
 				0, TAU, 24, Color(1, 1, 0.4, 0.25), 1.0)
+
+	# 收尾标记：把「_draw 里搬了多少绘制指令」与
+	# 「搬完之后引擎渲染 + 呈现 + 等 vsync 花了多久」分开。
+	# 不分开的话 draw_body 会把 vsync 等待全算进去，看不出真实瓶颈（实测踩过）。
+	if Tel != null:
+		Tel.mark("draw_end")
 
 
 func _update_hud() -> void:
