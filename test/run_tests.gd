@@ -56,6 +56,8 @@ func _initialize() -> void:
 	_suite("真机修复2：hitstop 频率配额", _test_hitstop_frequency_limit)
 	_suite("真机修复2：白模渲染", _test_whitebox_render)
 	_suite("性能回归：听觉代价场缓存", _test_hearing_cache)
+	_suite("真机修复3：白模与碰撞一致", _test_whitebox_matches_collision)
+	_suite("真机修复3：测试模式敌人上限", _test_enemy_count_test_mode)
 
 	print("")
 	if _failed == 0:
@@ -2203,3 +2205,83 @@ func _test_hearing_cache() -> void:
 		"1 格外的枪声听得见")
 	_check(not Perception.can_hear_at(near_field, g, centre + Vector2(400, 400), 22.0),
 		"400 格外听不见")
+
+
+# ─────────────────── 真机反馈 #1：白模与碰撞必须一致 ───────────────────
+
+func _test_whitebox_matches_collision() -> void:
+	# ⚠️ 真机反馈："黑色实心的墙可以直接通过，绿色实心的线有时候会挡路"
+	#    根因（已查明）：房间描边早先画在 `room.rect` 的最外圈【瓦片】上，
+	#    而 `map_generator` 把 `room.rect` **整块** carve 成 FLOOR ——
+	#    于是绿线盖在可走格上，看起来像墙、实际能走。
+	#    本测试用**像素级比对**把这个不一致钉死。
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+	var seeds: Array[int] = [11, 4242, 20261012, 777, 31337]
+	var checked := 0
+	for s in seeds:
+		var gen := MapGenerator.new()
+		if not gen.generate(s, reg.room_types):
+			continue
+		checked += 1
+		var g := gen.grid
+		var img := WhiteboxPainter.paint(g, gen.graph.rooms)
+		var n := LogicalGrid.CELL_SIZE_TILES
+
+		var mismatch := 0
+		var first_bad := ""
+		for cy in g.height:
+			for cx in g.width:
+				var cell := Vector2i(cx, cy)
+				var o := g.cell_to_tile_origin(cell)
+				# 取格子【正中心】的像素（描边只会在边缘，中心必须干净）
+				var px := img.get_pixel(o.x + n / 2, o.y + n / 2)
+				var paint_wall := WhiteboxPainter.looks_like_wall(px)
+				var real_wall := not g.is_walkable(cell)
+				if paint_wall != real_wall:
+					mismatch += 1
+					if first_bad == "":
+						first_bad = "格 %s：画成%s，碰撞是%s" % [
+							str(cell), "墙" if paint_wall else "可走",
+							"墙" if real_wall else "可走"]
+		_check_eq(mismatch, 0, "种子 %d：格子中心的「画成墙」与「碰撞是墙」完全一致%s"
+			% [s, "" if mismatch == 0 else "（首个不一致：" + first_bad + "）"])
+
+		# 房间边界格必须是【可走】的（这就是绿线曾经盖住的那些格子）
+		var bad_room := 0
+		for r in gen.graph.rooms:
+			for y in range(r.rect.position.y, r.rect.position.y + r.rect.size.y):
+				for x in range(r.rect.position.x, r.rect.position.x + r.rect.size.x):
+					if not g.is_walkable(Vector2i(x, y)):
+						bad_room += 1
+		_check_eq(bad_room, 0, "种子 %d：room.rect 内全部可走（房间不含有碰撞的格子）" % s)
+
+	_check(checked >= 4, "抽查了 %d 张地图" % checked)
+
+	# 「看起来像墙」的判据本身也要稳：暗 = 墙，亮 = 可走
+	_check(WhiteboxPainter.looks_like_wall(WhiteboxPainter.WB_WALL), "近黑色被判为墙")
+	_check(not WhiteboxPainter.looks_like_wall(WhiteboxPainter.WB_FLOOR), "亮灰地板被判为可走")
+	_check(not WhiteboxPainter.looks_like_wall(WhiteboxPainter.WB_CORRIDOR), "走廊被判为可走")
+	_check(not WhiteboxPainter.looks_like_wall(WhiteboxPainter.WB_DOOR), "门被判为可走")
+
+	# 描边不能盖在可走格的中心（只能出现在边缘）
+	var g2 := MapGenerator.new()
+	g2.generate(999, reg.room_types)
+	var img2 := WhiteboxPainter.paint(g2.grid, g2.graph.rooms)
+	_check_eq(img2.get_width(), g2.grid.width * LogicalGrid.CELL_SIZE_TILES,
+		"白模图宽度 = 逻辑格宽 x 3")
+
+
+func _test_enemy_count_test_mode() -> void:
+	# 真机反馈 #2：技术验证阶段敌人太多（35 个），要求每类型各 1 个、总数 <= 4
+	# ⚠️ 用 load() 取常量而不是引用类型名 —— 后者会在编译期把整个场景脚本拉进来，
+	#    而场景脚本引用了 autoload（Sfx/Feel/Tel），会污染无关脚本的编译。
+	var src: GDScript = load("res://view/raid_scene.gd")
+	_check(src != null, "能载入 raid_scene.gd")
+	var cap: int = int(src.get("MAX_TEST_ENEMIES"))
+	_check(cap <= 4, "测试模式敌人上限 %d <= 4" % cap)
+	_check(cap >= 2, "至少能放 2 种敌人（实际 %d）" % cap)
+	var text := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	_check(text.contains("agents.size() >= MAX_TEST_ENEMIES"), "刷怪循环里确实做了钳制")
+	_check(text.contains("MAX_TEST_ENEMIES > 0"), "关掉测试模式能回到正式刷怪")
+

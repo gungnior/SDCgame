@@ -24,6 +24,10 @@ const NOISE_QUIET := 7.0       ## 走路的响度
 ## 曳光存活时间。
 ## ⚠️ 早先只有 0.06s（约 3.6 帧），安卓真机反馈"开火只听到声音看不到子弹"。
 const TRACER_TTL := 0.13
+## 技术验证阶段：敌人数量上限（真机反馈 #2）
+## 现阶段要的是验证技术，不是打怪。每种敌人各 1 个、总数不超过 4 个足够暴露问题。
+## 调成 0 表示不限制（恢复正式刷怪）。
+const MAX_TEST_ENEMIES := 4
 ## 开局宽限期（秒）：这段时间内敌人不索敌。
 ## 实测：没有它时玩家 3.3 秒就死、0 击杀（安卓真机遥测）。
 ## 这不是"降低难度"，而是给玩家看懂地形与局势的时间 —— 搜打撤的前提是"能观察"。
@@ -176,16 +180,31 @@ func _setup_sim() -> void:
 	player_pos = Ballistics.cell_center(spawn.center)
 	raid.hp = vitals.hp
 
+	# ── 起始配装 ──
+	# ⚠️ 真机反馈 #3："按治疗按钮没反应"。查明原因：按钮是好的，
+	#    但 `_setup_sim` 从来没给玩家发过任何物品，背包是空的（0/12 槽），
+	#    所以找不到任何药。这里补上最小可用的起始配装。
+	raid.carry.add("medical_bandage", 2)
+	raid.carry.add("medical_kit", 1)
+	raid.carry.add("ammo_rifle", 90)
+	print("[配装] %s" % raid.carry.summary())
+
 	# 敌人
 	squad = Squad.new(1)
 	var scav := reg.get_enemy("enemy_scav")
 	var infected := reg.get_enemy("enemy_infected")
 	var eid := 0
-	for r in gen.graph.rooms:
-		if r.room_type == "spawn":
-			continue
-		for i in r.enemy_budget:
-			var d: EnemyDef = scav if (i % 2 == 0) else infected
+	# ── 技术验证模式：敌人数量被钳制（真机反馈 #2）──
+	# 现在要的是"验证技术"，不是"打怪"。每种敌人各放 1 个、总数 <= MAX_TEST_ENEMIES。
+	# 放不下那么多房间时按房间顺序取前几个，保证换地图时也有敌人可观察。
+	if MAX_TEST_ENEMIES > 0:
+		var kinds: Array[EnemyDef] = [scav, infected]
+		for r in gen.graph.rooms:
+			if agents.size() >= MAX_TEST_ENEMIES:
+				break
+			if r.room_type == "spawn":
+				continue
+			var d: EnemyDef = kinds[eid % kinds.size()]
 			var a := EnemyAgent.new(eid, d, Ballistics.cell_center(r.center))
 			if d.is_ranged():
 				a.equip(reg.get_weapon("weapon_pistol"), 60)
@@ -193,8 +212,22 @@ func _setup_sim() -> void:
 			squad.add_member(a)
 			agents.append(a)
 			eid += 1
+	else:
+		for r in gen.graph.rooms:
+			if r.room_type == "spawn":
+				continue
+			for i in r.enemy_budget:
+				var d2: EnemyDef = scav if (i % 2 == 0) else infected
+				var a2 := EnemyAgent.new(eid, d2, Ballistics.cell_center(r.center))
+				if d2.is_ranged():
+					a2.equip(reg.get_weapon("weapon_pistol"), 60)
+				a2.facing = Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized()
+				squad.add_member(a2)
+				agents.append(a2)
+				eid += 1
 	print("[地图] %s" % gen.summary())
-	print("[敌方] %d 名" % agents.size())
+	print("[敌方] %d 名%s" % [agents.size(),
+		"（技术验证模式，上限 %d）" % MAX_TEST_ENEMIES if MAX_TEST_ENEMIES > 0 else ""])
 
 
 func _setup_view() -> void:
@@ -235,6 +268,17 @@ func _setup_view() -> void:
 	view_label.add_theme_font_size_override("font_size", fs - 2)
 	view_label.add_theme_color_override("font_color", Color(0.75, 0.80, 0.88))
 	hud.add_child(view_label)
+
+	# 短提示（手机上唯一的即时反馈渠道 —— 例如"没有医疗物品"）
+	_toast_label = Label.new()
+	_toast_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_toast_label.position = Vector2(-160, 56)
+	_toast_label.size = Vector2(320, 24)
+	_toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_toast_label.add_theme_font_size_override("font_size", fs)
+	_toast_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.45))
+	_toast_label.visible = false
+	hud.add_child(_toast_label)
 
 	_load_tiles()
 	_build_map_texture()
@@ -317,96 +361,17 @@ func _build_map_texture() -> void:
 
 # ─────────── 白模（技术验证阶段的默认渲染）───────────
 #
-# ⚠️ 为什么默认用白模（安卓真机反馈 + 用户建议）：
-#   带了美术 tile 之后，墙和地板都是暗灰，玩家**看不出哪能走**。
-#   技术验证阶段要的是"能读懂"，不是"好看"。
-#   白模的语义极简单：**亮 = 可走，暗 + 描边 = 阻挡**。
-#   美术资源留着，`render_mode` 一改就切回来（frameworks 已就位）。
-const WB_FLOOR := Color(0.42, 0.46, 0.52)        ## 可走：亮
-const WB_CORRIDOR := Color(0.34, 0.37, 0.42)     ## 走廊：略暗一档
-const WB_WALL := Color(0.07, 0.08, 0.10)         ## 阻挡：近黑
-const WB_WALL_EDGE := Color(0.62, 0.68, 0.78)    ## 墙的描边：亮，一眼可辨
-const WB_DOOR := Color(0.82, 0.68, 0.24)
-const WB_GRID := Color(1, 1, 1, 0.035)           ## 格子网格：几乎不可见但帮助判距
-const WB_SPAWN_TINT := Color(0.20, 0.85, 0.42)
-const WB_EXTRACT_TINT := Color(1.0, 0.72, 0.20)
+# ⚠️ 绘制已抽到 view/whitebox_painter.gd —— 它是纯函数，可以像素级单测。
+#    真机反馈黑墙能穿过、绿线挡路就是因为当初这段逻辑长在场景里、测不到。
+const WB_FLOOR := WhiteboxPainter.WB_FLOOR
+const WB_WALL := WhiteboxPainter.WB_WALL
+const WB_WALL_EDGE := WhiteboxPainter.WB_WALL_EDGE
 
 
 func _build_whitebox(img: Image) -> void:
-	var g := gen.grid
-	var n := LogicalGrid.CELL_SIZE_TILES
-
-	# ① 铺底：按格子类型刷平色
-	for cy in g.height:
-		for cx in g.width:
-			var cell := Vector2i(cx, cy)
-			var v := g.get_cell(cell)
-			var col := WB_WALL
-			if v == LogicalGrid.Cell.FLOOR:
-				col = WB_FLOOR
-			elif v == LogicalGrid.Cell.CORRIDOR:
-				col = WB_CORRIDOR
-			elif v == LogicalGrid.Cell.DOOR:
-				col = WB_DOOR
-			var o := g.cell_to_tile_origin(cell)
-			for ty in n:
-				for tx in n:
-					img.set_pixel(o.x + tx, o.y + ty, col)
-
-	# ② 墙的描边：只画【朝向可走格】的那一侧（内部不画线，读起来才干净）
-	var dirs: Array[Vector2i] = [
-		Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
-	for cy in g.height:
-		for cx in g.width:
-			var cell := Vector2i(cx, cy)
-			if g.is_walkable(cell):
-				continue
-			var o := g.cell_to_tile_origin(cell)
-			for d in dirs:
-				if g.is_walkable(cell + d):
-					_draw_seam(img, o, d, n, WB_WALL_EDGE, 0, 1)
-
-	# ③ 房间轮廓 + 类型着色
-	for r in gen.graph.rooms:
-		var tint := Color(1, 1, 1, 0.16)
-		if r.room_type == "spawn":
-			tint = WB_SPAWN_TINT
-		elif r.room_type == "extract":
-			tint = WB_EXTRACT_TINT
-		_outline_rect(img, r.rect, n, tint)
-
-	# ④ 每个逻辑格画一条极淡的网格线，帮助判断距离
-	for cy in g.height:
-		for cx in g.width:
-			var o := g.cell_to_tile_origin(Vector2i(cx, cy))
-			for i in n:
-				_blend_px(img, o.x + i, o.y, WB_GRID)
-				_blend_px(img, o.x, o.y + i, WB_GRID)
-
-
-## 在逻辑格级别给矩形描边（cell 坐标 -> tile 坐标）
-func _outline_rect(img: Image, rect: Rect2i, n: int, col: Color) -> void:
-	var x0 := rect.position.x * n
-	var y0 := rect.position.y * n
-	var x1 := (rect.position.x + rect.size.x) * n - 1
-	var y1 := (rect.position.y + rect.size.y) * n - 1
-	var iw := img.get_width()
-	var ih := img.get_height()
-	for x in range(x0, x1 + 1):
-		_blend_px(img, x, y0, col)
-		_blend_px(img, x, y1, col)
-	for y in range(y0, y1 + 1):
-		_blend_px(img, x0, y, col)
-		_blend_px(img, x1, y, col)
-
-
-func _blend_px(img: Image, x: int, y: int, col: Color) -> void:
-	if x < 0 or y < 0 or x >= img.get_width() or y >= img.get_height():
-		return
-	if col.a >= 1.0:
-		img.set_pixel(x, y, col)
-	else:
-		img.set_pixel(x, y, img.get_pixel(x, y).lerp(col, col.a))
+	var painted := WhiteboxPainter.paint(gen.grid, gen.graph.rooms)
+	# 直接拷贝像素（尺寸一致，都是 tile_extents）
+	img.blit_rect(painted, Rect2i(Vector2i.ZERO, painted.get_size()), Vector2i.ZERO)
 
 
 ## 美术 tile 版（render_mode == RENDER_ART 时用）
@@ -999,14 +964,47 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func _try_heal() -> void:
 	if medical.is_treating():
 		medical.cancel()
+		_toast("已中断治疗")
 		return
+	if vitals.dead:
+		return
+	# 按优先级找一种能用的药
+	var last_err := ""
+	var found_any := false
 	for med_id in ["medical_kit", "medical_bandage", "medical_painkiller"]:
-		if raid.carry.has_item(med_id):
-			var err := medical.start(reg.get_item(med_id), vitals)
-			if err == "":
-				raid.carry.remove(med_id, 1)
-				return
-	push_warning("没有可用的医疗物品")
+		if not raid.carry.has_item(med_id):
+			continue
+		found_any = true
+		var err := medical.start(reg.get_item(med_id), vitals)
+		if err == "":
+			raid.carry.remove(med_id, 1)
+			_toast("开始治疗 · %s" % med_id)
+			if Sfx != null:
+				Sfx.play("reload_start")
+			return
+		last_err = err
+	# ── 失败必须有【看得见】的反馈 ──
+	# 真机反馈 #3："按治疗按钮没反应"。查明原因是背包里根本没有药，
+	# 而失败只调了 push_warning —— 手机上完全看不见，所以表现为"按钮坏了"。
+	if not found_any:
+		_toast("没有医疗物品")
+	else:
+		_toast("用不了：%s" % last_err)
+	if Sfx != null:
+		Sfx.play("ui_deny")
+
+
+## HUD 短提示（2 秒）。手机上唯一的即时反馈渠道。
+var _toast_text := ""
+var _toast_until := 0.0
+var _toast_label: Label = null
+
+
+func _toast(msg: String, seconds: float = 2.0) -> void:
+	_toast_text = msg
+	_toast_until = _time + seconds
+	if Tel != null:
+		Tel.emit("toast", {"msg": msg})
 
 
 func _restart() -> void:
@@ -1233,7 +1231,16 @@ func _update_hud() -> void:
 	#    Godot 里给 Label.text 赋值（哪怕值相同）也会触发 update_minimum_size -> 布局重算，
 	#    每帧都设是移动端常见的隐形开销（真机"自动开火卡顿"的次要来源）。
 	_set_label(hud_label, "\n".join(lines), "_cache_hud")
-	_set_label(view_label, "[视图] %s" % dbg[debug_mode], "_cache_view")
+	_set_label(view_label, "[视图] %s%s" % [dbg[debug_mode],
+		"  ·  白模 F5 切换" if render_mode == RENDER_WHITEBOX else "  ·  美术 F5 切换"], "_cache_view")
+
+	# 短提示
+	if _toast_label != null:
+		var show := _time < _toast_until
+		if _toast_label.visible != show:
+			_toast_label.visible = show
+		if show:
+			_set_label(_toast_label, _toast_text, "_cache_toast")
 	# ⚠️ 提示必须按平台给（真机反馈：安卓上显示的是 WASD/J/K/L 键盘键位）
 	var hint := ("左摇杆移动 · 右摇杆瞄准 · ◉ 开火 · ⟳ 换弹 · ✚ 治疗"
 		if _is_touch
@@ -1244,9 +1251,12 @@ func _update_hud() -> void:
 var _cache_hud := ""
 var _cache_view := ""
 var _cache_hint := ""
+var _cache_toast := ""
 
 
 func _set_label(l: Label, txt: String, cache_key: String) -> void:
+	if l == null:
+		return
 	if get(cache_key) == txt:
 		return
 	set(cache_key, txt)
