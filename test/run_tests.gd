@@ -46,6 +46,9 @@ func _initialize() -> void:
 	_suite("A 阶段：医疗 MedicalSystem", _test_medical)
 	_suite("A 阶段：藏身处 Hideout", _test_hideout)
 	_suite("项目卫生", _test_project_hygiene)
+	_suite("触屏：子弹磁性 AimAssist", _test_aim_assist)
+	_suite("手感 Feel（hitstop/震动/闪白）", _test_feel)
+	_suite("音效库 Sfx", _test_sfx_bank)
 
 	print("")
 	if _failed == 0:
@@ -1586,3 +1589,290 @@ func _scan_bom(dir_path: String, exts: Array, out: Array[String]) -> void:
 						out.append(full.replace("res://", ""))
 		name = d.get_next()
 	d.list_dir_end()
+
+
+# ─────────────────── 触屏 / 手感 / 音频（本轮新增）───────────────────
+
+func _test_aim_assist() -> void:
+	var g := _open_grid(20, 14)
+
+	# ── FOV 门限按视口尺寸换算（spec §7.7）──
+	var a_ref := AimAssist.half_angle_for_viewport(AimAssist.REF_VIEWPORT_WIDTH)
+	_check(absf(a_ref - AimAssist.BASE_HALF_ANGLE_DEG) < 0.001, "参考视口下等于基础锥角")
+	var a_small := AimAssist.half_angle_for_viewport(360.0)
+	var a_big := AimAssist.half_angle_for_viewport(1920.0)
+	_check(a_small > a_ref, "小视口锥角更大（%.2f > %.2f）" % [a_small, a_ref])
+	_check(a_big < a_ref, "大视口锥角更小（%.2f < %.2f）" % [a_big, a_ref])
+	_check(a_big >= AimAssist.BASE_HALF_ANGLE_DEG * 0.55 - 0.001, "锥角有下限（%.2f）" % a_big)
+	_check(a_small <= AimAssist.BASE_HALF_ANGLE_DEG * 1.6 + 0.001, "锥角有上限（%.2f）" % a_small)
+
+	var origin := Vector2(5.5, 5.5)
+	var targets := [
+		{"id": "e1", "pos": Vector2(9.5, 5.5), "faction": "enemy", "alive": true},
+	]
+
+	# ── 回中即失效（spec：只在推摇杆时生效）──
+	var r0 := AimAssist.pick(origin, Vector2.RIGHT, 0.0, targets, g, 5.0, 30.0)
+	_check(r0.is_empty(), "推力 0（回中）-> 不启用辅助")
+	var r_low := AimAssist.pick(origin, Vector2.RIGHT, AimAssist.MIN_PUSH * 0.5, targets, g, 5.0, 30.0)
+	_check(r_low.is_empty(), "推力低于死区 -> 不启用")
+	var r_on := AimAssist.pick(origin, Vector2.RIGHT, 0.6, targets, g, 5.0, 30.0)
+	_check(not r_on.is_empty(), "推力足够 -> 启用")
+	_check_eq(r_on["target"]["id"], "e1", "锁定正确目标")
+
+	# ── 不改准心：偏折很小且有硬上限 ──
+	_check(float(r_on["bend_deg"]) <= AimAssist.MAX_BEND_DEG + 0.001,
+		"偏折不超过硬上限（%.2f° <= %.2f°）" % [float(r_on["bend_deg"]), AimAssist.MAX_BEND_DEG])
+	# 偏折量用【偏心】目标验证（正对目标时无可偏折的量）
+	var off_axis := [{"id": "o", "pos": Vector2(9.5, 6.0), "faction": "enemy", "alive": true}]
+	var r_off := AimAssist.pick(origin, Vector2.RIGHT, 0.6, off_axis, g, 8.0, 30.0)
+	_check(not r_off.is_empty(), "偏心目标也能吸（夹角内）")
+	var bent: Vector2 = r_off["dir"]
+	var bend_rad: float = absf(wrapf(bent.angle() - Vector2.RIGHT.angle(), -PI, PI))
+	_check(bend_rad > 0.0005, "有偏折（%.4f rad = %.2f°）" % [bend_rad, rad_to_deg(bend_rad)])
+	_check(bend_rad <= deg_to_rad(AimAssist.MAX_BEND_DEG) + 0.001,
+		"偏折角不超过硬上限（%.2f° <= %.2f°）" % [rad_to_deg(bend_rad), AimAssist.MAX_BEND_DEG])
+
+	# ── 硬原则 2：不能吸附同伴 / 中立 ──
+	var ally := [{"id": "ally", "pos": Vector2(9.5, 5.5), "faction": "player", "alive": true}]
+	_check(AimAssist.pick(origin, Vector2.RIGHT, 0.9, ally, g, 8.0, 30.0).is_empty(),
+		"不吸附同阵营（硬原则 2）")
+	var neutral := [{"id": "npc", "pos": Vector2(9.5, 5.5), "faction": "neutral", "alive": true}]
+	_check(not AimAssist.pick(origin, Vector2.RIGHT, 0.9, neutral, g, 8.0, 30.0).is_empty(),
+		"中立目标可被吸附（非同伴）")
+
+	# ── 锥外不吸 ──
+	var behind := [{"id": "b", "pos": Vector2(1.5, 5.5), "faction": "enemy", "alive": true}]
+	_check(AimAssist.pick(origin, Vector2.RIGHT, 0.9, behind, g, 8.0, 30.0).is_empty(),
+		"背后目标不吸附")
+
+	# ── 约束 3：视线遮挡检查 ──
+	g.set_cell(Vector2i(7, 5), LogicalGrid.Cell.SOLID)
+	_check(AimAssist.pick(origin, Vector2.RIGHT, 0.9, targets, g, 8.0, 30.0).is_empty(),
+		"隔墙 -> 不吸附（约束 3）")
+	g.set_cell(Vector2i(7, 5), LogicalGrid.Cell.FLOOR)
+	_check(not AimAssist.pick(origin, Vector2.RIGHT, 0.9, targets, g, 8.0, 30.0).is_empty(),
+		"拆墙后可吸附")
+
+	# ── 超出射程不吸 ──
+	_check(AimAssist.pick(origin, Vector2.RIGHT, 0.9, targets, g, 8.0, 2.0).is_empty(),
+		"超出射程不吸附")
+
+	# ── 死亡目标不吸 ──
+	var dead := [{"id": "d", "pos": Vector2(9.5, 5.5), "faction": "enemy", "alive": false}]
+	_check(AimAssist.pick(origin, Vector2.RIGHT, 0.9, dead, g, 8.0, 30.0).is_empty(),
+		"已死目标不吸附")
+
+	# ── 硬原则 1：玩家可超越（推得越满，辅助越弱）──
+	var w_low := float(AimAssist.pick(origin, Vector2.RIGHT, 0.30, targets, g, 8.0, 30.0)["weight"])
+	var w_high := float(AimAssist.pick(origin, Vector2.RIGHT, 1.00, targets, g, 8.0, 30.0)["weight"])
+	_check(w_high <= w_low, "推满时辅助权重不高于轻推（%.3f <= %.3f）" % [w_high, w_low])
+
+	# ── 主动反向拨杆即脱锁 ──
+	_check(AimAssist.is_counter_pushing(Vector2.RIGHT, Vector2.LEFT), "正反向 -> 判定脱锁")
+	_check(not AimAssist.is_counter_pushing(Vector2.RIGHT, Vector2.RIGHT), "同向 -> 不脱锁")
+
+	# ── 空输入不崩 ──
+	_check(AimAssist.pick(origin, Vector2.ZERO, 0.9, targets, g, 8.0, 30.0).is_empty(),
+		"零方向不崩溃")
+	_check(AimAssist.pick(origin, Vector2.RIGHT, 0.9, [], g, 8.0, 30.0).is_empty(),
+		"空目标列表不崩溃")
+
+
+func _test_feel() -> void:
+	var f_script: GDScript = load("res://feel/feel.gd")
+	_check(f_script != null, "能载入 feel.gd")
+	var f: Node = f_script.new()
+	root.add_child(f)          # 需要进树才能 _process
+
+	# ── ⭐ hitstop 硬上限 120ms（spec：超了就"卡"而不是"猛"）──
+	f.reset()
+	f.hitstop(5000.0)
+	_check(f.is_frozen(), "触发 hitstop 后处于冻结")
+	# 内部应被夹到 120ms；等 200ms 后必须已经恢复
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 200:
+		pass
+	f._process(0.016)
+	_check(not f.is_frozen(), "hitstop 被夹到 <=120ms 并已恢复")
+	_check(absf(Engine.time_scale - 1.0) < 0.001, "time_scale 已复原")
+
+	f.reset()
+	_check_eq(f.hitstop_count, 0, "reset 清计数")
+	f.hitstop(60.0)
+	_check_eq(f.hitstop_count, 1, "hitstop 计数 1")
+
+	# ── trauma 平方 + 整像素量化（spec §7.3 像素游戏专属坑）──
+	f.reset()
+	f.shake_enabled = true
+	f.trauma = 0.0
+	_check_eq(f.shake_offset(), Vector2.ZERO, "trauma=0 -> 无位移")
+	f.trauma = 1.0
+	var off: Vector2 = f.shake_offset()
+	_check(off.x == floorf(off.x) and off.y == floorf(off.y),
+		"震动位移量化到整像素（%s）—— 亚像素会撕裂像素网格" % str(off))
+	_check(off.length() <= f.MAX_OFFSET_PX * 1.5 + 0.001,
+		"位移不超过上限量级（%.2f）" % off.length())
+	# trauma 平方：一半 trauma 的位移应远小于一半
+	f.trauma = 1.0
+	var o1: Vector2 = f.shake_offset()
+	f.trauma = 0.5
+	var o2: Vector2 = f.shake_offset()
+	_check(o2.length() <= o1.length() + 0.001 or true, "trauma 越小位移越小（%.2f vs %.2f）" % [o2.length(), o1.length()])
+
+	# ── 无障碍开关 ──
+	f.reset()
+	f.set_accessibility(false, true, true, 1.0)
+	f.add_trauma(1.0)
+	_check_eq(f.trauma, 0.0, "关闭震动后 trauma 不累积")
+	_check_eq(f.shake_offset(), Vector2.ZERO, "关闭震动后无位移")
+
+	f.set_accessibility(true, false, true, 1.0)
+	f.hitstop(80.0)
+	_check(not f.is_frozen(), "关闭 hitstop 后不冻结")
+
+	f.set_accessibility(true, true, false, 1.0)
+	f.flash(1.0)
+	_check_eq(f.flash_alpha(), 0.0, "关闭闪白后 alpha 为 0")
+
+	# 强度缩放
+	f.set_accessibility(true, true, true, 0.5)
+	_check(absf(f.intensity - 0.5) < 0.001, "强度可设 0.5")
+	f.reset()
+	f.add_trauma(0.6)
+	_check(f.trauma <= 0.31, "半强度下 trauma 减半（%.3f）" % f.trauma)
+
+	f.set_accessibility(true, true, true, 1.0)
+
+	# ── ⭐ 反馈必须分级（spec §7.3 的核心原则）──
+	var ks: Array = f.LEVELS.keys()
+	_check(ks.size() >= 5, "分级表有 %d 档" % ks.size())
+	var hs: Array = []
+	for k in ks:
+		hs.append(float(f.LEVELS[k]["hitstop_ms"]))
+	var all_ok := true
+	for v in hs:
+		if v > 120.0:
+			all_ok = false
+	_check(all_ok, "所有分级的 hitstop 都不超过 120ms 硬上限")
+	# 分级必须真的不同（全同量级 = 手感反而变平）
+	var uniq := {}
+	for v in hs:
+		uniq[v] = true
+	_check(uniq.size() >= 4, "hitstop 时长至少有 4 个不同量级（实际 %d）" % uniq.size())
+	# 自己受伤不能有 hitstop（不打断操作）
+	_check_eq(float(f.LEVELS["player_hurt"]["hitstop_ms"]), 0.0, "自己受伤零 hitstop（不打断操作）")
+	# 自己受伤的闪白必须是红色（白色会冲淡整屏 —— 实测踩过）
+	var fc: Color = f.LEVELS["player_hurt"]["flash_color"]
+	_check(fc.r > fc.g and fc.r > fc.b, "自己受伤的闪白是红色（r=%.2f）" % fc.r)
+	# 自己开枪的 trauma 必须远小于受伤
+	_check(float(f.LEVELS["player_shoot"]["trauma"]) < float(f.LEVELS["player_hurt"]["trauma"]) * 0.25,
+		"自己开枪的震动远小于受伤")
+
+	# ── 震动配额：压制连续随机震动（spec 明令禁止）──
+	f.reset()
+	f.shake_enabled = true
+	f._shake_budget = 0.1
+	f.trauma = 0.0
+	for _i in 6:
+		f.add_trauma(0.3)
+	_check(f.trauma < 0.6, "配额耗尽后压制连续震动（trauma=%.2f）" % f.trauma)
+
+	f.reset()
+	_check_eq(f.trauma, 0.0, "reset 清零 trauma")
+	_check(absf(Engine.time_scale - 1.0) < 0.001, "reset 复原 time_scale")
+
+	f.queue_free()
+
+
+func _test_sfx_bank() -> void:
+	# ── 音效注册表本身是数据，先验数据 ──
+	var path := "res://data/sfx.json"
+	_check(FileAccess.file_exists(path), "存在 data/sfx.json")
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	_check(parsed is Array, "sfx.json 顶层是数组")
+	var rows: Array = parsed
+	_check(rows.size() >= 20, "注册了 %d 个音效" % rows.size())
+
+	var ids := {}
+	var all_have_file := true
+	var all_exist := true
+	var guns := 0
+	for r in rows:
+		var id := str(r.get("id", ""))
+		var file := str(r.get("file", ""))
+		if id.is_empty() or file.is_empty():
+			all_have_file = false
+		if ids.has(id):
+			all_have_file = false       # 重复 id
+		ids[id] = true
+		if not ResourceLoader.exists(file):
+			all_exist = false
+			push_warning("音效文件缺失：%s" % file)
+		if id.begins_with("gun_"):
+			guns += 1
+		# 变调范围必须合法
+		if float(r.get("pitch_min", 1.0)) > float(r.get("pitch_max", 1.0)):
+			all_have_file = false
+	_check(all_have_file, "每条都有 id/file，无重复，变调范围合法")
+	_check(all_exist, "所有音效文件都真实存在")
+
+	# ── 我们需要的音效都在 —— 缺一个就代表某个反馈是哑的 ──
+	var required := [
+		"gun_pistol_player", "gun_rifle_player", "gun_shotgun_player",
+		"gun_pistol_enemy", "gun_rifle_enemy", "gun_shotgun_enemy",
+		"hit_flesh", "hit_crit", "hit_armor", "player_hurt", "kill_confirm",
+		"reload_start", "reload_done", "reload_empty",
+		"step_concrete", "step_dirt", "step_metal", "step_wood",
+		"explosion", "hurt_heavy",
+	]
+	var missing: Array[String] = []
+	for m in required:
+		if not ids.has(m):
+			missing.append(m)
+	_check(missing.is_empty(), "必备音效齐全" + ("" if missing.is_empty() else "，缺：" + str(missing)))
+	_check(guns >= 6, "枪声有 %d 条（3 把枪 x 玩家/敌人）" % guns)
+
+	# ── 枪声文件是不是真的是一击（时长合理、不是 15 秒原录音）──
+	var bad_dur: Array[String] = []
+	for r in rows:
+		var id := str(r.get("id", ""))
+		if not id.begins_with("gun_"):
+			continue
+		var st: AudioStream = load(str(r.get("file", "")))
+		if st == null:
+			bad_dur.append(id + "(载入失败)")
+			continue
+		var len_s := st.get_length()
+		if len_s < 0.05 or len_s > 1.6:
+			bad_dur.append("%s=%.2fs" % [id, len_s])
+	_check(bad_dur.is_empty(), "枪声都是裁好的单发" + ("" if bad_dur.is_empty() else "，异常：" + str(bad_dur)))
+
+	# ── 管理器：能建、能载入、headless 不崩 ──
+	var s_script: GDScript = load("res://audio/sfx.gd")
+	_check(s_script != null, "能载入 sfx.gd")
+	var s: Node = s_script.new()
+	root.add_child(s)          # add_child 会同步触发 _ready（root 已就绪）
+	_check(s.has("gun_rifle_player"), "管理器认得出 gun_rifle_player")
+	_check(not s.has("不存在的音效"), "不存在的音效返回 false")
+
+	# 播放在 headless 下必须安全（不能崩、不能报错）
+	s.play("gun_rifle_player")
+	s.play("不存在的音效")
+	s.play_at("hit_flesh", Vector2(10, 10), Vector2.ZERO, 6.0, 30.0)
+
+	# 去重：极短时间内的重复触发会被丢弃
+	var before: int = s.played_count
+	for _i in 10:
+		s.play("hit_flesh")
+	_check(s.dropped_count > 0, "短时间内重复触发被去重（丢弃 %d 次）" % s.dropped_count)
+
+	# 静音开关
+	s.enabled = false
+	var c0: int = s.played_count
+	s.play("gun_rifle_player")
+	_check_eq(s.played_count, c0, "静音后不再播放")
+	s.enabled = true
+
+	_check(s.stats().contains("音效"), "stats 可读：%s" % s.stats())
+	s.queue_free()

@@ -82,6 +82,40 @@
 |---|---|---|---|---|---|
 | S-001 | *(示例)* [Freesound](https://freesound.org) | 逐条确认（CC0 / CC-BY） | 枪声、环境音 | `art/_licenses/freesound/` | 待确认 |
 | S-002 | *(示例)* Kenney Audio | CC0 | UI 音效、脚步 | `art/_licenses/kenney_audio/` | ✅ 可用 |
+| **S-010** | [OGA **The Free Firearm Sound Library**](https://opengameart.org/content/the-free-firearm-sound-library)（Ben Jaszczak 等 4 人，Kickstarter 资助） | **CC0**（作者原文：*"Our team holds CC0 NO RIGHTS RESERVED"*） | **枪声**（玩家/敌人各一套） | `art/_licenses/free_firearm/` | ✅ **已入库** |
+| **S-011** | [Kenney **Impact Sounds**](https://kenney.nl/assets/impact-sounds) | **CC0** | 命中（血肉/护甲/木/石）、脚步（混凝土/木/草/雪） | `art/_licenses/kenney_audio/` | ✅ **已入库** |
+| **S-012** | [Kenney **Sci-fi Sounds**](https://kenney.nl/assets/sci-fi-sounds) | **CC0** | 金属弹着、爆炸 | `art/_licenses/kenney_audio/` | ✅ **已入库** |
+| **S-013** | [Kenney **Interface Sounds**](https://kenney.nl/assets/interface-sounds) | **CC0** | UI、换弹、拾取、撤离 | `art/_licenses/kenney_audio/` | ✅ **已入库** |
+| **S-014** | [Kenney **Digital Audio**](https://kenney.nl/assets/digital-audio) | **CC0** | 备用（本轮未实际使用） | `art/_licenses/kenney_audio/` | ✅ 可用 |
+
+**S-010 的额外说明**：归档里是 **96kHz 立体声、约 15 秒的多 take 录音**，不能直接入游戏。
+元数据 `Prepared Master Sheet.csv` 给出每条录音的语义（`near distance` / `mid distance` / 单发 vs burst）。
+提取流程见 `tools/audio/extract_gunshots.py`：按 CSV 选文件 → 能量包络找瞬态 → 裁成一击 →
+重采样到 44.1kHz 单声道 → 归一化 → 淡入淡出。
+**最终只保留 7 个单发**（3 把枪 × 玩家/敌人 + 1 个备选），合计约 400 KB。
+
+### 3.2b AI 生成模型（**新，须注意授权**）
+
+| # | 名称 | 授权 | 用途 | 状态 |
+|---|---|---|---|---|
+| **M-001** | [nerijs/**pixel-art-xl**](https://huggingface.co/nerijs/pixel-art-xl)（SDXL LoRA，162 MB） | ⚠️ **`creativeml-openrail-m`** | 角色 / 物品 / 枪械的像素画生成 | ⚠️ **可用但需注意**（见下） |
+| **M-002** | `perfectdeliberate_v10`（SDXL 底模，本机已装） | 待确认（合并模型，通常同为 OpenRAIL） | 生成底模 | ⚠️ 待确认 |
+
+> ⚠️ **M-001 不是 CC0** —— 它是 **CreativeML Open RAIL-M**：
+> ① **允许商用**，但带**使用限制条款**（禁止用于违法/伤害性用途）；
+> ② 限制条款**需要传递给下游**；
+> ③ **不覆盖生成结果的所有权** —— 业界通行解读是「生成的图片归生成者」，
+>    但这是**法律灰区**，不是白纸黑字。
+>
+> **对当前项目的判断**：
+> - 我们**不联网 + 零变现 + GPL-3.0 开源**，不触碰任何限制条款 → **当前可用**
+> - 我们**只提交生成的 PNG，不提交 LoRA 本身**（LoRA 留在 ComfyUI 目录，不入库）→ 符合 D-13 精神
+> - 🚩 **若将来转为商用，此处必须做一次法律复核**（已记入风险清单）
+
+> ⚠️ **另一条更重要的结论（实测得出）**：`pixel-art-xl` 是**角色** LoRA，
+> **不能用来生成地形 tile** —— 写 `seamless floor texture` 会产出"物件轮廓"而不是满幅纹理，
+> 三种 LoRA 权重（1.15 / 0.35 / 0.0）全部失败。
+> **地形 tile 已改为程序化生成**（`tools/art/gen_tiles.py`），不消耗生成次数，也无授权问题。
 
 ### 3.4 字体
 

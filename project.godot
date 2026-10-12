@@ -56,3 +56,8 @@ pointing/emulate_mouse_from_touch=true
 ; 不开这一项，中文换行/分词会不正确。代价：包体约 +4 MB。
 ; 验证：test/run_tests.gd 的「CJK 字体与中文断行」套件。
 locale/include_text_server_data=true
+[autoload]
+
+; 手感与音频总线（specs/tech-stack.md §7.3）
+Sfx="*res://audio/sfx.gd"
+Feel="*res://feel/feel.gd"

@@ -70,6 +70,15 @@ var hint_label: Label
 var view_label: Label
 var debug_mode := 0              ## 0 普通 1 流向场 2 房间图 3 声音范围
 
+# ─── 手感 / 音频 / 触屏（specs/tech-stack.md §2 与 §7.3）───
+var fx: FxPool = null            ## CPUParticles2D 池（T-03）
+var touch: TouchControls = null  ## 双摇杆 + 动作按钮
+var flash_rect: ColorRect = null ## 受击闪白覆盖层
+var _prev_shots: Dictionary = {} ## agent.id -> 已开火数（用于播放枪声）
+var _step_accum := 0.0
+var _last_hint_shown := false
+var _hitstop_events := 0         ## 本局触发过几次 hitstop（调试）
+
 var _rng := SimRng.new(20261012)
 var _time := 0.0
 
@@ -186,6 +195,36 @@ func _setup_view() -> void:
 
 	_load_tiles()
 	_build_map_texture()
+	_setup_feel_and_touch()
+
+
+## 手感 / 音频 / 触屏的挂载点
+func _setup_feel_and_touch() -> void:
+	# ── 粒子池（CPUParticles2D，T-03）──
+	fx = FxPool.new()
+	add_child(fx)
+
+	# ── 受击闪白覆盖层（放在 HUD 之下、世界之上）──
+	flash_rect = ColorRect.new()
+	flash_rect.color = Color(0, 0, 0, 0)
+	flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	flash_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var flash_layer := CanvasLayer.new()
+	flash_layer.layer = 50          # HUD(layer 默认 1) 之上
+	flash_layer.add_child(flash_rect)
+	add_child(flash_layer)
+
+	# ── 触屏控件（即使桌面也建出来，方便用鼠标验证布局）──
+	touch = TouchControls.new()
+	var ui_layer := CanvasLayer.new()
+	ui_layer.layer = 10
+	ui_layer.add_child(touch)
+	add_child(ui_layer)
+	touch.reload_pressed.connect(func():
+		player_weapon.start_reload()
+		if Sfx != null:
+			Sfx.play("reload_start"))
+	touch.heal_pressed.connect(_try_heal)
 
 
 ## 载入程序化生成的 16x16 tile（art/tiles/，由 tools/art/gen_tiles.py 产出）
@@ -338,7 +377,20 @@ func _process(delta: float) -> void:
 
 	_update_camera()
 	_update_hud()
+	_update_flash()
 	queue_redraw()
+
+
+## 受击闪白 —— ★★★★ 项（spec §7.3）
+func _update_flash() -> void:
+	if flash_rect == null or Feel == null:
+		return
+	var a := Feel.flash_alpha()
+	if a <= 0.001:
+		if flash_rect.color.a != 0.0:
+			flash_rect.color = Color(0, 0, 0, 0)
+		return
+	flash_rect.color = Color(Feel.flash_color(), a)
 
 
 func _tick_player(delta: float) -> void:
@@ -357,22 +409,42 @@ func _tick_player(delta: float) -> void:
 			if _walkable(try_y):
 				player_pos.y = try_y.y
 			player_facing = _move_input.normalized()
-			# 走路有脚步声
-			if fmod(_time, 0.6) < delta:
+			# 脚步：按节奏播放 + 发出声响给 AI 听觉
+			_step_accum += delta * _move_input.length()
+			var interval := 0.46 * lerpf(1.35, 1.0, clampf(vitals.speed_multiplier(raid.carry.weight_ratio()), 0.0, 1.0))
+			if _step_accum >= interval:
+				_step_accum = 0.0
 				noises.append({"pos": player_pos, "loudness_m": NOISE_QUIET})
+				if Sfx != null:
+					Sfx.play("step_%s" % _floor_material())
 	else:
 		_move_input = Vector2.ZERO
 
-	# 瞄准：优先朝最近可见敌人（T-56 子弹磁性）
-	var t := _nearest_enemy()
-	if t != null:
-		player_aim = (t.pos - player_pos).normalized()
-		if _move_input == Vector2.ZERO:
+	# ── 瞄准方向 ──
+	# ⚠️ 这里【绝不】把准心吸附到最近敌人。
+	#    T-56 明确：角度吸附容易让玩家觉得"被抢枪"；辅助只在开火时以
+	#    「子弹磁性」的形式生效（见 _try_fire 里的 AimAssist.pick）。
+	var av := Vector2.ZERO
+	if touch != null:
+		av = touch.aim_vector()
+	if av.length() > 0.14:
+		player_aim = av.normalized()
+		player_facing = player_aim
+	elif _mouse_aiming():
+		var world := get_global_mouse_position() / CELL_PX
+		var d := world - player_pos
+		if d.length() > 0.15:
+			player_aim = d.normalized()
 			player_facing = player_aim
 	elif _move_input != Vector2.ZERO:
-		player_aim = _move_input.normalized()
+		player_facing = _move_input.normalized()
 
+	# 换弹完成音（检测状态跳变）
+	var was_reloading := player_weapon.is_reloading()
 	player_weapon.tick(delta)
+	if was_reloading and not player_weapon.is_reloading():
+		if Sfx != null:
+			Sfx.play("reload_done")
 
 	# 治疗推进
 	if medical.is_treating():
@@ -392,39 +464,129 @@ func _tick_player(delta: float) -> void:
 func _try_fire() -> void:
 	if not player_weapon.can_fire():
 		if player_weapon.ammo_in_mag <= 0:
+			if Sfx != null:
+				Sfx.play("reload_empty")
 			player_weapon.start_reload()
+			if Sfx != null:
+				Sfx.play("reload_start")
 		return
 
 	player_weapon.fire()
 	# 开枪声很大
 	noises.append({"pos": player_pos, "loudness_m": NOISE_LOUD})
 
-	var dist := 30.0
-	var tgt := _nearest_enemy()
+	var w := player_weapon.def
+
+	# ── 枪械表现：音效 + 枪口火光 + 抛壳 ──
+	if Sfx != null:
+		Sfx.play("gun_%s_player" % _weapon_kind(w))
+	if fx != null:
+		fx.burst("muzzle", player_pos + player_aim * 0.34, player_aim)
+		var side := Vector2(-player_aim.y, player_aim.x)
+		fx.burst("casing", player_pos + side * 0.22 + player_aim * 0.1, side, 1.0)
+	# 自己开枪只给最轻的 kick（spec §7.3：不能每枪都大震）
+	Feel.hit("player_shoot")
+
+	# ── 子弹磁性（T-56 首选：射线加粗，**不改准心**）──
+	var push := _aim_push()
+	var half_angle := AimAssist.half_angle_for_viewport(get_viewport_rect().size.x)
+	var assist := AimAssist.pick(player_pos, player_aim, push,
+		_aim_targets(), gen.grid, half_angle, float(w.range_m))
+	var shot_dir := player_aim
+	var tgt: EnemyAgent = null
+	if not assist.is_empty():
+		shot_dir = assist["dir"]
+		tgt = assist["target"].get("agent")
+
+	var dist := float(w.range_m)
 	if tgt != null:
 		dist = player_pos.distance_to(tgt.pos)
 
-	var extra := player_weapon.current_spread_deg() - player_weapon.def.spread_deg
-	var hit := DamageModel.resolve_hit(player_weapon.def, dist, extra, _rng)
-	var acc := DamageModel.accuracy_at(player_weapon.def, dist, extra)
-
-	var shot_to := player_pos + player_aim * minf(dist, float(player_weapon.def.range_m))
+	var extra := player_weapon.current_spread_deg() - w.spread_deg
+	var acc := DamageModel.accuracy_at(w, dist, extra)
+	var shot_to := player_pos + shot_dir * minf(maxf(dist, 2.0), float(w.range_m))
 
 	if tgt != null and _rng.randf() <= clampf(0.30 + acc * 0.7, 0.05, 0.97):
 		player_weapon.mark_hit()
+		var hit := DamageModel.resolve_hit(w, dist, extra, _rng)
 		var dmg := int(hit["damage"])
+		var part := str(hit.get("part", DamageModel.PART_TORSO))
 		var died := tgt.take_damage(dmg)
 		raid.damage_dealt += dmg
+		shot_to = tgt.pos
+
+		# ── 反馈分级（spec §7.3 的核心原则）──
+		var lvl := "light"
+		if died:
+			lvl = "kill"
+		elif part == DamageModel.PART_HEAD:
+			lvl = "crit"
+		elif dmg >= int(0.28 * float(w.damage) * 2.0):
+			lvl = "heavy"
+		Feel.hit(lvl, tgt.pos, player_pos)
+		if fx != null:
+			fx.burst("blood_crit" if lvl == "crit" or lvl == "kill" else "blood",
+				tgt.pos, shot_dir)
+			if died:
+				fx.burst("kill", tgt.pos, shot_dir)
 		if died:
 			raid.register_kill()
 			_drop_loot(tgt)
 	else:
 		# 打空：子弹打到墙或射程边缘
-		var wall = Ballistics.first_blocking_cell(gen.grid, player_pos, shot_to)
+		var wall: Variant = Ballistics.first_blocking_cell(gen.grid, player_pos, shot_to)
 		if wall != null:
 			shot_to = Vector2(wall.x + 0.5, wall.y + 0.5)
+		if fx != null:
+			fx.burst("impact", shot_to, -shot_dir)
+		if Sfx != null and player_pos.distance_to(shot_to) < 34.0:
+			Sfx.play_at("hit_concrete", shot_to, player_pos, 4.0, 22.0)
 
 	bullets.append({"from": player_pos, "to": shot_to, "ttl": 0.06})
+
+
+## 武器类别 -> 音效后缀（gun_{kind}_player / _enemy）
+func _weapon_kind(w: WeaponDef) -> String:
+	var id := w.id
+	if id.contains("shotgun") or id.contains("shell"):
+		return "shotgun"
+	if id.contains("pistol"):
+		return "pistol"
+	return "rifle"
+
+
+## 桌面鼠标瞄准：只有鼠标真的在动才算（避免静止鼠标误接管朝向）
+func _mouse_aiming() -> bool:
+	if DisplayServer.is_touchscreen_available():
+		return false
+	return Input.get_last_mouse_velocity().length() > 1.0
+
+
+## 摇杆推力。桌面（键盘/鼠标）也给一个恒定值，保证辅助瞄准在桌面上可测。
+func _aim_push() -> float:
+	var p := 0.0
+	if touch != null:
+		p = touch.aim_push()
+	if p <= 0.01 and _move_input != Vector2.ZERO:
+		p = 0.45
+	return clampf(p, 0.0, 1.0)
+
+
+## 给 aim assist 的目标列表。
+## ⚠️ 必须带 faction —— spec §7.7 硬原则 2：不能吸附中立 NPC 或同伴。
+func _aim_targets() -> Array:
+	var out: Array = []
+	for a in agents:
+		if not a.is_alive():
+			continue
+		out.append({
+			"id": a.id,
+			"agent": a,
+			"pos": a.pos,
+			"faction": "enemy",
+			"alive": true,
+		})
+	return out
 
 
 func _drop_loot(a: EnemyAgent) -> void:
@@ -450,6 +612,17 @@ func _tick_enemies(delta: float) -> void:
 			continue
 		a.tick(delta, ctx)
 
+		# ── 敌人开火的表现：枪声（mid distance 版，自带距离感）+ 枪口火光 ──
+		var prev: int = int(_prev_shots.get(a.id, 0))
+		if a.shots_fired > prev:
+			_prev_shots[a.id] = a.shots_fired
+			# 目前所有远程敌人都装的手枪（见 _setup_sim 的 equip 调用）
+			var kind := _weapon_kind(a.weapon.def) if a.weapon != null else "pistol"
+			if Sfx != null:
+				Sfx.play_at("gun_%s_enemy" % kind, a.pos, player_pos, 7.0, 30.0)
+			if fx != null:
+				fx.burst("muzzle", a.pos + a.facing * 0.3, a.facing, 0.8)
+
 	# 敌人造成的伤害回写到 vitals
 	var target_hp := int((ctx["targets"][0] as Dictionary)["hp"])
 	if target_hp < vitals.hp:
@@ -460,6 +633,12 @@ func _tick_enemies(delta: float) -> void:
 		if applied > 0:
 			var heavy := applied >= 20
 			vitals.apply_bleed(Vitals.Bleed.HEAVY if heavy else Vitals.Bleed.LIGHT)
+			# ── 自己受伤：大闪白 + 大震动，但【零 hitstop】（不打断操作）──
+			Feel.hit("player_hurt", player_pos, player_pos)
+			Feel.flash_damage(0.45 if heavy else 0.28)
+			if heavy:
+				if applied >= 35 and Sfx != null:
+					Sfx.play("hurt_heavy")
 
 	noises.clear()
 	squad.tick(delta, _time)
@@ -475,11 +654,21 @@ func _tick_tracers(delta: float) -> void:
 func _update_camera() -> void:
 	var target := player_pos * CELL_PX
 	camera.global_position = camera.global_position.lerp(target, 0.18)
+	# trauma 震动（trauma² + 整像素量化 —— spec §7.3）
+	if Feel != null:
+		camera.offset = Feel.shake_offset()
+	else:
+		camera.offset = Vector2.ZERO
 
 
 # ═══════════════════════ 输入 ═══════════════════════
 
 func _read_move_input() -> Vector2:
+	# 触屏优先（双摇杆写 InputMap action，touch_controls 读回模拟量）
+	if touch != null:
+		var tv := touch.move_vector()
+		if tv != Vector2.ZERO:
+			return tv
 	var v := Vector2.ZERO
 	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
 		v.x -= 1.0
@@ -489,9 +678,7 @@ func _read_move_input() -> Vector2:
 		v.y -= 1.0
 	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
 		v.y += 1.0
-	if v != Vector2.ZERO:
-		return v
-	return _touch_move_vector()
+	return v
 
 
 func _touch_move_vector() -> Vector2:
@@ -543,6 +730,28 @@ func _input(event: InputEvent) -> void:
 				debug_mode = (debug_mode + 1) % 4
 			KEY_R:
 				_restart()
+			# ── 无障碍开关（spec §7.3 第 4 条：务必提供关闭/降低震动的选项）──
+			KEY_F1:
+				Feel.shake_enabled = not Feel.shake_enabled
+				if Sfx != null:
+					Sfx.play("ui_click")
+			KEY_F2:
+				Feel.hitstop_enabled = not Feel.hitstop_enabled
+				if not Feel.hitstop_enabled:
+					Engine.time_scale = 1.0
+				if Sfx != null:
+					Sfx.play("ui_click")
+			KEY_F3:
+				Feel.flash_enabled = not Feel.flash_enabled
+				if Sfx != null:
+					Sfx.play("ui_click")
+			KEY_F4:
+				Feel.intensity = 0.0 if Feel.intensity > 0.5 else 1.0
+				if Sfx != null:
+					Sfx.play("ui_click")
+			KEY_M:
+				if Sfx != null:
+					Sfx.enabled = not Sfx.enabled
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -576,6 +785,18 @@ func _restart() -> void:
 
 func _walkable(p: Vector2) -> bool:
 	return gen.grid.is_walkable(Ballistics.cell_of(p))
+
+
+## 玩家脚下的地面材质 -> 脚步音效后缀
+func _floor_material() -> String:
+	var key := _tile_key_for(Ballistics.cell_of(player_pos), true)
+	if key.contains("metal"):
+		return "metal"
+	if key.contains("dirt"):
+		return "dirt"
+	if key.contains("wood"):
+		return "wood"
+	return "concrete"
 
 
 func _nearest_enemy() -> EnemyAgent:
@@ -724,4 +945,4 @@ func _update_hud() -> void:
 	var dbg := ["普通", "流场方向", "房间图", "声音范围"]
 	hud_label.text = "\n".join(lines)
 	view_label.text = "[视图] %s" % dbg[debug_mode]
-	hint_label.text = "WASD 移动 · J/空格 开火 · K 换弹 · L 治疗 · Tab 视图 · R 重开"
+	hint_label.text = "WASD 移动 · J/空格 开火 · K 换弹 · L 治疗 · Tab 视图 · R 重开 · F1 震动 · F2 hitstop · F3 闪白 · F4 强度 · M 静音"

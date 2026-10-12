@@ -1,0 +1,263 @@
+[
+  {
+    "id": "gun_pistol_player",
+    "file": "res://art/sfx/gun_pistol_player.wav",
+    "volume_db": -2.0,
+    "pitch_min": 0.97,
+    "pitch_max": 1.03,
+    "max_simul": 3,
+    "bus": "Master"
+  },
+  {
+    "id": "gun_rifle_player",
+    "file": "res://art/sfx/gun_rifle_player.wav",
+    "volume_db": -2.5,
+    "pitch_min": 0.96,
+    "pitch_max": 1.02,
+    "max_simul": 3,
+    "bus": "Master"
+  },
+  {
+    "id": "gun_shotgun_player",
+    "file": "res://art/sfx/gun_shotgun_player.wav",
+    "volume_db": -1.0,
+    "pitch_min": 0.98,
+    "pitch_max": 1.04,
+    "max_simul": 2,
+    "bus": "Master"
+  },
+  {
+    "id": "gun_pistol_enemy",
+    "file": "res://art/sfx/gun_pistol_enemy.wav",
+    "volume_db": -6.0,
+    "pitch_min": 0.94,
+    "pitch_max": 1.04,
+    "max_simul": 4,
+    "bus": "Master"
+  },
+  {
+    "id": "gun_rifle_enemy",
+    "file": "res://art/sfx/gun_rifle_enemy.wav",
+    "volume_db": -6.5,
+    "pitch_min": 0.93,
+    "pitch_max": 1.03,
+    "max_simul": 4,
+    "bus": "Master"
+  },
+  {
+    "id": "gun_shotgun_enemy",
+    "file": "res://art/sfx/gun_shotgun_enemy.wav",
+    "volume_db": -4.5,
+    "pitch_min": 0.95,
+    "pitch_max": 1.05,
+    "max_simul": 3,
+    "bus": "Master"
+  },
+  {
+    "id": "hit_flesh",
+    "file": "res://art/sfx/hit_flesh.ogg",
+    "volume_db": -3.0,
+    "pitch_min": 0.88,
+    "pitch_max": 1.14,
+    "max_simul": 4,
+    "bus": "Master"
+  },
+  {
+    "id": "hit_crit",
+    "file": "res://art/sfx/hit_crit.ogg",
+    "volume_db": -1.5,
+    "pitch_min": 0.92,
+    "pitch_max": 1.08,
+    "max_simul": 3,
+    "bus": "Master"
+  },
+  {
+    "id": "hit_armor",
+    "file": "res://art/sfx/hit_armor.ogg",
+    "volume_db": -3.5,
+    "pitch_min": 0.95,
+    "pitch_max": 1.1,
+    "max_simul": 3,
+    "bus": "Master"
+  },
+  {
+    "id": "hit_wood",
+    "file": "res://art/sfx/hit_wood.ogg",
+    "volume_db": -5.0,
+    "pitch_min": 0.92,
+    "pitch_max": 1.12,
+    "max_simul": 3,
+    "bus": "Master"
+  },
+  {
+    "id": "hit_concrete",
+    "file": "res://art/sfx/hit_concrete.ogg",
+    "volume_db": -5.5,
+    "pitch_min": 0.9,
+    "pitch_max": 1.12,
+    "max_simul": 3,
+    "bus": "Master"
+  },
+  {
+    "id": "hit_metal",
+    "file": "res://art/sfx/hit_metal.ogg",
+    "volume_db": -5.0,
+    "pitch_min": 0.92,
+    "pitch_max": 1.14,
+    "max_simul": 3,
+    "bus": "Master"
+  },
+  {
+    "id": "player_hurt",
+    "file": "res://art/sfx/player_hurt.ogg",
+    "volume_db": -1.0,
+    "pitch_min": 0.9,
+    "pitch_max": 1.06,
+    "max_simul": 2,
+    "bus": "Master"
+  },
+  {
+    "id": "kill_confirm",
+    "file": "res://art/sfx/kill_confirm.ogg",
+    "volume_db": -6.0,
+    "pitch_min": 0.98,
+    "pitch_max": 1.04,
+    "max_simul": 2,
+    "bus": "Master"
+  },
+  {
+    "id": "reload_start",
+    "file": "res://art/sfx/reload_start.ogg",
+    "volume_db": -5.0,
+    "pitch_min": 0.95,
+    "pitch_max": 1.08,
+    "max_simul": 2,
+    "bus": "Master"
+  },
+  {
+    "id": "reload_done",
+    "file": "res://art/sfx/reload_done.ogg",
+    "volume_db": -3.5,
+    "pitch_min": 0.98,
+    "pitch_max": 1.06,
+    "max_simul": 2,
+    "bus": "Master"
+  },
+  {
+    "id": "reload_empty",
+    "file": "res://art/sfx/reload_empty.ogg",
+    "volume_db": -6.0,
+    "pitch_min": 1.0,
+    "pitch_max": 1.0,
+    "max_simul": 1,
+    "bus": "Master"
+  },
+  {
+    "id": "step_concrete",
+    "file": "res://art/sfx/step_concrete.ogg",
+    "volume_db": -13.0,
+    "pitch_min": 0.9,
+    "pitch_max": 1.12,
+    "max_simul": 2,
+    "bus": "Master"
+  },
+  {
+    "id": "step_wood",
+    "file": "res://art/sfx/step_wood.ogg",
+    "volume_db": -13.0,
+    "pitch_min": 0.9,
+    "pitch_max": 1.12,
+    "max_simul": 2,
+    "bus": "Master"
+  },
+  {
+    "id": "step_dirt",
+    "file": "res://art/sfx/step_dirt.ogg",
+    "volume_db": -13.0,
+    "pitch_min": 0.9,
+    "pitch_max": 1.12,
+    "max_simul": 2,
+    "bus": "Master"
+  },
+  {
+    "id": "step_metal",
+    "file": "res://art/sfx/step_metal.ogg",
+    "volume_db": -13.0,
+    "pitch_min": 0.92,
+    "pitch_max": 1.1,
+    "max_simul": 2,
+    "bus": "Master"
+  },
+  {
+    "id": "pickup",
+    "file": "res://art/sfx/pickup.ogg",
+    "volume_db": -5.0,
+    "pitch_min": 0.98,
+    "pitch_max": 1.05,
+    "max_simul": 3,
+    "bus": "Master"
+  },
+  {
+    "id": "ui_click",
+    "file": "res://art/sfx/ui_click.ogg",
+    "volume_db": -7.0,
+    "pitch_min": 0.99,
+    "pitch_max": 1.02,
+    "max_simul": 2,
+    "bus": "Master"
+  },
+  {
+    "id": "ui_confirm",
+    "file": "res://art/sfx/ui_confirm.ogg",
+    "volume_db": -5.0,
+    "pitch_min": 1.0,
+    "pitch_max": 1.0,
+    "max_simul": 1,
+    "bus": "Master"
+  },
+  {
+    "id": "ui_deny",
+    "file": "res://art/sfx/ui_deny.ogg",
+    "volume_db": -6.0,
+    "pitch_min": 1.0,
+    "pitch_max": 1.0,
+    "max_simul": 1,
+    "bus": "Master"
+  },
+  {
+    "id": "extract_tick",
+    "file": "res://art/sfx/extract_tick.ogg",
+    "volume_db": -8.0,
+    "pitch_min": 0.98,
+    "pitch_max": 1.03,
+    "max_simul": 2,
+    "bus": "Master"
+  },
+  {
+    "id": "extract_done",
+    "file": "res://art/sfx/extract_done.ogg",
+    "volume_db": -2.0,
+    "pitch_min": 1.0,
+    "pitch_max": 1.0,
+    "max_simul": 1,
+    "bus": "Master"
+  },
+  {
+    "id": "explosion",
+    "file": "res://art/sfx/explosion.ogg",
+    "volume_db": -1.0,
+    "pitch_min": 0.94,
+    "pitch_max": 1.06,
+    "max_simul": 2,
+    "bus": "Master"
+  },
+  {
+    "id": "hurt_heavy",
+    "file": "res://art/sfx/hurt_heavy.ogg",
+    "volume_db": -2.0,
+    "pitch_min": 0.96,
+    "pitch_max": 1.04,
+    "max_simul": 1,
+    "bus": "Master"
+  }
+]
