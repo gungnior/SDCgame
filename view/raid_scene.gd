@@ -115,19 +115,11 @@ var hideout: Hideout = null      ## 藏身处跨局持久（重启不重置资�
 # ─── 地形贴图 ───
 # 设计：把整张地图【烘焙成一张 81x81 像素图】，用 nearest 放大 16 倍绘制。
 # 一次 draw call，而不是 6561 次 draw_texture_rect —— 手机上这是关键差异。
-const TILE_PX := 16
-const TILE_NAMES := {
-	"floor_concrete": ["tile_floor_concrete_0", "tile_floor_concrete_1", "tile_floor_concrete_2"],
-	"floor_dirt":     ["tile_floor_dirt_0", "tile_floor_dirt_1", "tile_floor_dirt_2"],
-	"floor_asphalt":  ["tile_floor_asphalt_0", "tile_floor_asphalt_1", "tile_floor_asphalt_2"],
-	"floor_metal":    ["tile_floor_metal_0", "tile_floor_metal_1", "tile_floor_metal_2"],
-	"wall_concrete":  ["tile_wall_concrete_0", "tile_wall_concrete_1", "tile_wall_concrete_2"],
-	"wall_brick":     ["tile_wall_brick_0", "tile_wall_brick_1", "tile_wall_brick_2"],
-	"wall_metal":     ["tile_wall_metal_0", "tile_wall_metal_1", "tile_wall_metal_2"],
-}
-var _tiles: Dictionary = {}          # 名字 -> Array[Image]（原始像素数据）
 var _map_tex: ImageTexture = null
 var _map_tex_size := Vector2i.ZERO
+## 地图烘焙器（view/raid_map_baker.gd）—— 纯图像生成，不画东西、不碰坐标空间，
+## 所以能脱离场景树 headless 单测。它是本文件里边界最干净的一块。
+var map_baker: RaidMapBaker = null
 
 # ─── 渲染模式 ───
 ## 0 = 白模（技术验证阶段默认）；1 = 美术 tile
@@ -293,7 +285,10 @@ func _setup_view() -> void:
 	raid_hud.setup(_is_touch)
 	add_child(raid_hud)
 
-	_load_tiles()
+	# 地图烘焙交给 RaidMapBaker（纯图像生成，可 headless 单测）
+	if map_baker == null:
+		map_baker = RaidMapBaker.new()
+	map_baker.load_tiles()
 	_build_map_texture()
 	_setup_feel_and_touch()
 
@@ -359,150 +354,6 @@ func _setup_feel_and_touch() -> void:
 	set_layer.layer = 60          # 盖在背包面板之上
 	set_layer.add_child(settings_menu)
 	add_child(set_layer)
-
-
-## 载入程序化生成的 16x16 tile（art/tiles/，由 tools/art/gen_tiles.py 产出）
-func _load_tiles() -> void:
-	var loaded := 0
-	for key in TILE_NAMES.keys():
-		var arr: Array = []
-		var bases: Array = TILE_NAMES[key]
-		for b in bases:
-			var base_name: String = str(b)
-			var p: String = "res://art/tiles/%s.png" % base_name
-			if ResourceLoader.exists(p):
-				var tex: Texture2D = load(p)
-				if tex != null:
-					arr.append(tex.get_image())
-		if not arr.is_empty():
-			_tiles[str(key)] = arr
-			loaded += arr.size()
-	print("[地形] 载入 %d 张 tile（%d 类）" % [loaded, _tiles.size()])
-
-
-## 把整张地图烘焙成一张像素图
-func _build_map_texture() -> void:
-	if gen == null:
-		return
-	var te := gen.grid.tile_extents()      # 81 x 81 tile
-	_map_tex_size = te
-	var img := Image.create(te.x, te.y, false, Image.FORMAT_RGBA8)
-	img.fill(Color(0.04, 0.05, 0.07))
-
-	if render_mode == RENDER_WHITEBOX:
-		_build_whitebox(img)
-	else:
-		_build_tiles(img)
-
-	_map_tex = ImageTexture.create_from_image(img)
-
-
-# ─────────── 白模（技术验证阶段的默认渲染）───────────
-#
-# ⚠️ 绘制已抽到 view/whitebox_painter.gd —— 它是纯函数，可以像素级单测。
-#    真机反馈黑墙能穿过、绿线挡路就是因为当初这段逻辑长在场景里、测不到。
-const WB_FLOOR := WhiteboxPainter.WB_FLOOR
-const WB_WALL := WhiteboxPainter.WB_WALL
-const WB_WALL_EDGE := WhiteboxPainter.WB_WALL_EDGE
-
-
-func _build_whitebox(img: Image) -> void:
-	var painted := WhiteboxPainter.paint(gen.grid, gen.graph.rooms)
-	# 直接拷贝像素（尺寸一致，都是 tile_extents）
-	img.blit_rect(painted, Rect2i(Vector2i.ZERO, painted.get_size()), Vector2i.ZERO)
-
-
-## 美术 tile 版（render_mode == RENDER_ART 时用）
-func _build_tiles(img: Image) -> void:
-	var g := gen.grid
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 20261012
-	var n := LogicalGrid.CELL_SIZE_TILES
-
-	for cy in g.height:
-		for cx in g.width:
-			var cell := Vector2i(cx, cy)
-			var walkable := g.is_walkable(cell)
-			var key := _tile_key_for(cell, walkable)
-			var variants: Array = _tiles.get(key, [])
-			if variants.is_empty():
-				continue
-			var origin := g.cell_to_tile_origin(cell)
-			for ty in n:
-				for tx in n:
-					var idx: int = abs(int(hash(Vector2i(origin.x + tx, origin.y + ty)))) % variants.size()
-					var v: Image = variants[idx]
-					img.blit_rect(v, Rect2i(Vector2i.ZERO, Vector2i(TILE_PX, TILE_PX)),
-						Vector2i(origin.x + tx, origin.y + ty))
-
-	# 结构层：逻辑格级别的墙轮廓 + 贴墙 AO
-	_bake_structure(img)
-
-
-func _bake_structure(img: Image) -> void:
-	var g := gen.grid
-	var n := LogicalGrid.CELL_SIZE_TILES
-	var outline := Color(0.04, 0.05, 0.07, 1.0)
-	var ao := Color(0.0, 0.0, 0.0, 0.30)
-	var dirs: Array[Vector2i] = [
-		Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
-
-	for cy in g.height:
-		for cx in g.width:
-			var cell := Vector2i(cx, cy)
-			var origin := g.cell_to_tile_origin(cell)
-			if not g.is_walkable(cell):
-				# 墙：只在【朝向可走格】的那一侧描边，墙体内部不画线
-				for d in dirs:
-					if g.is_walkable(cell + d):
-						_draw_seam(img, origin, d, n, outline, 0, 1)
-				continue
-			# 地面：贴墙的内侧压暗（廉价 AO，可读性提升很大）
-			for d in dirs:
-				if not g.is_walkable(cell + d):
-					_draw_seam(img, origin, d, n, ao, 1, 2)
-
-
-## 沿 cell 的某一侧画一条线。d 指向【邻居】，线画在朝邻居的那条边上。
-func _draw_seam(img: Image, origin: Vector2i, d: Vector2i, n: int,
-		col: Color, inset: int, thickness: int) -> void:
-	var iw := img.get_width()
-	var ih := img.get_height()
-	for t in thickness:
-		for i in n:
-			var x := -1
-			var y := -1
-			if d == Vector2i(0, 1):          # 邻居在下 -> 画下边
-				x = origin.x + i
-				y = origin.y + n - 1 - inset - t
-			elif d == Vector2i(0, -1):       # 上边
-				x = origin.x + i
-				y = origin.y + inset + t
-			elif d == Vector2i(1, 0):        # 右边
-				x = origin.x + n - 1 - inset - t
-				y = origin.y + i
-			else:                            # 左边
-				x = origin.x + inset + t
-				y = origin.y + i
-			if x < 0 or y < 0 or x >= iw or y >= ih:
-				continue
-			if col.a >= 1.0:
-				img.set_pixel(x, y, col)
-			else:
-				img.set_pixel(x, y, img.get_pixel(x, y).lerp(col, col.a))
-
-
-## 给一个逻辑格挑 tile 类型（按房间类型 + 坐标哈希做变化）
-func _tile_key_for(cell: Vector2i, walkable: bool) -> String:
-	var h: int = abs(int(hash(cell)))
-	if walkable:
-		var room := _room_at(cell)
-		if room != null:
-			# 房间地面：混凝土 / 泥土 交替，让不同房间有质感差异
-			return ["floor_concrete", "floor_metal", "floor_dirt"][room.id % 3]
-		return ["floor_asphalt", "floor_concrete"][h % 2]
-	# 墙：混凝土为主，少量砖 / 金属
-	return ["wall_concrete", "wall_concrete", "wall_brick", "wall_metal"][h % 4]
 
 
 func _room_at(cell: Vector2i) -> Room:
@@ -1319,7 +1170,7 @@ func _walkable(p: Vector2) -> bool:
 
 ## 玩家脚下的地面材质 -> 脚步音效后缀
 func _floor_material() -> String:
-	var key := _tile_key_for(Ballistics.cell_of(player_pos), true)
+	var key := map_baker.tile_key_for(Ballistics.cell_of(player_pos), true)
 	if key.contains("metal"):
 		return "metal"
 	if key.contains("dirt"):
@@ -1327,6 +1178,19 @@ func _floor_material() -> String:
 	if key.contains("wood"):
 		return "wood"
 	return "concrete"
+
+
+## 重建地图烘焙图。
+## 真正的像素逻辑在 RaidMapBaker 里（纯函数，可 headless 单测）；
+## 这里只负责把结果接到场景的 `_map_tex`。
+func _build_map_texture() -> void:
+	if gen == null:
+		return
+	if map_baker == null:
+		map_baker = RaidMapBaker.new()
+	_map_tex_size = gen.grid.tile_extents()
+	_map_tex = map_baker.build(gen.grid, gen.graph.rooms,
+		render_mode == RENDER_WHITEBOX)
 
 
 func _nearest_enemy() -> EnemyAgent:
@@ -1360,7 +1224,7 @@ func _draw() -> void:
 	# ── 地形：一次画完整张烘焙图（nearest 放大 16 倍）──
 	if _map_tex != null:
 		draw_texture_rect(_map_tex,
-			Rect2(Vector2.ZERO, Vector2(_map_tex_size) * TILE_PX), false)
+			Rect2(Vector2.ZERO, Vector2(_map_tex_size) * RaidMapBaker.TILE_PX), false)
 	else:
 		# 贴图缺失时的降级绘制
 		for y in g.height:

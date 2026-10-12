@@ -6,6 +6,7 @@ extends TestSuite
 
 
 func register() -> void:
+	_suite("地图烘焙器 RaidMapBaker", _test_map_baker)
 	_suite("真机修复3：白模与碰撞一致", _test_whitebox_matches_collision)
 	_suite("白模：可走格必须真的可达", _test_whitebox_reachability)
 	_suite("真机修复3：#6 尸体战利品", _test_corpse_loot)
@@ -78,6 +79,63 @@ func _test_whitebox_matches_collision() -> void:
 	var img2 := WhiteboxPainter.paint(g2.grid, g2.graph.rooms)
 	_check_eq(img2.get_width(), g2.grid.width * LogicalGrid.CELL_SIZE_TILES,
 		"白模图宽度 = 逻辑格宽 x 3")
+
+
+func _test_map_baker() -> void:
+	# 地图烘焙从 raid_scene.gd 抽到 view/raid_map_baker.gd（拆分上帝对象）。
+	#
+	# ⭐ 这是**确定性**验证：烘焙出来的纹理必须与 WhiteboxPainter.paint() 逐像素一致。
+	#    （不能用截图 diff —— 每局地图种子是随机的，两张截图的像素本来就不一样。）
+	var reg := DataRegistry.new()
+	reg.load_all("A")
+	var baker := RaidMapBaker.new()
+	baker.load_tiles()
+
+	for seed_ in [11, 4242, 20261012]:
+		var gen := MapGenerator.new()
+		if not gen.generate(seed_, reg.room_types):
+			continue
+		var g := gen.grid
+		# ① 白模：必须与 WhiteboxPainter 的输出逐像素一致
+		var tex := baker.build(g, gen.graph.rooms, true)
+		_check(tex != null, "种子 %d：烘焙出纹理" % seed_)
+		if tex == null:
+			continue
+		var got := tex.get_image()
+		var want := WhiteboxPainter.paint(g, gen.graph.rooms)
+		_check_eq(got.get_size(), want.get_size(),
+			"种子 %d：尺寸与 WhiteboxPainter 一致 %s" % [seed_, str(want.get_size())])
+		# 逐像素比对（尺寸一致才比）
+		var diff := 0
+		if got.get_size() == want.get_size():
+			for y in want.get_height():
+				for x in want.get_width():
+					if got.get_pixel(x, y) != want.get_pixel(x, y):
+						diff += 1
+		_check_eq(diff, 0,
+			"种子 %d：烘焙结果与 WhiteboxPainter 逐像素一致（差异 %d）" % [seed_, diff])
+
+		# ② 美术 tile 模式也要能跑出图（不崩、尺寸对）
+		var tex2 := baker.build(g, gen.graph.rooms, false)
+		_check(tex2 != null and tex2.get_image().get_size() == g.tile_extents(),
+			"种子 %d：美术 tile 模式尺寸正确" % seed_)
+
+	# ③ tile_key_for 在**不烘焙**时也要能用
+	#    （_floor_material() 靠它决定脚步音效；早先它依赖场景的 _room_at，
+	#      抽出来时会漏掉 —— 所以 baker 必须自己记住当前地图）
+	var gen2 := MapGenerator.new()
+	gen2.generate(777, reg.room_types)
+	baker.set_map(gen2.grid, gen2.graph.rooms)
+	var k := baker.tile_key_for(gen2.spawn_room().center, true)
+	_check(not k.is_empty(), "不烘焙也能取材质键：%s" % k)
+	_check(k.begins_with("floor_"), "可走格给的是地面材质（%s）" % k)
+	var kw := baker.tile_key_for(Vector2i(0, 0), false)
+	_check(kw.begins_with("wall_"), "阻挡格给的是墙材质（%s）" % kw)
+
+	# ④ 材质键必须落在真实存在的 tile 变体里（否则会画成空白）
+	_check(baker.tile_key_for(gen2.spawn_room().center, true) in RaidMapBaker.TILE_NAMES,
+		"材质键在 TILE_NAMES 里")
+	_check(RaidMapBaker.TILE_PX == 16, "TILE_PX 仍是 16")
 
 
 func _test_whitebox_reachability() -> void:

@@ -74,16 +74,27 @@ func _test_touch_input_isolation() -> void:
 
 func _test_whitebox_render() -> void:
 	# 技术验证阶段默认白模（用户建议 + 真机"看不出哪能走"）
+	# ⚠️ 这里原本断言白模的**实现细节**在 raid_scene.gd 里。
+	#    但那块代码已经搬到 `view/raid_map_baker.gd`（拆分上帝对象）——
+	#    于是三条断言失败。**这是这类"源码文本断言"的通病**：
+	#    它把「代码在哪」和「代码对不对」绑在了一起，一重构就失效。
+	#    修法分两层，各查各的：
+	#      · 「默认是白模」是**场景的策略** -> 查 raid_scene.gd
+	#      · 「烘焙怎么做」是**烘焙器的实现** -> 查 raid_map_baker.gd
 	var src := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	var baker := FileAccess.get_file_as_string("res://view/raid_map_baker.gd")
 	_check(src.contains("RENDER_WHITEBOX"), "有白模渲染模式")
 	_check(src.contains("RENDER_ART"), "保留美术 tile 模式（可切换）")
 	_check(src.contains("var render_mode := RENDER_WHITEBOX"),
 		"默认是白模（技术验证优先『能读懂』而非『好看』）")
-	_check(src.contains("_build_whitebox"), "有白模烘焙函数")
+	_check(baker.contains("_build_whitebox"), "有白模烘焙函数")
 	# 白模的语义必须极端简单：亮 = 可走，暗 + 描边 = 阻挡
-	_check(src.contains("WB_FLOOR") and src.contains("WB_WALL"),
+	_check(baker.contains("WB_FLOOR") and baker.contains("WB_WALL"),
 		"白模区分地板与墙的配色")
-	_check(src.contains("WB_WALL_EDGE"), "墙有高亮描边（一眼可辨）")
+	_check(baker.contains("WB_WALL_EDGE"), "墙有高亮描边（一眼可辨）")
+	# 场景必须把烘焙委托出去，而不是又长回来
+	_check(src.contains("RaidMapBaker") and src.contains("map_baker.build("),
+		"场景把地图烘焙委托给 RaidMapBaker（防代码回流）")
 
 	# 白模烘焙必须真的能跑出图（不崩、尺寸对）
 	var reg := DataRegistry.new()
