@@ -2622,7 +2622,16 @@ func _test_keybindings() -> void:
 	_check(sm.contains("NOTIFICATION_WM_GO_BACK_REQUEST"), "安卓返回键也接上了")
 	_check(sm.contains("F1") and sm.contains("F4"),
 		"设置菜单里写了 F1~F4 的说明（用户：『f1 到 f4 没有说明』）")
-	_check(sm.contains("get_tree().paused = true"), "打开菜单会暂停游戏")
+	# ⚠️ 这里**故意断言不使用 get_tree().paused**。
+	#    PC 实测：用了它之后按 ESC 卡死（树被暂停 28 秒且 ESC 关不掉）。
+	#    它会连输入一起门控，导致菜单看得见、点不动。
+	#    现在改成纯逻辑冻结（Game.paused），输入路径完全不变。
+	_check(not sm.contains("get_tree().paused = true"),
+		"不使用 get_tree().paused（它会门控输入 -> 菜单点不动 -> 卡死）")
+	_check(sm.contains("Game.paused = true"), "打开菜单会冻结游戏逻辑")
+	_check(sm.contains("Game.paused = false"), "关闭菜单会恢复")
+	_check(rs.contains("Game.paused") or rs.contains("game_paused"),
+		"场景 _process 会看暂停标志")
 	_check(sm.contains("PROCESS_MODE_ALWAYS"), "菜单自身不受暂停影响")
 	# 场景里要有场景内开关的钩子
 	_check(rs.contains("func toggle_whitebox()"), "有 toggle_whitebox 钩子")

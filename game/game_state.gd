@@ -30,28 +30,22 @@ var hitstop_enabled := true
 var flash_enabled := true
 
 var _ready_done := false
-## 当前负责暂停的菜单（安全网用）。谁开暂停谁登记，关闭时清空。
-## ⚠️ 加这个是因为真机上出现过"暂停之后没能恢复"：
-##    一旦负责暂停的菜单被释放/异常退出，树会永远停在 paused=true，
-##    而 Tel 之类的 ALWAYS 节点还在跑 -> 玩家看到的是"游戏卡死"。
-var pause_owner: Node = null
+## 逻辑暂停标志（**不使用 get_tree().paused**）
+##
+## 用户 PC 实测按 ESC 后卡死：日志显示场景的 _process 停了 28 秒，
+## 但 ALWAYS 的 Tel 仍在记录 —— 树被 pause 了而且恢复不了。
+## `get_tree().paused` 同时门控【逻辑】与【输入】，只冻结前者需要精确控制
+## 整棵子树的 process_mode，漏一处就是"看得见、点不动"。
+## 所以改成纯逻辑冻结：场景在 _process 里自己看这个标志。
+var paused := false
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# 保险：清掉任何残留的树暂停（旧版本可能留下 paused=true）
+	get_tree().paused = false
 	ensure_loaded()
 
-
-func _process(_delta: float) -> void:
-	# ── 暂停安全网 ──
-	# 如果树被暂停，但【没有任何有效节点在为这次暂停负责】，
-	# 就强制恢复 —— 否则游戏会永久卡在静止状态（真机踩过）。
-	if not get_tree().paused:
-		return
-	if pause_owner == null or not is_instance_valid(pause_owner):
-		pause_owner = null
-		get_tree().paused = false
-		push_warning("[Game] 检测到无主的暂停，已强制恢复")
 
 
 func ensure_loaded() -> void:

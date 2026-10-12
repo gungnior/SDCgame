@@ -535,7 +535,14 @@ func _process(delta: float) -> void:
 		return
 	_time += delta
 
-	if not raid.is_over():
+	# ── 逻辑冻结（设置菜单打开时）──
+	# 不用 get_tree().paused：它同时门控输入，导致菜单看得见点不动（PC 实测卡死）。
+	# 这里只跳过游戏逻辑；HUD / 绘制 / 输入 / 相机全部照常。
+	var frozen := game_paused or (Game != null and Game.paused)
+	if frozen:
+		_firing = false
+		_move_input = Vector2.ZERO
+	elif not raid.is_over():
 		Tel.mark("player")
 		_tick_player(delta)
 		Tel.mark("enemies")
@@ -547,7 +554,7 @@ func _process(delta: float) -> void:
 		raid.hp = vitals.hp
 		if vitals.dead:
 			raid.take_damage(9999)
-	else:
+	elif raid.is_over():
 		_show_result_once()
 		# ⚠️ 回合结束后绝不能还卡在 hitstop 里（Engine.time_scale = 0）
 		#    否则画面完全不动，玩家会以为"游戏卡死了"（安卓真机反馈）

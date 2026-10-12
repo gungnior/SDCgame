@@ -12,7 +12,8 @@ extends Control
 ##   · 安卓：左上角齿轮按钮打开；系统返回键（ui_cancel）打开
 ##   · 内嵌**完整按键说明**（F1~F4 到底干什么，之前完全没写）
 ##
-## 打开时把游戏暂停（get_tree().paused = true），关闭时恢复。
+## 打开时冻结游戏逻辑（Game.paused = true），关闭时恢复。
+## ⚠️【不使用 get_tree().paused】—— 它会连输入一起门控，导致菜单点不动。
 
 signal resumed()
 signal went_hideout()
@@ -33,7 +34,7 @@ func _ready() -> void:
 	visible = false
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	# ALWAYS：即使 get_tree().paused = true 也要能继续接受点击
+	# ALWAYS：保持本菜单在极端情况下也能响应
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build()
 	_force_always(self)
@@ -230,14 +231,20 @@ func open() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	if _ext != null:
 		_ext.set("game_paused", true)
-	# ⚠️ 暂停整棵树之前，必须把【整棵子树的 process_mode 都设成 ALWAYS】。
-	#    只设菜单自己是没用的：TouchButton 子节点默认 INHERIT，
-	#    暂停后它们的 _gui_input 根本不会被调用 —— 菜单看得见、点不动，
-	#    表现就是"游戏卡死了"（用户实测）。
-	_force_always(self)
-	get_tree().paused = true
+	# ⚠️【不再使用 get_tree().paused】。
+	#
+	# 用户 PC 实测按 ESC 后卡死：日志显示 hp=None 持续 28 秒，
+	# 但 Tel(PROCESS_MODE_ALWAYS) 仍在记录 —— 树被暂停了，而且 ESC 也关不掉。
+	# 原因是 get_tree().paused 同时门控【逻辑推进】和【节点能否收输入】，
+	# 想只冻结前者就必须精确控制整棵子树的 process_mode，
+	# 漏一处就变成"菜单看得见、点不动"。
+	#
+	# 现在改成纯逻辑冻结：把场景的 game_paused 置位，
+	# 由场景自己在 _process 里跳过游戏逻辑。
+	# HUD / 绘制 / 输入 / 按钮一律照常 -> 不可能再"点不动"。
+	# 也不再碰 Engine.time_scale，避免和 hitstop 打架。
 	if Game != null:
-		Game.pause_owner = self
+		Game.paused = true
 	# 刷新所有开关的显示（可能被 F1~F4 改过）
 	for c in _root.get_children():
 		if c is HBoxContainer:
@@ -259,9 +266,8 @@ func close() -> void:
 	_open = false
 	visible = false
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	get_tree().paused = false
 	if Game != null:
-		Game.pause_owner = null
+		Game.paused = false
 	if _ext != null:
 		_ext.set("game_paused", false)
 	if Sfx != null:
