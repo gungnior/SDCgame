@@ -67,6 +67,7 @@ func _initialize() -> void:
 	_suite("真机修复4：散布收缩 hitbox", _test_spread_radius_factor)
 	_suite("PC实测：粒子坐标换算", _test_fx_cell_coords)
 	_suite("PC实测：键位与设置菜单", _test_keybindings)
+	_suite("PC实测：Control 尺寸不得塌成 0", _test_control_size_not_zero)
 
 	print("")
 	if _failed == 0:
@@ -2651,3 +2652,58 @@ func _test_corpse_interaction_visible() -> void:
 	var sm := FileAccess.get_file_as_string("res://ui/settings_menu.gd")
 	_check(not sm.contains("func _get("),
 		"设置菜单没有定义 _get（会与 Object._get(StringName) 签名冲突）")
+
+
+# ─────────────────── 本会话【第三次】栽的同一个坑 ───────────────────
+
+func _test_control_size_not_zero() -> void:
+	# ⚠️ 这个坑在本会话里踩了三次：
+	#   ① 虚拟摇杆   —— 布局全挤在角落
+	#   ② 结算面板   —— 面板整个看不见
+	#   ③ 设置菜单   —— 按 ESC 后**只看得到顶部两个小圆按钮，
+	#                   暗色背景和所有开关都不渲染**（用户："esc 了看不到继续"）
+	#
+	# 根因完全相同：**`Control` 直接挂在 `CanvasLayer` / `Node2D` 下时，
+	#   `set_anchors_preset(FULL_RECT)` 解析不到父矩形 -> 自身 size 停在 (0,0)
+	#   -> 子节点全部塌掉。**
+	#
+	# 正确做法：自己跟 viewport 尺寸同步（并在 viewport 变化时重新同步）。
+	var sm := FileAccess.get_file_as_string("res://ui/settings_menu.gd")
+	_check(sm.contains("func _fit_viewport"), "设置菜单有 _fit_viewport")
+	_check(sm.contains("size = vp"), "把自身 size 钉到视口尺寸")
+	_check(sm.contains("get_viewport().size_changed.connect"),
+		"监听 viewport 尺寸变化（窗口/旋转后要重新同步）")
+	# 顺序：必须先手动同步一次，再连信号（否则第一帧仍然是塌的）
+	var i_fit := sm.find("_fit_viewport()")
+	var i_conn := sm.find("size_changed.connect")
+	_check(i_fit > 0 and i_conn > 0 and i_fit < i_conn,
+		"先同步再连接信号（fit@%d < connect@%d）" % [i_fit, i_conn])
+
+	# 结算面板也要有这个兜底（它是第二个踩坑的地方）
+	var ro := FileAccess.get_file_as_string("res://ui/result_overlay.gd")
+	_check(ro.contains("get_viewport_rect()") or ro.contains("size = vp"),
+		"结算面板也用了 viewport 兜底")
+
+	# TouchButton 不能无条件覆盖调用方设的最小尺寸 ——
+	# 否则设置菜单里设的 150x76 会被悄悄改成 60x60，文字溢出到圆外
+	var tb := FileAccess.get_file_as_string("res://ui/touch_button.gd")
+	_check(tb.contains("if custom_minimum_size == Vector2.ZERO"),
+		"TouchButton 只在调用方没指定时才推最小尺寸")
+	_check(tb.contains("func _draw_wide"),
+		"宽控件画圆角矩形（否则文字溢出圆形按钮）")
+
+
+func _test_settings_menu_layout() -> void:
+	# 直接读源码断言"操作按钮在顶部固定栏"，而不是在滚动区底部。
+	# 早先放在滚动内容末尾 —— 16 行按键说明 + 一堆开关比屏幕高，
+	# 按钮被挤到折叠线以下，玩家根本看不到（真机原话："看不到继续"）。
+	var sm := FileAccess.get_file_as_string("res://ui/settings_menu.gd")
+	var i_bar := sm.find("顶部固定栏")
+	var i_scroll := sm.find("下方滚动区")
+	var i_resume := sm.find("resume_top")
+	_check(i_bar > 0, "有顶部固定栏")
+	_check(i_scroll > 0, "有下方滚动区")
+	_check(i_resume > 0, "「继续」按钮存在")
+	_check(i_resume < i_scroll,
+		"「继续」在滚动区【之前】创建 = 位于固定栏，不会被内容挤出屏幕")
+	_check(sm.contains("went_hideout.emit()"), "「返回藏身处」仍可用")

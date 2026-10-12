@@ -32,12 +32,33 @@ func is_open() -> bool:
 
 func _ready() -> void:
 	visible = false
-	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	# ALWAYS：保持本菜单在极端情况下也能响应
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# ⚠️⚠️【本会话第三次栽在这里】⚠️⚠️
+	#   `Control` 直接挂在 `CanvasLayer` 下时，`set_anchors_preset(FULL_RECT)`
+	#   **解析不到父矩形** -> 自身 size 停在 (0,0) ->
+	#   子节点（背景 ColorRect / ScrollContainer）全部塌成 0 尺寸 ->
+	#   ScrollContainer 把内容整段裁掉。
+	#   实测表现：按 ESC 后【只看得到顶部两个小圆按钮，背景和所有开关都不渲染】。
+	#   （前两次是虚拟摇杆和结算面板，症状不同、根因相同。）
+	#   修法：自己跟 viewport 尺寸同步。
+	_fit_viewport()
+	if get_viewport() != null:
+		get_viewport().size_changed.connect(_fit_viewport)
 	_build()
 	_force_always(self)
+
+
+## 把自身尺寸钉到视口上（Control 挂在非 Control 父节点下时必须手动做）
+func _fit_viewport() -> void:
+	var vp := get_viewport_rect().size
+	if vp.x <= 0.0 or vp.y <= 0.0:
+		# 极端情况：viewport 还没准备好 -> 退回项目设定的视口尺寸
+		vp = Vector2(ProjectSettings.get_setting("display/window/size/viewport_width", 640),
+			ProjectSettings.get_setting("display/window/size/viewport_height", 360))
+	position = Vector2.ZERO
+	size = vp
+	set_anchors_preset(Control.PRESET_FULL_RECT)
 
 
 func _build() -> void:
@@ -47,15 +68,66 @@ func _build() -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
+	# ── 纵向两段：顶部固定操作栏 + 下方滚动设置区 ──
+	#
+	# ⚠️ 真机反馈："esc 了看不到继续"。
+	#    早先把「继续 / 返回藏身处」放在滚动内容的**最底部**，
+	#    而按键说明有 16 行、加上一堆开关，内容比 720px 高得多 ——
+	#    按钮被挤到折叠线以下，玩家根本看不见。
+	#    现在把操作按钮放进**顶部固定栏**，无论内容多长都一定可见。
+	var col := VBoxContainer.new()
+	col.set_anchors_preset(Control.PRESET_FULL_RECT)
+	col.add_theme_constant_override("separation", 6)
+	add_child(col)
+
+	# ① 顶部固定栏（不滚动）
+	var bar := MarginContainer.new()
+	bar.add_theme_constant_override("margin_left", 28)
+	bar.add_theme_constant_override("margin_top", 14)
+	bar.add_theme_constant_override("margin_right", 28)
+	bar.add_theme_constant_override("margin_bottom", 6)
+	col.add_child(bar)
+
+	var bar_row := HBoxContainer.new()
+	bar_row.add_theme_constant_override("separation", 12)
+	bar.add_child(bar_row)
+
+	var title := _label("设置", 26, Color(0.95, 0.97, 1.0))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	bar_row.add_child(title)
+
+	var resume_top := TouchButton.new()
+	resume_top.label_text = "继续"
+	resume_top.use_hold = false
+	resume_top.base_radius = 30.0
+	resume_top.custom_minimum_size = Vector2(150, 76)
+	resume_top.accent = Color(0.42, 0.82, 0.52)
+	resume_top.pressed_down.connect(close)
+	bar_row.add_child(resume_top)
+
+	var hb_top := TouchButton.new()
+	hb_top.label_text = "返回藏身处"
+	hb_top.use_hold = false
+	hb_top.base_radius = 30.0
+	hb_top.custom_minimum_size = Vector2(170, 76)
+	hb_top.accent = Color(0.85, 0.62, 0.42)
+	hb_top.pressed_down.connect(func():
+		close()
+		went_hideout.emit())
+	bar_row.add_child(hb_top)
+	_bottom_hb = hb_top
+
+	# ② 下方滚动区
 	var sc := ScrollContainer.new()
-	sc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	add_child(sc)
+	col.add_child(sc)
 
 	var margin := MarginContainer.new()
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.add_theme_constant_override("margin_left", 28)
-	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_top", 2)
 	margin.add_theme_constant_override("margin_right", 28)
 	margin.add_theme_constant_override("margin_bottom", 18)
 	sc.add_child(margin)
@@ -64,8 +136,6 @@ func _build() -> void:
 	_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root.add_theme_constant_override("separation", 6)
 	margin.add_child(_root)
-
-	_root.add_child(_label("设置", 26, Color(0.95, 0.97, 1.0)))
 
 	# ── 玩法辅助 ──
 	_root.add_child(_label("辅助瞄准", 15, Color(0.72, 0.80, 0.92)))
@@ -113,31 +183,12 @@ func _build() -> void:
 		13, Color(0.78, 0.83, 0.90))
 	_root.add_child(keys)
 
-	var bottom := HBoxContainer.new()
-	bottom.add_theme_constant_override("separation", 10)
-	_root.add_child(bottom)
-	var resume := TouchButton.new()
-	resume.label_text = "继续"
-	resume.use_hold = false
-	resume.base_radius = 30.0
-	resume.custom_minimum_size = Vector2(0, 88)
-	resume.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	resume.accent = Color(0.42, 0.82, 0.52)
-	resume.pressed_down.connect(close)
-	bottom.add_child(resume)
-
-	var hb := TouchButton.new()
-	hb.label_text = "返回藏身处"
-	hb.use_hold = false
-	hb.base_radius = 30.0
-	hb.custom_minimum_size = Vector2(0, 88)
-	hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hb.accent = Color(0.85, 0.62, 0.42)
-	hb.pressed_down.connect(func():
-		close()
-		went_hideout.emit())
-	bottom.add_child(hb)
-	_bottom_hb = hb
+	# 结尾的「继续 / 返回藏身处」已经移到【顶部固定栏】了（见 _build 开头）。
+	# 这里不再重复放 —— 早先放这里就是因为它们被挤到折叠线以下，
+	# 玩家按 ESC 后完全看不到（真机反馈："esc 了看不到继续"）。
+	_root.add_child(_label(
+		"（按 ESC 或点右上角「继续」关闭本菜单）",
+		12, Color(0.55, 0.60, 0.68)))
 
 
 var _bottom_hb: TouchButton = null
