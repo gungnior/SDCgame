@@ -43,3 +43,7 @@ art/_raw/
 # 验收脚本的中间产物（基线保留，当前截图不保留）
 art/_raw/_verify_now.png
 art/_raw/_det*.png
+
+# Python 字节码（py_compile 的产物，不该进库）
+__pycache__/
+*.pyc
