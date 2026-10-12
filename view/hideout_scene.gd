@@ -249,6 +249,8 @@ func _on_upgrade(id: String) -> void:
 			for b in c.get_children():
 				if b is TouchButton and b.has_meta("upgrade_id"):
 					_refresh_upgrade_button(b, str(b.get_meta("upgrade_id")))
+	if Game != null:
+		Game.save_game()      # 改动即存档：在藏身处被杀进程也不丢进度
 	_refresh()
 
 
@@ -256,6 +258,7 @@ func _on_toggle(key: String) -> void:
 	if Game == null:
 		return
 	Game.set(key, not bool(Game.get(key)))
+	Game.save_game()
 	if Sfx != null:
 		Sfx.play("ui_click")
 	for c in _root.get_children():
@@ -279,6 +282,7 @@ func _on_go() -> void:
 	if Sfx != null:
 		Sfx.play("ui_confirm")
 	if Game != null:
+		Game.save_game()
 		Game.start_raid()
 
 

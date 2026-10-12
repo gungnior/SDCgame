@@ -613,6 +613,12 @@ func _show_result_once() -> void:
 			int(rep.get("lost_slots", 0)), int(rep.get("lost_value", 0))])
 	lines.append("击杀 %d   搜刮容器 %d" % [raid.enemies_killed, raid.containers_looted])
 	lines.append("地图种子 %d" % _raid_seed)
+	# 存档：累计统计 + 自动落盘
+	# ⚠️ 必须在 settle() 【之后】调用 —— 撤离时战利品是在 settle 里
+	#    写进 hideout.stash 的，早于它存档会把这一局的收获漏掉。
+	if Game != null:
+		Game.record_raid_result(win, raid.enemies_killed)
+		lines.append(Game.save_status)
 	result_overlay.show_result(win, lines)
 	Tel.emit("raid_end", {
 		"win": win, "reason": raid.death_reason,

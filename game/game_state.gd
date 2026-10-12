@@ -39,13 +39,19 @@ var _ready_done := false
 ## 所以改成纯逻辑冻结：场景在 _process 里自己看这个标志。
 var paused := false
 
+# ─── 存档 ───
+var save: SaveManager = null
+## 累计统计（跨局，写进存档）
+var stats := {"raids": 0, "extracts": 0, "deaths": 0, "kills": 0}
+## 上一次存档/读档的提示（HUD 或藏身处显示用）
+var save_status := ""
+
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	# 保险：清掉任何残留的树暂停（旧版本可能留下 paused=true）
 	get_tree().paused = false
 	ensure_loaded()
-
 
 
 func ensure_loaded() -> void:
@@ -58,6 +64,72 @@ func ensure_loaded() -> void:
 		return
 	hideout = Hideout.new(reg.items, 3000)
 	hideout.wallet += 5000
+	save = SaveManager.new()
+	load_game()
+
+
+# ─────────────────── 存档读写 ───────────────────
+
+## 把藏身处 / 设置 / 统计写进存档。返回失败原因（空串 = 成功）。
+func save_game() -> String:
+	if save == null or hideout == null:
+		return "还没初始化"
+	var err := save.save({
+		"hideout": hideout.to_dict(),
+		"settings": {
+			"auto_fire": auto_fire,
+			"auto_aim": auto_aim,
+			"vision_follows_lock": vision_follows_lock,
+			"shake_enabled": shake_enabled,
+			"hitstop_enabled": hitstop_enabled,
+			"flash_enabled": flash_enabled,
+		},
+		"stats": stats.duplicate(),
+	})
+	save_status = "已保存" if err == "" else "保存失败：%s" % err
+	if err != "":
+		push_warning("[Game] 存档失败：%s" % err)
+	return err
+
+
+## 读存档并应用。返回是否成功读到了已有存档。
+func load_game() -> bool:
+	if save == null or hideout == null:
+		return false
+	var r := save.load_save()
+	if not bool(r["ok"]):
+		# 没有存档 = 全新开局，不算错误
+		save_status = "新档：%s" % str(r["error"])
+		return false
+	var d: Dictionary = r["data"]
+	if d.has("hideout"):
+		hideout.from_dict(d["hideout"])
+	if d.has("settings"):
+		var s: Dictionary = d["settings"]
+		auto_fire = bool(s.get("auto_fire", auto_fire))
+		auto_aim = bool(s.get("auto_aim", auto_aim))
+		vision_follows_lock = bool(s.get("vision_follows_lock", vision_follows_lock))
+		shake_enabled = bool(s.get("shake_enabled", shake_enabled))
+		hitstop_enabled = bool(s.get("hitstop_enabled", hitstop_enabled))
+		flash_enabled = bool(s.get("flash_enabled", flash_enabled))
+	if d.has("stats"):
+		for k in stats.keys():
+			stats[k] = int((d["stats"] as Dictionary).get(k, stats[k]))
+	var from := int(r["migrated_from"])
+	save_status = "读档成功" if from == SaveManager.SAVE_VERSION \
+		else "读档成功（从 v%d 迁移）" % from
+	return true
+
+
+## 一局结束后记一笔统计并自动存档
+func record_raid_result(win: bool, kills: int) -> void:
+	stats["raids"] = int(stats["raids"]) + 1
+	stats["kills"] = int(stats["kills"]) + kills
+	if win:
+		stats["extracts"] = int(stats["extracts"]) + 1
+	else:
+		stats["deaths"] = int(stats["deaths"]) + 1
+	save_game()
 
 
 ## 应用无障碍设置到 Feel（场景加载后调用一次即可）

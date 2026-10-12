@@ -73,6 +73,7 @@ func _initialize() -> void:
 	_suite("手机实测：HUD 性能读数", _test_hud_perf_metric)
 	_suite("白模：可走格必须真的可达", _test_whitebox_reachability)
 	_suite("白模：视野锥不透视", _test_cone_no_xray)
+	_suite("存档：读写与版本迁移", _test_save_manager)
 
 	print("")
 	if _failed == 0:
@@ -2932,3 +2933,134 @@ func _test_cone_no_xray() -> void:
 	var r2 := aa2.update(0.1, Vector2(2.5, 7.5), Vector2.RIGHT, 55.0, 30.0, [], g2)
 	_check(bool(r2["has_lock"]) and not bool(r2["visible"]),
 		"粘性期间 has_lock=true 但 visible=false（这正是『对墙开火』的修法）")
+
+
+# ─────────────────── ① 存档模块 ───────────────────
+
+func _test_save_manager() -> void:
+	# 关联：roadmap-bac.md §2「核心框架（…存档…）」——
+	# 这是 M0 清单（action-plan §3）里唯一未完成的技术项。
+	#
+	# ⚠️ 路径策略是实测出来的：
+	#   `user://` 在开发环境写不进去（Godot 子进程被限制在工作区内），
+	#   而安卓上必须用 user://。所以 user:// 优先、失败回退到可执行文件旁边。
+	var sm := SaveManager.new()
+	_check(not sm.path.is_empty(), "解析出了存档路径：%s" % sm.path)
+	_check(sm.path.ends_with(SaveManager.SAVE_FILE),
+		"路径以 %s 结尾" % SaveManager.SAVE_FILE)
+
+	# 清掉可能存在的旧档，保证从干净状态开始
+	sm.delete()
+	_check(not sm.exists(), "删除后存档不存在")
+
+	# 从"没有存档"读 -> 明确报告而不是崩
+	var r0 := sm.load_save()
+	_check(not bool(r0["ok"]), "没有存档时 ok=false")
+	_check(not str(r0["error"]).is_empty(), "有明确的原因：%s" % str(r0["error"]))
+
+	# ── 写读往返 ──
+	var payload := {
+		"hideout": {"wallet": 12345, "upgrades": {"stash_size": 2},
+			"stash": {"slots": [], "max_weight": 999.0}},
+		"settings": {"auto_fire": true, "auto_aim": false},
+		"stats": {"raids": 7, "extracts": 5, "deaths": 2, "kills": 31},
+	}
+	var err := sm.save(payload)
+	_check_eq(err, "", "保存成功（%s）" % err)
+	_check(sm.exists(), "存档文件已生成")
+
+	var r1 := sm.load_save()
+	_check(bool(r1["ok"]), "读档成功")
+	_check_eq(int(r1["data"].get("version", 0)), SaveManager.SAVE_VERSION,
+		"写入的版本号是当前版本")
+	_check_eq(int((r1["data"]["hideout"] as Dictionary)["wallet"]), 12345, "钱数往返一致")
+	_check_eq(int((r1["data"]["stats"] as Dictionary)["kills"]), 31, "统计往返一致")
+
+	# ── 版本迁移 ──
+	# v1 的档只有 wallet，缺 upgrades/stash
+	var v1 := {"version": 1, "wallet": 999}
+	var ok1 := SaveManager.migrate(v1, 1)
+	_check(ok1, "v1 能迁移到当前版本")
+	_check_eq(int(v1["version"]), SaveManager.SAVE_VERSION, "迁移后版本号被更新")
+	_check(v1.has("upgrades") and v1.has("stash"), "v1->v2 补上了 upgrades/stash")
+	_check(v1.has("settings") and v1.has("stats"), "v2->v3 补上了 settings/stats")
+
+	# v2
+	var v2 := {"version": 2, "wallet": 500, "upgrades": {}, "stash": {}}
+	_check(SaveManager.migrate(v2, 2), "v2 能迁移")
+	_check_eq(int(v2["version"]), SaveManager.SAVE_VERSION, "v2 迁移后版本正确")
+
+	# 已经是当前版本：迁移应当是空操作
+	var v3 := {"version": SaveManager.SAVE_VERSION, "wallet": 1}
+	_check(SaveManager.migrate(v3, SaveManager.SAVE_VERSION), "当前版本迁移为空操作")
+	_check_eq(int(v3["wallet"]), 1, "空操作不改数据")
+
+	# ── 拒绝比程序更新的档 ──
+	# ⚠️ 这条很重要：按旧规则解析新档会得到乱七八糟的状态，
+	#    宁可报错也不要把玩家的档读坏。
+	# ⚠️ 不能走 sm.save() —— 它总是把 version 覆写成当前版本，
+	#    那样根本造不出"未来版本"的档（测试第一版就写错了）。
+	#    直接写文件绕过它。
+	var ff := FileAccess.open(sm.path, FileAccess.WRITE)
+	_check(ff != null, "能直接打开存档文件写入")
+	if ff != null:
+		ff.store_string(JSON.stringify({
+			"version": SaveManager.SAVE_VERSION + 5, "wallet": 1}))
+		ff.close()
+	var r2 := sm.load_save()
+	_check(not bool(r2["ok"]), "拒绝读取比程序新的存档")
+	_check(str(r2["error"]).contains("新"), "错误信息说明了版本过新：%s" % str(r2["error"]))
+
+	# ── 坏档不能崩 ──
+	var bad := FileAccess.open(sm.path, FileAccess.WRITE)
+	if bad != null:
+		bad.store_string("这不是 JSON {{{")
+		bad.close()
+	var r3 := sm.load_save()
+	_check(not bool(r3["ok"]), "坏档返回 ok=false")
+	_check(not str(r3["error"]).is_empty(), "坏档有明确原因")
+
+	# ── 清理 ──
+	sm.delete()
+	_check(not sm.exists(), "测试后清理干净")
+
+
+func _test_save_roundtrip_hideout() -> void:
+	# 藏身处状态【真的】能存下来并读回去 —— 不只是 JSON 往返，
+	# 而是 Hideout 这个对象本身。
+	var reg := DataRegistry.new()
+	reg.load_all("A")
+	var sm := SaveManager.new()
+	sm.delete()
+
+	# 造一个有状态变化的藏身处
+	var h1 := Hideout.new(reg.items, 3000)
+	h1.wallet = 4321
+	h1.buy_upgrade("stash_size")
+	h1.buy_upgrade("stash_size")     # Lv2
+	h1.buy_upgrade("carry_size")     # Lv1
+	h1.stash.add("medical_bandage", 3)
+	h1.stash.add("ammo_rifle", 60)
+
+	_check_eq(sm.save({"hideout": h1.to_dict()}), "", "保存藏身处")
+	var r := sm.load_save()
+	_check(bool(r["ok"]), "读回藏身处")
+
+	var h2 := Hideout.new(reg.items, 0)
+	h2.from_dict(r["data"]["hideout"])
+	_check_eq(h2.level_of("stash_size"), 2, "升级等级往返一致")
+	_check_eq(h2.level_of("carry_size"), 1, "第二个升级也一致")
+	_check_eq(h2.wallet, 4321, "资金往返一致")
+	_check_eq(h2.stash.count_of("medical_bandage"), 3, "仓库物品往返一致")
+	_check_eq(h2.stash.count_of("ammo_rifle"), 60, "第二件也一致")
+
+	# ⚠️ 关键：读回来之后**效果函数必须跟着新等级走**。
+	#    只恢复等级数字、不重新应用，就会出现"升级了但仓库没变大"。
+	_check_eq(h2.slot_count(), h1.slot_count(), "仓库槽位效果一致（%d）" % h2.slot_count())
+	_check(absf(h2.carry_weight_limit() - h1.carry_weight_limit()) < 0.001,
+		"负重上限效果一致（%.1f kg）" % h2.carry_weight_limit())
+	_check(absf(h2.sell_ratio() - h1.sell_ratio()) < 0.001, "商人回收比例一致")
+	_check(h2.slot_count() > SaveManager.SAVE_VERSION * 0 + 40,
+		"升级后仓库确实比基础多（%d > 40）" % h2.slot_count())
+
+	sm.delete()
