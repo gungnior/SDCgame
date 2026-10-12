@@ -21,18 +21,36 @@ var _shown := false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	# ⚠️ 不要用 set_anchors_preset(FULL_RECT) 再手动赋 size ——
+	#    那会让 Godot 打印 "Nodes with non-equal opposite anchors will have
+	#    their size overridden after _ready()"，而且赋的 size 会被锚点覆盖。
+	#    正确做法：**零锚点（PRESET_TOP_LEFT）+ 自己钉 position/size**。
+	#    （设置菜单 / MerchantPanel 都改成了这套写法。）
+	set_anchors_preset(Control.PRESET_TOP_LEFT)
 	_build()
 	visible = false
+	_fit_viewport()
+	if get_viewport() != null:
+		get_viewport().size_changed.connect(_fit_viewport)
+
+
+## 把自身与遮罩都钉到视口尺寸
+func _fit_viewport() -> void:
+	var vp := get_viewport_rect().size
+	if vp.x < 4.0 or vp.y < 4.0:
+		vp = Vector2(ProjectSettings.get_setting("display/window/size/viewport_width", 640),
+			ProjectSettings.get_setting("display/window/size/viewport_height", 360))
+	position = Vector2.ZERO
+	size = vp
 	_layout()
-	get_viewport().size_changed.connect(_layout)
 
 
 func _build() -> void:
 	_panel = ColorRect.new()
 	_panel.color = Color(0.03, 0.04, 0.06, 0.82)
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP   # 挡住下层，防止误触摇杆
-	_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# 零锚点：尺寸由 _layout() 手动给（避免锚点覆盖 size 的警告）
+	_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	add_child(_panel)
 
 	_title = Label.new()
@@ -74,7 +92,8 @@ func _layout() -> void:
 	var vp := size
 	if vp.x < 4.0 or vp.y < 4.0:
 		vp = get_viewport_rect().size
-		size = vp                     # 把自己也撑开，后续 resized 才对
+		# 这里**不能**再 `size = vp` —— 有了锚点之后赋值会被覆盖并触发警告。
+		# 尺寸由 _fit_viewport() 统一负责。
 	_panel.position = Vector2.ZERO
 	_panel.size = vp
 
