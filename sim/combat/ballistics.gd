@@ -67,6 +67,32 @@ static func first_blocking_cell(grid: LogicalGrid, from: Vector2, to: Vector2) -
 	return null
 
 
+## 从 from 沿 dir 射线，返回**撞到第一堵墙的距离**（世界单位 = 逻辑格）。
+## 没撞墙返回 max_dist。
+##
+## 用途：视野锥裁切（真机反馈："玩家自动开火视野锥会透视，对于白模地图来说
+## 没有遮挡，会导致透视到敌人对墙开火"）。
+## 视觉上锥体必须被墙截断，否则玩家会以为"我看得见 = 我能打到"。
+##
+## 实现：复用 raycast_cells（标准 DDA，不会漏格），撞墙时退到
+## **上一个可走格的中心** —— 比墙略早一点点，读起来正好是"视线到此为止"。
+static func los_distance(grid: LogicalGrid, from: Vector2, dir: Vector2,
+		max_dist: float) -> float:
+	if grid == null or max_dist <= 0.0 or dir == Vector2.ZERO:
+		return max_dist
+	var d := dir.normalized()
+	var cells: Array[Vector2i] = raycast_cells(grid, from, from + d * max_dist)
+	if cells.is_empty():
+		return max_dist
+	for i in cells.size():
+		if not grid.is_walkable(cells[i]):
+			if i == 0:
+				return 0.0
+			var safe := cell_center(cells[i - 1])
+			return clampf(from.distance_to(safe), 0.0, max_dist)
+	return max_dist
+
+
 ## 两点之间是否通视（无墙阻挡）
 static func has_line_of_sight(grid: LogicalGrid, from: Vector2, to: Vector2) -> bool:
 	if grid == null:

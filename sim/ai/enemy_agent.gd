@@ -333,20 +333,46 @@ func _move_toward(flows: FlowFieldManager, goal: Vector2) -> void:
 		return
 	var d := flows.direction_for(my_cell, goal_cell)
 	if d == Vector2i.ZERO:
-		# ── 回退：朝目标直走 ──
-		# 走到这里有两种情况：
-		#   ① 目标不可达（流场给不出方向）
-		#   ② **本帧的流场构建预算用尽**（见 FlowFieldManager.MAX_BUILDS_PER_FRAME）
-		# ② 是真机性能优化的关键：玩家一移动，多个敌人的目标格同时变化，
-		#   若同一帧全建流场，AI 的 act 阶段会冲到 32ms（安卓 profiler 实测）。
-		#   预算外的敌人这一帧直走，下一帧就能拿到精确流场 —— 观感上完全看不出。
+		# ── 真拿不到方向才会走到这里 ──
+		#
+		# ⚠️ 注意：**流场预算用尽不再走这条路** —— FlowFieldManager 会复用
+		#    最近一次建好的场，旧场仍然是**绕墙的**。
+		#    所以这里只剩「目标不可达」一种情况。
+		#
+		# ⚠️ 而"朝目标直走"是**无视墙体**的。早先把它当预算回退用，
+		#    结果敌人贴着墙硬顶、卡在墙角 —— 用户描述成
+		#    "流场和白模地图冲突，视觉上能走的地方却走不了"
+		#    （地图本身没问题：可达性测试对 8 张图断言 0 个不可达格；
+		#      是**我为了压 AI 单帧耗时加的预算，把路径能力降级了**）。
+		#    现在只当最后手段，并且**先确认前方真的能走**，否则沿墙滑动。
 		var to := goal - pos
-		if to.length() > 0.01:
-			move_dir = to.normalized()
+		if to.length() <= 0.01:
+			move_dir = Vector2.ZERO
+			return
+		var want := to.normalized()
+		if _cell_step_ok(flows, my_cell, want):
+			move_dir = want
+			return
+		# 前方是墙：沿墙滑动（挑一个能走的侧向），别再顶墙
+		var side := Vector2(-want.y, want.x)
+		if _cell_step_ok(flows, my_cell, side):
+			move_dir = side
+		elif _cell_step_ok(flows, my_cell, -side):
+			move_dir = -side
 		else:
 			move_dir = Vector2.ZERO
 		return
 	move_dir = Vector2(d).normalized()
+
+
+## 朝 dir 迈一格，落点是不是可走？（用于"别顶墙"的局部规避）
+func _cell_step_ok(flows: FlowFieldManager, from_cell: Vector2i, dir: Vector2) -> bool:
+	if dir.length_squared() < 0.000001:
+		return false
+	var step := Vector2i(int(signf(dir.x)), int(signf(dir.y)))
+	if step == Vector2i.ZERO:
+		return false
+	return flows.is_walkable_cell(from_cell + step)
 
 
 func _to_string() -> String:

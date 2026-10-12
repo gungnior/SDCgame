@@ -96,7 +96,15 @@ static func scan_nearest(origin: Vector2, aim_dir: Vector2, half_angle_deg: floa
 
 
 ## 每帧更新锁定状态。
-## 返回 {target, dist, pos, changed, has_lock}
+## 返回 {target, dist, pos, changed, has_lock, visible}
+##
+## ⚠️ `visible` 和 `has_lock` 是【两件事】，必须分开：
+##   · has_lock：锁定还在（含 1.2 秒粘性）—— 用来**平滑瞄准**，避免准心抖
+##   · visible ：**这一帧真的看得见**（有视线、在锥内）—— 用来决定**能不能开火**
+##
+## 早先只有 has_lock，于是"自动射击"会在敌人躲到墙后**继续朝墙打 1.2 秒**
+## （用户实测："会导致透视到敌人对墙开火"）。
+## 修法就是让开火判定用 visible，而不是 has_lock。
 func update(dt: float, origin: Vector2, aim_dir: Vector2, half_angle_deg: float,
 		max_range: float, targets: Array, grid: LogicalGrid,
 		player_faction: String = "player",
@@ -115,21 +123,23 @@ func update(dt: float, origin: Vector2, aim_dir: Vector2, half_angle_deg: float,
 		locked_pos = found["pos"]
 		_grace = LOCK_GRACE
 		return {"target": found["target"], "dist": found["dist"],
-			"pos": found["pos"], "changed": changed, "has_lock": true}
+			"pos": found["pos"], "changed": changed,
+			"has_lock": true, "visible": true}
 
 	# 没找到：靠粘性再撑一会儿（否则准心会疯狂切换）
 	if locked_id >= 0:
 		_grace -= dt
 		if _grace > 0.0:
+			# ⚠️ 粘性期间 has_lock=true 但 **visible=false** —— 绝不允许开火
 			return {"target": {}, "dist": -1.0, "pos": locked_pos,
-				"changed": false, "has_lock": true}
+				"changed": false, "has_lock": true, "visible": false}
 		# 粘性耗尽 -> 真正脱锁
 		locked_id = -1
 		_grace = 0.0
 		changed = true
 
 	return {"target": {}, "dist": -1.0, "pos": Vector2.ZERO,
-		"changed": changed, "has_lock": false}
+		"changed": changed, "has_lock": false, "visible": false}
 
 
 ## 从当前方向朝目标转过去，带角度上限（避免瞬间甩头）。

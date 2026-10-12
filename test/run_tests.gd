@@ -71,6 +71,8 @@ func _initialize() -> void:
 	_suite("PC实测：藏身处布局", _test_hideout_layout)
 	_suite("手机实测：音频并发计数", _test_sfx_concurrency)
 	_suite("手机实测：HUD 性能读数", _test_hud_perf_metric)
+	_suite("白模：可走格必须真的可达", _test_whitebox_reachability)
+	_suite("白模：视野锥不透视", _test_cone_no_xray)
 
 	print("")
 	if _failed == 0:
@@ -678,12 +680,20 @@ func _test_flow_field_manager() -> void:
 			cells.append(r.center)
 			break
 	mgr2.begin_frame()
-	var built := 0
+	# ⚠️ 必须数【构建次数】，不能数"返回非空" ——
+	#    预算用尽时 field_for 会返回**旧场**（仍然绕墙，
+	#    这正是不让敌人顶墙的关键），它非空但并没有新建。
+	#    （"数非空返回"这个错我在第一次修预算时就犯过一次。）
+	var before_n := mgr2.build_count
 	for c in cells:
-		if mgr2.field_for(c) != null:
-			built += 1
+		mgr2.field_for(c)
+	var built := mgr2.build_count - before_n
 	_check_eq(built, 1, "同一帧内最多只建 1 个流场（实际 %d）" % built)
 	_check_eq(mgr2.defer_count, cells.size() - 1, "其余 %d 次被推迟" % (cells.size() - 1))
+	# 被推迟时必须拿到【旧场】而不是 null —— 否则调用方会退化成无视墙的直走
+	mgr2.begin_frame()
+	var stale := mgr2.field_for(Vector2i(1, 1))
+	_check(stale != null, "预算用尽时返回旧场（不是 null），保证仍然绕墙")
 	# 下一帧应当能继续建（注意：要数「构建次数」而不是「返回非空」——
 	# 已缓存的格子返回非空但不构建，我第一版断言就写错了）
 	mgr2.begin_frame()
@@ -2796,3 +2806,129 @@ func _test_hud_perf_metric() -> void:
 	_check(tel.contains("func last_avg_ms"), "Tel 暴露 last_avg_ms")
 	_check(tel.contains("func last_worst_ms"), "Tel 暴露 last_worst_ms")
 	_check(tel.contains("_last_avg_ms = wall"), "窗口关闭时记录真实墙钟均值")
+
+
+# ─────────────────── 白模白模：视觉可走 == 实际可走 ───────────────────
+
+func _test_whitebox_reachability() -> void:
+	# 真机反馈："流场有概率会和白模地图冲突，导致白模视觉上能走的地方，却走不了"
+	#
+	# 关键：**"看起来可走"必须等价于"玩家真的能走到"**。
+	# 白模画的是 grid.is_walkable()，而玩家的碰撞也是 grid.is_walkable() ——
+	# 两者同源，所以问题只可能出在**玩家的移动模型**上：
+	# 碰撞只查【中心点】、且逐轴移动，
+	# 于是被墙夹住的窄缝 / 对角墙角，视觉上像通道、实际进不去。
+	# 这里用**和玩家完全相同的移动规则**做 BFS，断言所有可走格都真的可达。
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+	var seeds: Array[int] = [11, 777, 4242, 31337, 20261012, 99, 5000, 123456]
+	var checked := 0
+	var bad_total := 0
+	var worst := ""
+	for s in seeds:
+		var gen := MapGenerator.new()
+		if not gen.generate(s, reg.room_types):
+			continue
+		checked += 1
+		var g := gen.grid
+		var start := gen.spawn_room().center
+		if not g.is_walkable(start):
+			continue
+		# 与 raid_scene._walkable / _tick_player 完全一致的规则
+		var seen := {}
+		var q: Array[Vector2i] = [start]
+		seen[start] = true
+		var dirs: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0),
+			Vector2i(0, 1), Vector2i(0, -1)]
+		while not q.is_empty():
+			var cur: Vector2i = q.pop_back()
+			for d in dirs:
+				var nb := cur + d
+				if seen.has(nb):
+					continue
+				if not g.is_walkable(nb):
+					continue
+				seen[nb] = true
+				q.append(nb)
+		# 统计：可走但不可达的格数
+		var bad := 0
+		var sample := ""
+		for y in g.height:
+			for x in g.width:
+				var cell := Vector2i(x, y)
+				if g.is_walkable(cell) and not seen.has(cell):
+					bad += 1
+					if sample == "":
+						sample = str(cell)
+		bad_total += bad
+		if bad > 0 and worst == "":
+			worst = "种子 %d：%d 个可走格到不了（例如 %s）" % [s, bad, sample]
+	_check(checked >= 6, "抽查了 %d 张地图" % checked)
+	_check_eq(bad_total, 0,
+		"所有可走格从出生点都真的能走到（不可达格总数 %d）%s"
+		% [bad_total, "" if bad_total == 0 else "；首个：" + worst])
+
+	# 且出生点周围至少要有一定空间，否则开局就卡住
+	var gen2 := MapGenerator.new()
+	if gen2.generate(4242, reg.room_types):
+		var g2 := gen2.grid
+		var sp := gen2.spawn_room().center
+		var open_n := 0
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				if g2.is_walkable(sp + Vector2i(dx, dy)):
+					open_n += 1
+		_check(open_n >= 5, "出生点周围至少 5/9 格可走（实际 %d）" % open_n)
+
+
+func _test_cone_no_xray() -> void:
+	# 真机反馈："玩家自动开火视野锥会透视，对于白模地图来说没有遮挡，
+	#            会导致透视到敌人对墙开火。"
+	# 拆成两个独立的缺陷：
+	#   ① **视觉**：锥体是固定半径扇形，直接穿过墙
+	#   ② **逻辑**：自动射击用 has_lock（含 1.2 秒粘性），
+	#      敌人躲到墙后仍会朝墙打满 1.2 秒
+	var bl := FileAccess.get_file_as_string("res://sim/combat/ballistics.gd")
+	_check(bl.contains("func los_distance"), "有 los_distance（算撞墙前的距离）")
+	_check(bl.contains("raycast_cells"), "复用标准 DDA（不漏格）")
+
+	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	_check(rs.contains("Ballistics.los_distance"), "锥体逐条射线做裁切")
+	_check(rs.contains("screen_diag_cells"),
+		"视觉半径不超过屏幕对角线（屏幕外看不见，不白算）")
+	# 自动射击必须用 visible，不是 has_lock
+	_check(rs.contains('_lock_info.get("visible", false)'),
+		"自动射击要求【当前可见】而不是锁定粘性")
+	_check(not rs.contains("Game.auto_fire and auto_aim.has_lock()"),
+		"不得再用 has_lock 决定开火")
+
+	var aa := FileAccess.get_file_as_string("res://sim/combat/auto_aim.gd")
+	_check(aa.contains('"visible": true') and aa.contains('"visible": false'),
+		"update() 区分 has_lock 与 visible")
+	_check(aa.contains("has_lock=true 但 **visible=false**") or
+		aa.contains("visible=false"), "注释说明了粘性期间禁止开火")
+
+	# 行为验证：los_distance 在墙前就会截断
+	var grid := _open_grid(20, 14)
+	# 在 x=10 竖一道墙
+	for y in 14:
+		grid.set_cell(Vector2i(10, y), LogicalGrid.Cell.SOLID)
+	var d := Ballistics.los_distance(grid, Vector2(5.5, 7.5), Vector2.RIGHT, 18.0)
+	_check(d < 5.2 and d > 3.5,
+		"朝墙射线在墙前截断（%.2f 格，墙在 x=10，起点 x=5.5）" % d)
+	# 空地：给多少走多少
+	var g2 := _open_grid(20, 14)
+	_check(absf(Ballistics.los_distance(g2, Vector2(2.5, 2.5), Vector2.RIGHT, 6.0) - 6.0) < 0.01,
+		"空地射线不截断")
+	# 起点就在墙里 -> 0
+	_check(Ballistics.los_distance(grid, Vector2(10.5, 7.5), Vector2.RIGHT, 8.0) == 0.0,
+		"起点在墙里返回 0（不会算出负距离或崩）")
+
+	# 粘性期间 visible 必须是 false
+	var aa2 := AutoAim.new()
+	var targets := [{"id": 1, "pos": Vector2(8.5, 7.5), "faction": "enemy", "alive": true}]
+	var r1 := aa2.update(0.1, Vector2(2.5, 7.5), Vector2.RIGHT, 55.0, 30.0, targets, g2)
+	_check(bool(r1["visible"]), "看得见时 visible=true")
+	var r2 := aa2.update(0.1, Vector2(2.5, 7.5), Vector2.RIGHT, 55.0, 30.0, [], g2)
+	_check(bool(r2["has_lock"]) and not bool(r2["visible"]),
+		"粘性期间 has_lock=true 但 visible=false（这正是『对墙开火』的修法）")

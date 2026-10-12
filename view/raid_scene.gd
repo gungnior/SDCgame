@@ -279,7 +279,10 @@ func _setup_view() -> void:
 	_hud_fs = fs          # 供 _update_hud 使用（局部变量跨不过函数）
 
 	hud_label = Label.new()
-	hud_label.position = Vector2(10, 6)
+	# ⚠️ 触屏时左上角有【齿轮按钮】（打开设置/暂停），HUD 第一行会被它压住。
+	#    实测截图里 "HP 100/100" 的 H 直接被齿轮盖掉。
+	#    这里把 HUD 整体右移让开齿轮。
+	hud_label.position = Vector2(64 if _is_touch else 10, 6)
 	hud_label.add_theme_font_size_override("font_size", fs)
 	hud_label.add_theme_color_override("font_color", Color(0.92, 0.94, 0.96))
 	hud.add_child(hud_label)
@@ -1151,8 +1154,13 @@ func _update_auto_aim(delta: float) -> void:
 			# 每秒最多转 AUTO_AIM_TURN_DEG 度 —— 避免"瞬移式"甩枪（手感很假）
 			player_aim = AutoAim.turn_toward(player_aim, to_t, AUTO_AIM_TURN_DEG * delta)
 
-	# ② 自动射击：锁定即开火（优先最近，scan_nearest 已保证）
-	if Game != null and Game.auto_fire and auto_aim.has_lock():
+	# ② 自动射击：**必须当前可见**（不能用锁定粘性）
+	#
+	# ⚠️ 用户实测："会导致透视到敌人对墙开火"。
+	#    粘性（1.2 秒）是为了让【瞄准】不抖，但敌人躲到墙后时
+	#    has_lock 仍为 true -> 自动射击会朝墙打满 1.2 秒。
+	#    所以这里判定用 `visible`（这一帧真有视线），不是 has_lock。
+	if Game != null and Game.auto_fire and bool(_lock_info.get("visible", false)):
 		if not medical.is_treating():
 			_try_fire()
 
@@ -1463,9 +1471,14 @@ func _draw() -> void:
 	# ── 锥形视野 + 锁定指示（真机反馈 #5）──
 	# 必须把视野范围画出来 —— 玩家要能看见自己锁到了谁。
 	# 锥角来自枪械数据（weapon.aim_cone_deg），所以换枪视野就变。
+	#
+	# ⚠️ 用户实测："视野锥会透视，对于白模地图来说没有遮挡，
+	#    会导致透视到敌人对墙开火。"
+	#    早先锥体是个**固定半径的扇形**，直接穿过墙体 —— 视觉上在告诉你
+	#    "你能看到墙后面"，而实际上打不到。现在**每条锥线都做射线裁切**，
+	#    锥体贴着墙就停住。这既符合真实视野，也消除了"看得见却打不到"的误导。
 	if player_weapon != null and not raid.is_over():
 		var pcz := player_pos * CELL_PX
-		var cone_r := float(player_weapon.def.range_m) * CELL_PX
 		var half := deg_to_rad(aim_cone_deg())
 		var base := player_aim.angle()
 		var has_lock := auto_aim.has_lock()
@@ -1473,19 +1486,36 @@ func _draw() -> void:
 			else Color(0.55, 0.85, 1.0, 0.055))
 		var edge_col := (Color(1.0, 0.62, 0.38, 0.42) if has_lock
 			else Color(0.55, 0.85, 1.0, 0.20))
-		var segs := 18
+		# 视觉半径不必超过屏幕对角线 —— 屏幕外的部分看不见，白算
+		var vp := get_viewport_rect().size
+		var screen_diag_cells := (vp.length() / CELL_PX) + 2.0
+		var cone_r_cells := minf(float(player_weapon.def.range_m), screen_diag_cells)
+		var segs := 22
 		var pts := PackedVector2Array()
 		pts.append(pcz)
+		var edge_a := Vector2.ZERO
+		var edge_b := Vector2.ZERO
 		for i in segs + 1:
 			var a := base - half + (2.0 * half) * (float(i) / float(segs))
-			pts.append(pcz + Vector2.from_angle(a) * cone_r)
+			var d := Vector2.from_angle(a)
+			# 逐条射线算"撞墙前的距离"，锥体于是被墙截断
+			var dist := Ballistics.los_distance(gen.grid, player_pos, d, cone_r_cells)
+			var end := pcz + d * (dist * CELL_PX)
+			pts.append(end)
+			if i == 0:
+				edge_a = end
+			elif i == segs:
+				edge_b = end
 		draw_colored_polygon(pts, cone_col)
-		draw_line(pcz, pcz + Vector2.from_angle(base - half) * cone_r, edge_col, 1.5)
-		draw_line(pcz, pcz + Vector2.from_angle(base + half) * cone_r, edge_col, 1.5)
+		draw_line(pcz, edge_a, edge_col, 1.5)
+		draw_line(pcz, edge_b, edge_col, 1.5)
 		if has_lock:
 			var lp := auto_aim.locked_pos * CELL_PX
 			var s := 13.0
-			var lc := Color(1.0, 0.45, 0.35, 0.95)
+			# 只在**当前可见**时用实线 —— 粘性期间的锁定改成虚线感（画角标）
+			var vis := bool(_lock_info.get("visible", false))
+			var lc := (Color(1.0, 0.45, 0.35, 0.95) if vis
+				else Color(1.0, 0.45, 0.35, 0.35))
 			draw_line(lp + Vector2(-s, -s), lp + Vector2(s, -s), lc, 2.0)
 			draw_line(lp + Vector2(s, -s), lp + Vector2(s, s), lc, 2.0)
 			draw_line(lp + Vector2(s, s), lp + Vector2(-s, s), lc, 2.0)

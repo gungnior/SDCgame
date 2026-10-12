@@ -21,7 +21,10 @@ var _fields: Dictionary = {}        ## target_cell(Vector2i) -> FlowField
 const MAX_BUILDS_PER_FRAME := 1
 
 var _builds_this_frame := 0
-var defer_count: int = 0            ## 因预算被推迟的次数（调试/测试用）
+var defer_count: int = 0
+## 最近一次建好的场。预算用尽时复用它 —— 旧场仍然【绕墙】，
+## 而"朝目标直走"是无视墙体的，会让敌人顶在墙上（真机反馈的根因）。
+var _last_field: FlowField = null            ## 因预算被推迟的次数（调试/测试用）
 
 ## 统计（用于验证"只在换格时重建"这条优化真的生效）
 var build_count: int = 0            ## 实际构建次数
@@ -35,6 +38,7 @@ func setup(grid: LogicalGrid) -> void:
 	hit_count = 0
 	_builds_this_frame = 0
 	defer_count = 0
+	_last_field = null
 
 
 ## 每帧开始时调用一次，重置构建预算。
@@ -43,18 +47,29 @@ func begin_frame() -> void:
 
 
 ## 取目标格对应的流场；不存在则构建（**受每帧预算限制**）。
-## 预算用尽时返回 null —— 调用方应退化为"直接朝目标走"，下一帧就能拿到精确流场。
+##
+## ⚠️ 预算用尽时返回【最近一次建好的场】，**不要返回 null**。
+##
+## 早先返回 null，调用方退化成"朝目标直走" —— 而直走**无视墙体**，
+## 敌人于是会贴着墙硬顶、卡在墙角。
+## 用户实测描述为"流场和白模地图冲突，视觉上能走的地方却走不了"：
+## 地图本身没问题（可达性测试对 8 张图断言 0 个不可达格），
+## 是**我为了压 AI 单帧耗时加的预算，把路径能力降级了**。
+##
+## 旧场虽然指向的是"上一两帧的目标格"，但它**仍然是绕墙的** ——
+## 目标几乎没动，方向基本正确，而绕墙这件事绝不能丢。
 func field_for(target_cell: Vector2i) -> FlowField:
 	if _grid == null:
 		return null
 	if _fields.has(target_cell):
 		hit_count += 1
-		return _fields[target_cell]
+		_last_field = _fields[target_cell]
+		return _last_field
 
-	# 预算用尽：本帧不再建场（否则 AI 单帧会冲到几十毫秒）
+	# 预算用尽：本帧不新建（否则 AI 单帧会冲到几十毫秒），退回复用旧场
 	if _builds_this_frame >= MAX_BUILDS_PER_FRAME:
 		defer_count += 1
-		return null
+		return _last_field
 
 	var f := FlowField.new()
 	f.load_from_grid(_grid)
@@ -62,7 +77,15 @@ func field_for(target_cell: Vector2i) -> FlowField:
 	_fields[target_cell] = f
 	build_count += 1
 	_builds_this_frame += 1
+	_last_field = f
 	return f
+
+
+## 某格能不能走（给"沿墙滑动"用；直接问网格，不依赖流场是否已建）
+func is_walkable_cell(cell: Vector2i) -> bool:
+	if _grid == null:
+		return false
+	return _grid.is_walkable(cell)
 
 
 ## 敌人调用这个拿方向。target_cell 是目标当前所在逻辑格。
