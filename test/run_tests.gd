@@ -68,6 +68,7 @@ func _initialize() -> void:
 	_suite("PC实测：粒子坐标换算", _test_fx_cell_coords)
 	_suite("PC实测：键位与设置菜单", _test_keybindings)
 	_suite("PC实测：Control 尺寸不得塌成 0", _test_control_size_not_zero)
+	_suite("PC实测：藏身处布局", _test_hideout_layout)
 
 	print("")
 	if _failed == 0:
@@ -2707,3 +2708,35 @@ func _test_settings_menu_layout() -> void:
 	_check(i_resume < i_scroll,
 		"「继续」在滚动区【之前】创建 = 位于固定栏，不会被内容挤出屏幕")
 	_check(sm.contains("went_hideout.emit()"), "「返回藏身处」仍可用")
+
+
+func _test_hideout_layout() -> void:
+	# 真机反馈："在返回藏身处后加入 开始下一局的 ui"
+	# 查证：藏身处早先把所有内容塞进一个 VBox，
+	# 640x360 下内容总高约 586px -> **「出发」按钮被挤出屏幕**，
+	# 玩家回到藏身处后找不到怎么开下一局。
+	# （与设置菜单"看不到继续"完全同类：内容超出视口 + 关键按钮放在末尾。）
+	var hs := FileAccess.get_file_as_string("res://view/hideout_scene.gd")
+	_check(hs.contains("开始下一局"), "按钮文案是「开始下一局」")
+	_check(hs.contains("func _fit_viewport"), "藏身处也有 _fit_viewport 兜底")
+	_check(hs.contains("ScrollContainer"), "内容放进滚动容器")
+	# 关键：按钮必须在滚动区【之前】创建 = 位于顶部固定栏
+	var i_go := hs.find("开始下一局")
+	var i_scroll := hs.find("ScrollContainer.new()")
+	_check(i_go > 0 and i_scroll > 0, "两者都存在")
+	_check(i_go < i_scroll,
+		"「开始下一局」在滚动区之前创建 = 顶部固定栏，任何分辨率都可见（go@%d < scroll@%d）"
+		% [i_go, i_scroll])
+	_check(hs.contains("Game.start_raid()"), "点了会开新一局")
+
+
+func _test_whitebox_is_default() -> void:
+	# 真机反馈："把默认地图换成白模"
+	# （查证发现它**本来就是默认**，这个测试用来防止被改回去）
+	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	_check(rs.contains("var render_mode := RENDER_WHITEBOX"),
+		"默认渲染模式是白模")
+	_check(rs.contains("const RENDER_WHITEBOX := 0"), "白模常量是 0")
+	# 而且不能在任何地方被持久化/覆盖成美术模式
+	_check(not rs.contains("render_mode = RENDER_ART\n\t\t_build_map_texture()\n\t_setup_sim"),
+		"启动流程里不会强制切成美术模式")

@@ -23,7 +23,7 @@ var _status: Label
 
 func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color(0.07, 0.08, 0.10))
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	# _build 里会调 _fit_viewport 把自身尺寸钉到视口
 	if Game != null:
 		Game.ensure_loaded()
 		Game.apply_accessibility()
@@ -37,22 +37,72 @@ func _build() -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
+	# ⚠️ 布局必须分两段：**顶部固定栏 + 下方滚动区**。
+	#
+	# 早先把"资金/仓库/升级/辅助瞄准/出发按钮"全塞进一个 VBox，
+	# 而 640x360 的视口装不下（内容总高约 586px）——
+	# **「出发」按钮被直接挤出屏幕**，玩家回到藏身处后找不到怎么开下一局。
+	# （与设置菜单"看不到继续"是完全相同的一类问题。
+	#  Control 直接挂在 CanvasLayer/Viewport 下时锚点解析不到父矩形，
+	#  所以这里也补了 _fit_viewport 兜底。）
+	_fit_viewport()
+	if get_viewport() != null:
+		get_viewport().size_changed.connect(_fit_viewport)
+
+	var col := VBoxContainer.new()
+	col.set_anchors_preset(Control.PRESET_FULL_RECT)
+	col.add_theme_constant_override("separation", 4)
+	add_child(col)
+
+	# ① 顶部固定栏：标题 + 资金 + 【开始下一局】
+	var bar := MarginContainer.new()
+	bar.add_theme_constant_override("margin_left", 20)
+	bar.add_theme_constant_override("margin_top", 12)
+	bar.add_theme_constant_override("margin_right", 20)
+	bar.add_theme_constant_override("margin_bottom", 6)
+	col.add_child(bar)
+
+	var bar_row := HBoxContainer.new()
+	bar_row.add_theme_constant_override("separation", 12)
+	bar.add_child(bar_row)
+
+	var head := VBoxContainer.new()
+	head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_theme_constant_override("separation", 0)
+	bar_row.add_child(head)
+	head.add_child(_title("藏身处", 26, Color(0.94, 0.96, 1.0)))
+	_wallet_label = _title("", 16, Color(0.95, 0.82, 0.40))
+	head.add_child(_wallet_label)
+
+	# 开始下一局 —— 真机反馈："在返回藏身处后加入 开始下一局的 ui"
+	var go := TouchButton.new()
+	go.label_text = "开始下一局"
+	go.icon_text = "▶"
+	go.use_hold = false
+	go.accent = Color(0.42, 0.82, 0.52)
+	go.base_radius = 44.0
+	go.custom_minimum_size = Vector2(250, 96)
+	go.pressed_down.connect(_on_go)
+	bar_row.add_child(go)
+
+	# ② 下方滚动区：仓库 / 升级 / 开关
+	var sc := ScrollContainer.new()
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	col.add_child(sc)
+
 	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 24)
-	margin.add_theme_constant_override("margin_top", 16)
-	margin.add_theme_constant_override("margin_right", 24)
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_theme_constant_override("margin_left", 20)
+	margin.add_theme_constant_override("margin_top", 2)
+	margin.add_theme_constant_override("margin_right", 20)
 	margin.add_theme_constant_override("margin_bottom", 16)
-	add_child(margin)
+	sc.add_child(margin)
 
 	_root = VBoxContainer.new()
+	_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root.add_theme_constant_override("separation", 8)
 	margin.add_child(_root)
-
-	_root.add_child(_title("藏身处", 30, Color(0.94, 0.96, 1.0)))
-
-	_wallet_label = _title("", 18, Color(0.95, 0.82, 0.40))
-	_root.add_child(_wallet_label)
 
 	_root.add_child(_title("仓库", 16, Color(0.70, 0.78, 0.90)))
 	_stash_label = _title("", 14, Color(0.80, 0.84, 0.90))
@@ -78,17 +128,16 @@ func _build() -> void:
 	_status = _title("", 14, Color(0.55, 0.90, 0.62))
 	_root.add_child(_status)
 
-	# 出发按钮 —— 放到最后，占满宽
-	var go := TouchButton.new()
-	go.label_text = "出 发"
-	go.icon_text = "▶"
-	go.use_hold = false
-	go.accent = Color(0.42, 0.82, 0.52)
-	go.base_radius = 40.0
-	go.custom_minimum_size = Vector2(0, 110)
-	go.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	go.pressed_down.connect(_on_go)
-	_root.add_child(go)
+
+## 把自身尺寸钉到视口（Control 挂在非 Control 父节点下时必须手动做）
+func _fit_viewport() -> void:
+	var vp := get_viewport_rect().size
+	if vp.x <= 0.0 or vp.y <= 0.0:
+		vp = Vector2(ProjectSettings.get_setting("display/window/size/viewport_width", 640),
+			ProjectSettings.get_setting("display/window/size/viewport_height", 360))
+	position = Vector2.ZERO
+	size = vp
+	set_anchors_preset(Control.PRESET_FULL_RECT)
 
 
 func _title(txt: String, fs: int, col: Color) -> Label:
