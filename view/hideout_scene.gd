@@ -19,6 +19,8 @@ var _root: VBoxContainer
 var _wallet_label: Label
 var _stash_label: Label
 var _status: Label
+## 商人面板（④ 商人系统）—— 商人逻辑早就有，缺的是入口
+var merchant_panel: MerchantPanel = null
 
 
 func _ready() -> void:
@@ -80,6 +82,16 @@ func _build() -> void:
 	head.add_child(_wallet_label)
 
 	# 开始下一局 —— 真机反馈："在返回藏身处后加入 开始下一局的 ui"
+	var mer := TouchButton.new()
+	mer.label_text = "商人"
+	mer.icon_text = "¥"
+	mer.use_hold = false
+	mer.accent = Color(0.85, 0.72, 0.38)
+	mer.base_radius = 34.0
+	mer.custom_minimum_size = Vector2(156, 96)   # 必须 > 96*1.4=134.4 才会走圆角矩形绘制
+	mer.pressed_down.connect(_open_merchant)
+	bar_row.add_child(mer)
+
 	var go := TouchButton.new()
 	go.label_text = "开始下一局"
 	go.icon_text = "▶"
@@ -132,6 +144,12 @@ func _build() -> void:
 
 	_status = _title("", 14, Color(0.55, 0.90, 0.62))
 	_root.add_child(_status)
+
+	# 商人面板：挂在场景根上（不是 _root），这样它能盖住整个屏幕
+	merchant_panel = MerchantPanel.new()
+	merchant_panel.changed.connect(_refresh)
+	merchant_panel.closed.connect(func(): if Game != null: Game.save_game())
+	add_child(merchant_panel)
 
 
 ## 把自身尺寸钉到视口（Control 挂在非 Control 父节点下时必须手动做）
@@ -233,6 +251,15 @@ func _refresh() -> void:
 		lines.append("  …还有 %d 种" % (entries.size() - 10))
 	_stash_label.text = "\n".join(lines)
 	_status.text = ""
+
+
+## 打开商人（买卖）
+func _open_merchant() -> void:
+	if merchant_panel == null or Game == null or Game.hideout == null:
+		return
+	merchant_panel.open(Game.hideout, Game.reg.items)
+	if Sfx != null:
+		Sfx.play("ui_open")
 
 
 func _on_upgrade(id: String) -> void:

@@ -19,9 +19,21 @@ var duration: float = 0.0
 var elapsed: float = 0.0
 var _active: Dictionary = {}
 
+## 治疗速度倍率 —— 来自藏身处的「战地急救」升级。
+##
+## ⚠️ 真机/设计缺口：`Hideout.heal_speed_multiplier()` 早先**没人调用**，
+##    也就是"升级花了钱但毫无作用"。现在由 RaidSession 从 modifiers 传进来。
+##    >1 表示更快（耗时更短）。
+var speed_multiplier: float = 1.0
+
 ## 统计
 var treatments_done: int = 0
 var total_healed: int = 0
+
+
+## 设置治疗速度倍率（藏身处升级）。返回是否生效。
+func set_speed_multiplier(m: float) -> void:
+	speed_multiplier = clampf(m, 0.2, 5.0)
 
 
 func is_treating() -> bool:
@@ -56,7 +68,8 @@ func start(item: ItemDef, vitals: Vitals) -> String:
 
 	active_item_id = item.id
 	_active = treat
-	duration = maxf(0.1, float(treat.get("time", 2.0)))
+	# 藏身处的「战地急救」升级通过 speed_multiplier 缩短耗时
+	duration = maxf(0.1, float(treat.get("time", 2.0)) / maxf(speed_multiplier, 0.001))
 	elapsed = 0.0
 	return ""
 

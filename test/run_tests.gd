@@ -77,6 +77,8 @@ func _initialize() -> void:
 	_suite("群体 AI：包夹角色", _test_squad_flanking)
 	_suite("群体 AI：警戒扩散", _test_squad_alert_spread)
 	_suite("群体 AI：警戒驱动行为", _test_squad_alert_drives_behavior)
+	_suite("藏身处：升级效果接进局内", _test_hideout_effects_reach_raid)
+	_suite("藏身处：商人买卖", _test_merchant)
 
 	print("")
 	if _failed == 0:
@@ -3321,3 +3323,117 @@ func _test_squad_alert_drives_behavior() -> void:
 	var before := lone.state
 	lone.tick(0.1, ctx3)
 	_check_eq(lone.state, before, "没编队的敌人不受小队警戒影响")
+
+
+# ─────────────────── ④ 藏身处升级效果 + 商人 ───────────────────
+
+func _test_hideout_effects_reach_raid() -> void:
+	# 真机/设计缺口：`Hideout.raid_modifiers()` / `heal_speed_multiplier()` /
+	# `carry_weight_limit()` **全都实现了，但一个都没被调用** ——
+	# 也就是玩家花钱买「负重训练」「战地急救」完全没效果。
+	var reg := DataRegistry.new()
+	reg.load_all("A")
+	var gen := MapGenerator.new()
+	gen.generate(1234, reg.room_types)
+
+	# ── 无升级：用默认值 ──
+	var h0 := Hideout.new(reg.items, 0)
+	var r0 := RaidSession.new(reg.items, SimRng.new(1), h0.stash, h0.raid_modifiers())
+	_check_eq(r0.carry.slot_count(), RaidSession.DEFAULT_CARRY_SLOTS,
+		"无升级时背包格数是默认值")
+	_check(absf(r0.carry.max_weight - RaidSession.DEFAULT_CARRY_WEIGHT) < 0.01,
+		"无升级时负重上限是默认值 %.1f" % r0.carry.max_weight)
+	_check(absf(r0.heal_speed - 1.0) < 0.001, "无升级时治疗速度是 1.0")
+
+	# ── 买升级：必须真的进到局内 ──
+	var h1 := Hideout.new(reg.items, 999999)
+	h1.buy_upgrade("carry_size")       # +3 kg
+	h1.buy_upgrade("carry_size")       # +3 kg
+	h1.buy_upgrade("heal_speed")       # +12%
+	var mods := h1.raid_modifiers()
+	_check(absf(float(mods["carry_weight_limit"]) - h1.carry_weight_limit()) < 0.001,
+		"raid_modifiers 里的负重上限与 Hideout 一致")
+	var r1 := RaidSession.new(reg.items, SimRng.new(2), h1.stash, mods)
+	_check(absf(r1.carry.max_weight - h1.carry_weight_limit()) < 0.001,
+		"局内负重上限真的用了升级值（%.1f kg）" % r1.carry.max_weight)
+	_check(r1.carry.max_weight > r0.carry.max_weight + 5.0,
+		"升了两级后确实更宽（%.1f > %.1f）" % [r1.carry.max_weight, r0.carry.max_weight])
+	_check(absf(r1.heal_speed - h1.heal_speed_multiplier()) < 0.001,
+		"局内治疗速度用了升级值（%.2f）" % r1.heal_speed)
+	_check(r1.heal_speed > 1.0, "治疗速度确实变快了")
+
+	# ── 治疗速度真的缩短耗时 ──
+	var bandage: ItemDef = reg.get_item("medical_bandage")
+	var md := MedicalSystem.new()
+	var vit := Vitals.new()
+	vit.reset(100, 40)
+	vit.hp = 10
+	_check_eq(md.start(bandage, vit), "", "无加成时能开始治疗")
+	var base_dur := md.duration
+	md.cancel()
+	md.set_speed_multiplier(r1.heal_speed)
+	vit.hp = 10
+	_check_eq(md.start(bandage, vit), "", "有加成时能开始治疗")
+	_check(md.duration < base_dur,
+		"升级后治疗耗时更短（%.2fs < %.2fs）" % [md.duration, base_dur])
+	# 倍率夹取：极端值不能变成 0 秒或无穷
+	md.cancel()
+	md.set_speed_multiplier(999.0)
+	_check(md.speed_multiplier <= 5.0, "倍率有上限（%.1f）" % md.speed_multiplier)
+	md.set_speed_multiplier(-5.0)
+	_check(md.speed_multiplier >= 0.2, "倍率有下限（%.1f）" % md.speed_multiplier)
+
+	# ── 商人回收比例也受升级影响 ──
+	var h2 := Hideout.new(reg.items, 999999)
+	var before := h2.sell_ratio()
+	h2.buy_upgrade("merchant_rep")
+	_check(h2.sell_ratio() > before,
+		"「商人关系」升级提升回收比例（%.2f -> %.2f）" % [before, h2.sell_ratio()])
+
+
+func _test_merchant() -> void:
+	# `Hideout.buy/sell/stock_price` 早就实现了，缺的是 UI 入口（已补 MerchantPanel）。
+	# 这里测交易逻辑本身。
+	var reg := DataRegistry.new()
+	reg.load_all("A")
+	var h := Hideout.new(reg.items, 1000)
+
+	# 买入：钱够
+	var price := h.stock_price("ammo_rifle")
+	_check(price > 0, "步枪弹有售价 %d" % price)
+	_check_eq(h.buy("ammo_rifle", 10), "", "买 10 发成功")
+	_check_eq(h.stash.count_of("ammo_rifle"), 10, "仓库收到 10 发")
+	_check_eq(h.wallet, 1000 - price * 10, "钱扣对了（%d）" % h.wallet)
+
+	# 买入：钱不够要有明确原因、且不能扣钱
+	var w0 := h.wallet
+	var e1 := h.buy("valuables_gpu", 1)
+	_check(not e1.is_empty(), "钱不够时返回原因：%s" % e1)
+	_check_eq(h.wallet, w0, "失败时不能扣钱")
+
+	# 买入不存在的物品
+	_check(not h.buy("no_such_item", 1).is_empty(), "买不存在的物品有原因")
+
+	# 卖出：按回收比例
+	var ratio := h.sell_ratio()
+	var def: ItemDef = reg.get_item("ammo_rifle")
+	var expect_unit := int(round(float(def.value) * ratio))
+	var got := h.sell("ammo_rifle", 4)
+	_check_eq(got, expect_unit * 4, "卖出到账 %d（单价 %d x4）" % [got, expect_unit])
+	_check_eq(h.stash.count_of("ammo_rifle"), 6, "仓库剩下 6 发")
+
+	# 卖不存在的
+	_check_eq(h.sell("no_such_item", 1), 0, "卖不存在的物品返回 0")
+	_check_eq(h.sell("ammo_rifle", 0), 0, "卖 0 个返回 0")
+
+	# 卖超量：只卖仓库里有的
+	var have := h.stash.count_of("ammo_rifle")
+	var got2 := h.sell("ammo_rifle", 999)
+	_check_eq(got2, expect_unit * have, "卖超量只卖实际持有的（%d 发）" % have)
+	_check_eq(h.stash.count_of("ammo_rifle"), 0, "卖光了")
+
+	# 仓库满时买入要报错而不是吞钱
+	var tiny := Hideout.new(reg.items, 999999)
+	tiny.stash.set_slot_capacity(1)
+	var e2 := tiny.buy("armor_heavy", 3)
+	_check(not e2.is_empty(), "仓库放不下时返回原因：%s" % e2)

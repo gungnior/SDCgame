@@ -184,13 +184,17 @@ func _setup_sim() -> void:
 		hideout = Hideout.new(reg.items, 3000)
 		hideout.wallet += 5000
 
-	raid = RaidSession.new(reg.items, _rng, hideout.stash)
+	# ⚠️ 把藏身处的升级效果传进本局 —— 否则升级花了钱但毫无作用。
+	#    （早先 raid_modifiers() 从未被调用。）
+	raid = RaidSession.new(reg.items, _rng, hideout.stash, hideout.raid_modifiers())
 	raid.load_map(gen)
 	raid.start(240.0)
 
 	vitals = Vitals.new()
 	vitals.reset(100, 40)
 	medical = MedicalSystem.new()
+	# 藏身处「战地急救」升级：治疗更快
+	medical.set_speed_multiplier(raid.heal_speed)
 
 	# 玩家武器：步枪 + 自动装配件（展示 A 阶段改装系统）
 	var loadout := WeaponModding.create_loadout(reg.get_weapon("weapon_rifle"), WeaponModding.SLOTS_A)

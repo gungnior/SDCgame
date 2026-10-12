@@ -55,11 +55,27 @@ var _map: MapGenerator = null
 
 ## shared_stash：藏身处仓库必须【跨局共享】——否则"死亡掉装备"就没有对照物了。
 ## 不传则本局自带一个空仓库（仅适合单局测试）。
-func _init(items: Dictionary = {}, rng: SimRng = null, shared_stash: Inventory = null) -> void:
+func _init(items: Dictionary = {}, rng: SimRng = null, shared_stash: Inventory = null,
+		modifiers: Dictionary = {}) -> void:
 	_items = items
 	_rng = rng if rng != null else SimRng.new(1)
-	carry = Inventory.new(12, _items, 20.0)
+	# ⚠️ 负重上限与背包格数必须来自藏身处升级，**不能硬编码**。
+	#    早先写死 `Inventory.new(12, _items, 20.0)` ——
+	#    于是 `Hideout.carry_weight_limit()` 从来没被用过，
+	#    玩家花 1200 元买「负重训练」完全没效果。
+	var slots := int(modifiers.get("carry_slots", DEFAULT_CARRY_SLOTS))
+	var wlimit := float(modifiers.get("carry_weight_limit", DEFAULT_CARRY_WEIGHT))
+	carry = Inventory.new(slots, _items, wlimit)
+	# 治疗速度同理（藏身处「战地急救」升级）
+	heal_speed = clampf(float(modifiers.get("heal_speed", 1.0)), 0.2, 5.0)
 	stash = shared_stash if shared_stash != null else Inventory.new(40, _items, 999.0)
+
+
+const DEFAULT_CARRY_SLOTS := 12
+const DEFAULT_CARRY_WEIGHT := 20.0
+
+## 治疗速度倍率（藏身处升级提供，本局生效）
+var heal_speed: float = 1.0
 
 
 ## 载入地图，取出撤离点
