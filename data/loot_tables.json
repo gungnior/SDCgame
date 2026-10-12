@@ -3,13 +3,108 @@
     "id": "loot_common",
     "name": "普通房间",
     "entries": [
-      { "item_id": "consumable_can",     "weight": 40, "min": 1, "max": 2 },
-      { "item_id": "consumable_water",   "weight": 30, "min": 1, "max": 2 },
-      { "item_id": "medical_bandage",    "weight": 35, "min": 1, "max": 3 },
-      { "item_id": "medical_painkiller", "weight": 18, "min": 1, "max": 2 },
-      { "item_id": "ammo_pistol",        "weight": 30, "min": 8, "max": 24 },
-      { "item_id": "ammo_rifle",         "weight": 25, "min": 6, "max": 20 },
-      { "item_id": "valuables_goldwatch","weight": 4,  "min": 1, "max": 1 }
+      {
+        "item_id": "consumable_can",
+        "weight": 40,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "consumable_water",
+        "weight": 30,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "medical_bandage",
+        "weight": 35,
+        "min": 1,
+        "max": 3
+      },
+      {
+        "item_id": "medical_painkiller",
+        "weight": 18,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "ammo_pistol",
+        "weight": 30,
+        "min": 8,
+        "max": 24
+      },
+      {
+        "item_id": "ammo_rifle",
+        "weight": 25,
+        "min": 6,
+        "max": 20
+      },
+      {
+        "item_id": "valuables_goldwatch",
+        "weight": 4,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "medical_tourniquet",
+        "weight": 20,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "consumable_energybar",
+        "weight": 24,
+        "min": 1,
+        "max": 3
+      },
+      {
+        "item_id": "consumable_cigarette",
+        "weight": 18,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "valuables_screwdriver",
+        "weight": 14,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "valuables_watch_broken",
+        "weight": 14,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "valuables_copperwire",
+        "weight": 10,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "medical_antibiotic",
+        "weight": 10,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "consumable_coffee",
+        "weight": 12,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "valuables_silvercoin",
+        "weight": 8,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "valuables_dogtag",
+        "weight": 7,
+        "min": 1,
+        "max": 2
+      }
     ],
     "stage": "B"
   },
@@ -17,13 +112,120 @@
     "id": "loot_extract",
     "name": "撤离点房间",
     "entries": [
-      { "item_id": "valuables_gpu",      "weight": 10, "min": 1, "max": 1 },
-      { "item_id": "valuables_hdd",      "weight": 12, "min": 1, "max": 1 },
-      { "item_id": "valuables_goldwatch","weight": 20, "min": 1, "max": 2 },
-      { "item_id": "medical_kit",        "weight": 25, "min": 1, "max": 1 },
-      { "item_id": "ammo_rifle",         "weight": 30, "min": 12, "max": 30 },
-      { "item_id": "armor_light",        "weight": 8,  "min": 1, "max": 1 },
-      { "item_id": "key_labcard",        "weight": 3,  "min": 1, "max": 1 }
+      {
+        "item_id": "valuables_gpu",
+        "weight": 10,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_hdd",
+        "weight": 12,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_goldwatch",
+        "weight": 20,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "medical_kit",
+        "weight": 25,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "ammo_rifle",
+        "weight": 30,
+        "min": 12,
+        "max": 30
+      },
+      {
+        "item_id": "armor_light",
+        "weight": 8,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "key_labcard",
+        "weight": 3,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_jewelry",
+        "weight": 5,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_antique",
+        "weight": 6,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_painting",
+        "weight": 6,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_medal",
+        "weight": 9,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_lens",
+        "weight": 10,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "medical_surgical",
+        "weight": 12,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "armor_helmet_heavy",
+        "weight": 7,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "backpack_large",
+        "weight": 6,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_radio",
+        "weight": 8,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_capacitor",
+        "weight": 10,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "key_warehouse",
+        "weight": 5,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "key_office",
+        "weight": 4,
+        "min": 1,
+        "max": 1
+      }
     ],
     "stage": "B"
   },
@@ -31,12 +233,90 @@
     "id": "loot_enemy_drop",
     "name": "敌人掉落",
     "entries": [
-      { "item_id": "ammo_pistol",        "weight": 40, "min": 4, "max": 12 },
-      { "item_id": "ammo_rifle",         "weight": 35, "min": 4, "max": 10 },
-      { "item_id": "ammo_shell",         "weight": 25, "min": 2, "max": 6 },
-      { "item_id": "medical_bandage",    "weight": 30, "min": 1, "max": 2 },
-      { "item_id": "medical_painkiller", "weight": 10, "min": 1, "max": 1 },
-      { "item_id": "consumable_can",     "weight": 15, "min": 1, "max": 1 }
+      {
+        "item_id": "ammo_pistol",
+        "weight": 40,
+        "min": 4,
+        "max": 12
+      },
+      {
+        "item_id": "ammo_rifle",
+        "weight": 35,
+        "min": 4,
+        "max": 10
+      },
+      {
+        "item_id": "ammo_shell",
+        "weight": 25,
+        "min": 2,
+        "max": 6
+      },
+      {
+        "item_id": "medical_bandage",
+        "weight": 30,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "medical_painkiller",
+        "weight": 10,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "consumable_can",
+        "weight": 15,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "medical_tourniquet",
+        "weight": 20,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "medical_stim",
+        "weight": 8,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "consumable_energybar",
+        "weight": 14,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "valuables_dogtag",
+        "weight": 12,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_watch_broken",
+        "weight": 10,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "armor_helmet_light",
+        "weight": 6,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "armor_plate",
+        "weight": 7,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "key_dorm",
+        "weight": 5,
+        "min": 1,
+        "max": 1
+      }
     ],
     "stage": "B"
   }

@@ -213,9 +213,37 @@ func _load_loot_tables() -> void:
 			continue
 		if t.entries.is_empty():
 			errors.append("[loot_tables] %s: entries 为空" % t.id)
+		# ⚠️ 按【已加载的物品】过滤条目。
+		#
+		# 为什么必须过滤：数据填充到 A 阶段后，掉落表里会同时有 B 和 A 的物品，
+		# 而 `load_all("B")` 只装载 B。若不过滤，表里就留着指向"未加载物品"的条目 ——
+		# 运行期 LootRoller 虽然会 `continue` 跳过（不会崩），但：
+		#   ① 抽到空条目 = 白白消耗一次抽样机会，掉落数量悄悄变少
+		#   ② 测试里"抽到的物品必须都合法"这条断言必然失败
+		# 过滤之后，**阶段开关就真的是纯数据驱动**：换一个 load_all 参数即可，
+		# 表内容自动跟着变。
+		# ⚠️ `entries` 是**类型化数组**，不能整体赋值一个普通 Array
+		#    （会报 "Invalid assignment of property 'entries'"）。
+		#    必须在原数组上原地增删。
+		var kept: Array = []
+		var dropped := 0
 		for e in t.entries:
 			if e.min_count > e.max_count:
 				errors.append("[loot_tables] %s/%s: min(%d) > max(%d)" % [t.id, e.item_id, e.min_count, e.max_count])
+			if items.has(e.item_id):
+				kept.append(e)
+			else:
+				dropped += 1
+		if dropped > 0:
+			t.entries.clear()
+			for e in kept:
+				t.entries.append(e)
+			warnings.append("[loot_tables] %s: 按 stage<=%s 跳过了 %d 个条目（物品未加载）"
+				% [t.id, max_stage, dropped])
+		if t.entries.is_empty():
+			# 全被过滤掉了：这张表在当前阶段没有意义，不注册（避免空表被抽）
+			warnings.append("[loot_tables] %s: 当前阶段没有可用条目，已跳过" % t.id)
+			continue
 		loot_tables[t.id] = t
 
 

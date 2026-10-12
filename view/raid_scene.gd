@@ -225,11 +225,19 @@ func _setup_sim() -> void:
 	var scav := reg.get_enemy("enemy_scav")
 	var infected := reg.get_enemy("enemy_infected")
 	var eid := 0
+	# ⚠️ **从数据里取全部敌人类型**，不要硬编码 ——
+	#    数据填充到 A 阶段后（2 -> 4 种），硬编码会让新敌人永远不出现。
+	#    `reg.enemies` 已经是按 stage 过滤过的（load_all("A") 只装 B+A）。
+	var kinds: Array[EnemyDef] = []
+	for id in reg.enemies:
+		kinds.append(reg.enemies[id])
+	kinds.sort_custom(func(a, b): return a.id < b.id)   # 稳定顺序，便于复现
+	if kinds.is_empty():
+		printerr("[敌方] 数据里一个敌人都没有，检查 data/enemies.json")
+		return
 	# ── 技术验证模式：敌人数量被钳制（真机反馈 #2）──
 	# 现在要的是"验证技术"，不是"打怪"。每种敌人各放 1 个、总数 <= MAX_TEST_ENEMIES。
-	# 放不下那么多房间时按房间顺序取前几个，保证换地图时也有敌人可观察。
 	if MAX_TEST_ENEMIES > 0:
-		var kinds: Array[EnemyDef] = [scav, infected]
 		for r in gen.graph.rooms:
 			if agents.size() >= MAX_TEST_ENEMIES:
 				break
@@ -248,7 +256,7 @@ func _setup_sim() -> void:
 			if r.room_type == "spawn":
 				continue
 			for i in r.enemy_budget:
-				var d2: EnemyDef = scav if (i % 2 == 0) else infected
+				var d2: EnemyDef = kinds[eid % kinds.size()]
 				var a2 := EnemyAgent.new(eid, d2, Ballistics.cell_center(r.center))
 				if d2.is_ranged():
 					a2.equip(reg.get_weapon("weapon_pistol"), 60)
@@ -257,7 +265,8 @@ func _setup_sim() -> void:
 				agents.append(a2)
 				eid += 1
 	print("[地图] %s" % gen.summary())
-	print("[敌方] %d 名%s" % [agents.size(),
+	print("[敌方] %d 名（类型池 %d：%s）%s" % [agents.size(), kinds.size(),
+		", ".join(kinds.map(func(k): return k.name)),
 		"（技术验证模式，上限 %d）" % MAX_TEST_ENEMIES if MAX_TEST_ENEMIES > 0 else ""])
 
 

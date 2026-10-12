@@ -34,5 +34,41 @@
     "loot_value_avg": 90,
     "sprite": "res://art/enemies/enemy_scav/side/idle_00.png",
     "stage": "B"
+  },
+  {
+    "id": "enemy_raider",
+    "name": "武装劫掠者",
+    "name_en": "Raider",
+    "archetype": "ranged",
+    "hp": 130,
+    "move_speed": 2.2,
+    "sight_range_m": 16,
+    "sight_angle_deg": 110,
+    "hear_range_m": 18,
+    "reaction_time": 0.6,
+    "give_up_dist_m": 45,
+    "damage": 14,
+    "attack_cooldown": 0.55,
+    "loot_value_avg": 180,
+    "sprite": "res://art/enemies/enemy_raider/side/idle_00.png",
+    "stage": "A"
+  },
+  {
+    "id": "enemy_marksman",
+    "name": "神射手",
+    "name_en": "Marksman",
+    "archetype": "ranged",
+    "hp": 90,
+    "move_speed": 1.5,
+    "sight_range_m": 24,
+    "sight_angle_deg": 70,
+    "hear_range_m": 12,
+    "reaction_time": 0.9,
+    "give_up_dist_m": 55,
+    "damage": 34,
+    "attack_cooldown": 1.6,
+    "loot_value_avg": 260,
+    "sprite": "res://art/enemies/enemy_marksman/side/idle_00.png",
+    "stage": "A"
   }
 ]

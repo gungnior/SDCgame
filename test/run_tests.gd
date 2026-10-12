@@ -159,16 +159,61 @@ func _test_data_content() -> void:
 
 
 func _test_stage_switch() -> void:
-	# B 阶段的数据全部是 stage=B，所以 B/A/C 三档装载量应当相同
+	# 阶段开关（roadmap-bac.md §1 硬约束 5：「用数据开关，不用代码分支」）
+	#
+	# ⚠️ 这个测试的早期版本断言"B/C 装载量相同" —— 那在**数据全是 B 档**时成立。
+	#    数据填充到 A 之后就不成立了：A 档会多出一批枪械/物品/敌人。
+	#    所以改成断言**机制本身**：低级档是真子集，且过滤真的在起作用。
 	var reg_b := DataRegistry.new()
 	reg_b.load_all("B")
+	var reg_a := DataRegistry.new()
+	reg_a.load_all("A")
 	var reg_c := DataRegistry.new()
 	reg_c.load_all("C")
 
-	_check(reg_c.items.size() >= reg_b.items.size(), "C 档装载量 >= B 档")
-	_check_eq(reg_c.items.size(), reg_b.items.size(), "当前数据全为 B 档，B/C 装载量相同")
+	_check(reg_b.errors.is_empty(), "B 档加载无错误：%s" % str(reg_b.errors))
+	_check(reg_a.errors.is_empty(), "A 档加载无错误：%s" % str(reg_a.errors))
 	print("        B: %s" % reg_b.summary())
+	print("        A: %s" % reg_a.summary())
 	print("        C: %s" % reg_c.summary())
+
+	# 单调不减
+	_check(reg_a.items.size() >= reg_b.items.size(), "A 档物品 >= B 档")
+	_check(reg_a.weapons.size() >= reg_b.weapons.size(), "A 档枪械 >= B 档")
+	_check(reg_a.enemies.size() >= reg_b.enemies.size(), "A 档敌人 >= B 档")
+	_check(reg_c.items.size() >= reg_a.items.size(), "C 档 >= A 档")
+
+	# ⭐ 过滤真的在起作用：A 阶段应当比 B 阶段多出内容
+	_check(reg_a.weapons.size() > reg_b.weapons.size(),
+		"A 档枪械比 B 档多（B=%d A=%d）" % [reg_b.weapons.size(), reg_a.weapons.size()])
+	_check(reg_a.items.size() > reg_b.items.size(),
+		"A 档物品比 B 档多（B=%d A=%d）" % [reg_b.items.size(), reg_a.items.size()])
+	_check(reg_a.enemies.size() > reg_b.enemies.size(),
+		"A 档敌人比 B 档多（B=%d A=%d）" % [reg_b.enemies.size(), reg_a.enemies.size()])
+
+	# B 档里【不能】出现 A 档的东西（否则过滤没生效）
+	var a_only: Array[String] = []
+	for id in reg_a.weapons:
+		if not reg_b.weapons.has(id):
+			a_only.append(id)
+	_check(a_only.size() > 0, "确实存在只在 A 档出现的枪械：%s" % str(a_only))
+	for id in a_only:
+		_check(not reg_b.weapons.has(id), "B 档不含 A 档枪械 %s" % id)
+
+	# ⭐ 掉落表条目必须跟着阶段过滤 ——
+	#    否则 B 档会抽到指向"未加载物品"的条目，白白消耗抽样机会。
+	var t_b: LootTableDef = reg_b.get_loot_table("loot_common")
+	var t_a: LootTableDef = reg_a.get_loot_table("loot_common")
+	_check(t_b != null and t_a != null, "两档都能取到 loot_common")
+	if t_b != null and t_a != null:
+		_check(t_a.entries.size() > t_b.entries.size(),
+			"A 档掉落条目比 B 档多（B=%d A=%d）" % [t_b.entries.size(), t_a.entries.size()])
+		# B 档表里的每个 item_id 都必须在 B 档已加载
+		var bad := 0
+		for e in t_b.entries:
+			if not reg_b.items.has(e.item_id):
+				bad += 1
+		_check_eq(bad, 0, "B 档掉落表里没有指向未加载物品的条目")
 
 
 func _test_rng_determinism() -> void:
