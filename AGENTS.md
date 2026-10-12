@@ -2,6 +2,9 @@
 
 > **任何 agent（DSH 的 Lead/teammate、WorkBuddy、或人）动手之前先读这一份。**
 > 项目背景见 [specs/](specs/)；B→A→C 路线见 [roadmap-bac.md](specs/roadmap-bac.md)。
+>
+> 🆕 **刚接手这个项目？先读 [specs/session-handoff.md](specs/session-handoff.md)**
+> —— 那是「上一轮到哪了、哪些没验证、下一步做什么」的交接。
 
 ---
 
