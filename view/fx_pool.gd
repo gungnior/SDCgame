@@ -128,7 +128,17 @@ static func _square_texture() -> ImageTexture:
 	return _sq
 
 
-## 在 pos 处喷一组粒子。dir 决定喷射方向（世界坐标）。
+## 一个逻辑格多少世界像素 —— 必须与 raid_scene 的 CELL_PX 一致。
+##
+## ⚠️ 真机反馈："打出的子弹在地图左上角有火花动画"。
+##    根因：调用方传进来的是**逻辑格坐标**（如 5.5），
+##    而粒子节点在世界空间里 1 格 = 48 像素 ——
+##    于是粒子全被摆在 (5.5, 5.5) 像素处，也就是地图左上角。
+##    统一在这里换算：**burst() 一律收逻辑格坐标**，和全局其它系统保持一致。
+const CELL_PX := 48.0
+
+
+## 在 pos（**逻辑格坐标**）处喷一组粒子。dir 决定喷射方向（世界方向）。
 func burst(kind: String, pos: Vector2, dir: Vector2 = Vector2.RIGHT,
 		scale: float = 1.0) -> void:
 	if not _pool.has(kind):
@@ -137,7 +147,7 @@ func burst(kind: String, pos: Vector2, dir: Vector2 = Vector2.RIGHT,
 	var i: int = int(_next[kind])
 	_next[kind] = (i + 1) % arr.size()
 	var p: CPUParticles2D = arr[i]
-	p.global_position = pos
+	p.global_position = pos * CELL_PX
 	p.direction = dir.normalized() if dir != Vector2.ZERO else Vector2.RIGHT
 	p.scale_amount_min = float(KINDS[kind]["scale_min"]) * scale
 	p.scale_amount_max = float(KINDS[kind]["scale_max"]) * scale

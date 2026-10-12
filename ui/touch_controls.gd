@@ -24,6 +24,8 @@ signal heal_pressed()
 signal interact_pressed()
 ## 打开背包 / 搜索（真机反馈 #3 / #6）
 signal bag_pressed()
+## 左上角齿轮：打开设置/暂停（第三轮 #3，安卓必须能暂停）
+signal menu_pressed()
 
 ## 输入动作名（同时在 project.godot 的 InputMap 里声明）
 const A_MOVE := ["move_left", "move_right", "move_up", "move_down"]
@@ -40,6 +42,7 @@ var fire_btn: TouchButton
 var reload_btn: TouchButton
 var heal_btn: TouchButton
 var bag_btn: TouchButton
+var menu_btn: TouchButton
 
 var _safe := Rect2()                   ## 安全区内的可用矩形（视口坐标）
 
@@ -133,6 +136,11 @@ func _build() -> void:
 	heal_btn = _make_button("Heal", "✚", "治疗", br * 0.82, Color(0.45, 0.88, 0.58), false)
 	bag_btn = _make_button("Bag", "▤", "背包", br * 0.82, Color(0.82, 0.72, 0.42), false)
 	bag_btn.pressed_down.connect(func(): bag_pressed.emit())
+	# 齿轮放【左上角】—— 用户明确要求。
+	# 注意：它压在移动摇杆的 DYNAMIC 区域内，但它是后加入的 GUI 子节点，
+	# 触摸优先给它，所以不会互相打架（摇杆只在齿轮之外的区域响应）。
+	menu_btn = _make_button("Menu", "⚙", "", br * 0.72, Color(0.72, 0.76, 0.84), false)
+	menu_btn.pressed_down.connect(func(): menu_pressed.emit())
 	reload_btn.pressed_down.connect(func(): reload_pressed.emit())
 	heal_btn.pressed_down.connect(func(): heal_pressed.emit())
 
@@ -247,7 +255,7 @@ func is_firing() -> bool:
 
 
 func release_all() -> void:
-	for b in [fire_btn, reload_btn, heal_btn, bag_btn]:
+	for b in [fire_btn, reload_btn, heal_btn, bag_btn, menu_btn]:
 		if b != null:
 			b.force_release()
 

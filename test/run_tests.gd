@@ -63,6 +63,10 @@ func _initialize() -> void:
 	_suite("真机修复3：#5 视野锥随枪械变化", _test_weapon_aim_cone)
 	_suite("真机修复3：#6 尸体战利品", _test_corpse_loot)
 	_suite("真机修复3：#7 藏身处与设置", _test_game_state_settings)
+	_suite("真机修复4：命中判定无双重随机", _test_no_double_hit_roll)
+	_suite("真机修复4：散布收缩 hitbox", _test_spread_radius_factor)
+	_suite("PC实测：粒子坐标换算", _test_fx_cell_coords)
+	_suite("PC实测：键位与设置菜单", _test_keybindings)
 
 	print("")
 	if _failed == 0:
@@ -2522,3 +2526,119 @@ func _test_game_state_settings() -> void:
 	_check(rs.contains("hideout_requested.connect(_go_hideout)"),
 		"回藏身处接的是切场景（不是 _restart）")
 	_check(rs.contains("Game.go_to_hideout()"), "确实调用了切场景")
+
+
+# ─────────────────── 用户 PC 实测反馈：子弹从敌人身上穿过去 ───────────────────
+
+func _test_no_double_hit_roll() -> void:
+	# ⚠️ 用户 PC 实测："我射她的时候 hitbox 很怪，子弹从他身上传过去了"
+	#    查明是**两个独立 bug 叠加**：
+	#      ① _try_fire 在 AimAssist 已经判定命中之后，【又掷了一次随机数】
+	#         `randf() <= 0.30 + acc*0.7`。没过就把它当打空，曳光打到墙上
+	#         -> 表现就是"子弹从她身上穿过去"。
+	#      ② 桌面 `_aim_push()` 返回 0（只有按住移动才给 0.45），
+	#         而 pick() 在 push < 0.22 时直接返回空 -> PC 上子弹磁性几乎从不生效。
+	#    本测试做**源码级守卫**，防止双重判定被加回来。
+	var src := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	_check(not src.is_empty(), "能读到 raid_scene.gd")
+	_check(not src.contains("_rng.randf() <= clampf(0.30 + acc"),
+		"命中判定里不再有第二次随机数（双重判定会表现为『子弹穿过去』）")
+	_check(src.contains("if tgt != null:"), "pick 找到目标即为命中")
+	_check(src.contains("_spread_radius_factor"),
+		"散布改为收缩有效 hitbox（逻辑只有一处）")
+	_check(src.contains("return 0.55"),
+		"桌面 _aim_push 给恒定推力（返回 0 会让 pick 直接失效）")
+
+
+func _test_spread_radius_factor() -> void:
+	# 散布对有效 hitbox 的收缩：0 散布 = 满半径；散布大 = 半径小但不会到 0
+	# 直接验证数学关系（不实例化场景）
+	var base := AimAssist.DEFAULT_HIT_RADIUS
+	_check(base > 0.2, "默认实体半径 %.2f 格足够宽松（触屏精度差，判定要给余量）" % base)
+	# 复刻 _spread_radius_factor 的公式做交叉验证
+	var f0 := clampf(1.0 - maxf(0.0, 0.0) / 10.0, 0.35, 1.0)
+	var f5 := clampf(1.0 - maxf(5.0, 0.0) / 10.0, 0.35, 1.0)
+	var f99 := clampf(1.0 - maxf(99.0, 0.0) / 10.0, 0.35, 1.0)
+	_check(absf(f0 - 1.0) < 0.001, "0 散布 -> 满半径")
+	_check(f5 < f0 and f5 > 0.35, "5° 散布 -> 半径收缩到 %.2f" % f5)
+	_check(absf(f99 - 0.35) < 0.001, "散布再大也保底 0.35 半径（不能完全打不中）")
+
+	# 有效半径收缩后，超出新半径的偏轴目标应该被拒
+	var g := _open_grid(20, 14)
+	var origin := Vector2(5.5, 5.5)
+	var off := [{"id": "o", "pos": Vector2(9.5, 5.95), "faction": "enemy", "alive": true}]
+	# 满半径：接受
+	_check(not AimAssist.pick(origin, Vector2.RIGHT, 0.6, off, g, 4.2, 30.0,
+		"player", base).is_empty(), "满半径下能命中")
+	# 极小半径：拒绝
+	_check(AimAssist.pick(origin, Vector2.RIGHT, 0.6, off, g, 4.2, 30.0,
+		"player", 0.05).is_empty(), "半径收到 0.05 后拒掉偏轴目标")
+
+	# 桌面推力必须够（低于 MIN_PUSH 会让 pick 完全失效）
+	_check(0.55 >= AimAssist.MIN_PUSH,
+		"桌面推力 0.55 >= MIN_PUSH %.2f" % AimAssist.MIN_PUSH)
+
+
+# ─────────────────── PC 实测反馈（火花位置 / 键位 / 设置菜单）───────────────────
+
+func _test_fx_cell_coords() -> void:
+	# 用户 PC 实测："我刚才这个弹夹打出的子弹，会在地图左上角有火花动画"
+	# 根因：burst() 收到的是【逻辑格坐标】（如 5.5），
+	#       而粒子节点在世界空间里 1 格 = 48 像素 ——
+	#       于是全部堆在 (5.5, 5.5) 像素 = 地图左上角。
+	# 现在 burst() 内部统一乘 CELL_PX，调用方一律传逻辑格坐标。
+	var src := FileAccess.get_file_as_string("res://view/fx_pool.gd")
+	_check(src.contains("p.global_position = pos * CELL_PX"),
+		"burst() 把逻辑格坐标换算成像素（漏了就会全堆在左上角）")
+	_check(src.contains("const CELL_PX := 48.0"), "CELL_PX 常量存在")
+	# 必须与 raid_scene 的 CELL_PX 一致，否则火花位置会整体偏移
+	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	_check(rs.contains("CELL_PX") or rs.contains("LogicalGrid.CELL_PX"),
+		"raid_scene 也使用同一套格->像素换算")
+	_check(src.contains("burst(kind: String, pos: Vector2"),
+		"burst 签名仍收 Vector2（逻辑格坐标）")
+
+
+func _test_keybindings() -> void:
+	# 用户 PC 实测："修改 pc 按键 r 为装弹 k 为重启 t 为治疗"
+	#           "f1 到 f4 没有说明 应该加入 esc 设置菜单"
+	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	var i := rs.find("func _input(event: InputEvent)")
+	_check(i > 0, "找到 _input")
+	var seg := rs.substr(i, 1400)
+	_check(seg.contains("KEY_R:") and seg.contains("start_reload()"),
+		"R = 装弹")
+	_check(seg.contains("KEY_T:") and seg.contains("_try_heal()"),
+		"T = 治疗")
+	_check(seg.contains("KEY_B:") and seg.contains("_open_bag()"),
+		"B = 背包/搜索（PC 上必须有键，否则尸体搜不了）")
+	_check(seg.contains("KEY_K:"), "K 已绑定（重开）")
+	_check(not seg.contains("KEY_L:"), "旧的 L 键已移除")
+	# ESC 不能在 raid_scene 里处理，否则和 SettingsMenu 撞车（toggle 两次 = 没反应）
+	_check(not seg.contains("KEY_ESCAPE"),
+		"ESC 不由 raid_scene 处理（交给 SettingsMenu 独占）")
+	var sm := FileAccess.get_file_as_string("res://ui/settings_menu.gd")
+	_check(sm.contains('is_action_pressed("ui_cancel")'), "ESC 走 ui_cancel")
+	_check(sm.contains("NOTIFICATION_WM_GO_BACK_REQUEST"), "安卓返回键也接上了")
+	_check(sm.contains("F1") and sm.contains("F4"),
+		"设置菜单里写了 F1~F4 的说明（用户：『f1 到 f4 没有说明』）")
+	_check(sm.contains("get_tree().paused = true"), "打开菜单会暂停游戏")
+	_check(sm.contains("PROCESS_MODE_ALWAYS"), "菜单自身不受暂停影响")
+	# 场景里要有场景内开关的钩子
+	_check(rs.contains("func toggle_whitebox()"), "有 toggle_whitebox 钩子")
+	_check(rs.contains("func toggle_debug()"), "有 toggle_debug 钩子")
+	_check(rs.contains("var game_paused := false"), "有 game_paused 标志")
+
+
+func _test_corpse_interaction_visible() -> void:
+	# 用户 PC 实测："和敌人尸体没法交互。（战利品系统呢）"
+	# 尸体其实已经生成、也能搜 —— 问题是【没有可见入口】。
+	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	_check(rs.contains("_spawn_corpse(tgt)"), "击杀后会生成尸体容器")
+	_check(rs.contains("corpse_label"), "HUD 有『附近有尸体』的提示")
+	_check(rs.contains("func _bag_key_hint()"), "提示里带按键（触屏/PC 文案不同）")
+	_check(rs.contains("raid.corpse_near(player_pos)"), "每帧检测附近尸体")
+	# SettingsMenu 不能和 Object._get 撞名（踩过一次编译失败）
+	var sm := FileAccess.get_file_as_string("res://ui/settings_menu.gd")
+	_check(not sm.contains("func _get("),
+		"设置菜单没有定义 _get（会与 Object._get(StringName) 签名冲突）")

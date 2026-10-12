@@ -91,6 +91,8 @@ var fx: FxPool = null            ## CPUParticles2D 池（T-03）
 var touch: TouchControls = null  ## 双摇杆 + 动作按钮
 var flash_rect: ColorRect = null ## 受击闪白覆盖层
 var inventory_panel: InventoryPanel = null   ## 背包/搜索面板（#3 / #6）
+## 设置 / 暂停菜单（第三轮 #3：ESC / 齿轮 / 安卓返回键都开它）
+var settings_menu: SettingsMenu = null
 var result_overlay: ResultOverlay = null   ## 结算界面（含触屏重开按钮）
 var _prev_shots: Dictionary = {} ## agent.id -> 已开火数（用于播放枪声）
 var _step_accum := 0.0
@@ -269,6 +271,7 @@ func _setup_view() -> void:
 
 	# 手机上字号要更大（真机反馈：默认 13px 在手机上偏小）
 	var fs := 16 if _is_touch else 13
+	_hud_fs = fs          # 供 _update_hud 使用（局部变量跨不过函数）
 
 	hud_label = Label.new()
 	hud_label.position = Vector2(10, 6)
@@ -359,6 +362,17 @@ func _setup_feel_and_touch() -> void:
 	inv_layer.add_child(inventory_panel)
 	add_child(inv_layer)
 	touch.bag_pressed.connect(_open_bag)
+	touch.menu_pressed.connect(_open_settings)
+
+	# ── 设置 / 暂停菜单（第三轮 #3）──
+	# PC：ESC 开关；安卓：左上角齿轮 + 系统返回键（都走 ui_cancel）
+	settings_menu = SettingsMenu.new()
+	settings_menu.bind_scene(self, true)
+	settings_menu.went_hideout.connect(_go_hideout)
+	var set_layer := CanvasLayer.new()
+	set_layer.layer = 60          # 盖在背包面板之上
+	set_layer.add_child(settings_menu)
+	add_child(set_layer)
 
 
 ## 载入程序化生成的 16x16 tile（art/tiles/，由 tools/art/gen_tiles.py 产出）
@@ -611,6 +625,11 @@ func _update_flash() -> void:
 
 
 func _tick_player(delta: float) -> void:
+	# 设置菜单打开时冻结玩家输入（摇杆/键盘都可能还在推着）
+	if game_paused:
+		_move_input = Vector2.ZERO
+		_firing = false
+		return
 	var prev := player_pos
 
 	# 移动（治疗中不能动 —— reference-teardown §9 的取舍）
@@ -720,8 +739,12 @@ func _try_fire() -> void:
 	Tel.mark("fire_aim")
 	var push := _aim_push()
 	var half_angle := AimAssist.half_angle_for_viewport(get_viewport_rect().size.x)
+	# ── 散布的作用：**收缩有效 hitbox**，而不是事后另掷一次随机数 ──
+	# 见下方命中判定处的说明（真机反馈："子弹从他身上穿过去了"）。
+	var extra_seed := player_weapon.current_spread_deg() - w.spread_deg
+	var eff_radius := AimAssist.DEFAULT_HIT_RADIUS * _spread_radius_factor(extra_seed)
 	var assist := AimAssist.pick(player_pos, player_aim, push,
-		_aim_targets(), gen.grid, half_angle, float(w.range_m))
+		_aim_targets(), gen.grid, half_angle, float(w.range_m), "player", eff_radius)
 	var shot_dir := player_aim
 	var tgt: EnemyAgent = null
 	if not assist.is_empty():
@@ -735,9 +758,19 @@ func _try_fire() -> void:
 
 	var extra := player_weapon.current_spread_deg() - w.spread_deg
 	var acc := DamageModel.accuracy_at(w, dist, extra)
+	# ⚠️⚠️ 这里【绝对不能再掷骰子】。
+	#
+	# 早先的写法是：AimAssist 找到目标 -> 再 `randf() <= 0.30 + acc*0.7` 决定是否命中。
+	# 后果就是用户实测到的："准心明明在她身上，子弹却从她身上穿过去了" ——
+	# 因为那一发恰好没过随机数，于是走 else 分支把曳光打到墙上。
+	#
+	# **双重判定本身就是错的**：pick() 已经做完了全部检查
+	# （锥 / hitbox / 视线遮挡 / 射程 / 阵营），它返回目标 = 这一枪就是命中的。
+	# 散布/精度改由 `_spread_radius_factor()` 在**进入 pick 之前**收缩有效 hitbox ——
+	# 这样"瞄得准就真的打得中"，而散布大的枪仍然更难命中，逻辑只有一处。
 	var shot_to := player_pos + shot_dir * minf(maxf(dist, 2.0), float(w.range_m))
 
-	if tgt != null and _rng.randf() <= clampf(0.30 + acc * 0.7, 0.05, 0.97):
+	if tgt != null:
 		player_weapon.mark_hit()
 		var hit := DamageModel.resolve_hit(w, dist, extra, _rng)
 		var dmg := int(hit["damage"])
@@ -797,14 +830,25 @@ func _mouse_aiming() -> bool:
 	return Input.get_last_mouse_velocity().length() > 1.0
 
 
-## 摇杆推力。桌面（键盘/鼠标）也给一个恒定值，保证辅助瞄准在桌面上可测。
+## 摇杆推力。桌面（键盘/鼠标）也必须给恒定值 —— 否则辅助瞄准在 PC 上直接失效。
+##
+## ⚠️ 真机/桌面实测：`AimAssist.pick` 在 `push < MIN_PUSH(0.22)` 时**直接返回空**。
+##    而早先这里在桌面用鼠标瞄准时返回 0（只有"同时按住移动"才给 0.45），
+##    于是 PC 上"子弹磁性"几乎从不生效 -> 有效判定只剩那条 4.2° 的窄锥
+##    -> 表现就是"子弹从敌人身上穿过去"。**这是穿模的第二个原因。**
 func _aim_push() -> float:
-	var p := 0.0
 	if touch != null:
-		p = touch.aim_push()
-	if p <= 0.01 and _move_input != Vector2.ZERO:
-		p = 0.45
-	return clampf(p, 0.0, 1.0)
+		var p := touch.aim_push()
+		if p > 0.01:
+			return clampf(p, 0.0, 1.0)
+	# 桌面：鼠标瞄准 / 键盘瞄准时给一个稳定值
+	return 0.55
+
+
+## 散布对有效 hitbox 的收缩系数。
+## 0 散布 -> 1.0（满半径）；散布越大半径越小，但不低于 0.35（不能变成完全打不中）
+func _spread_radius_factor(extra_spread_deg: float) -> float:
+	return clampf(1.0 - maxf(extra_spread_deg, 0.0) / 10.0, 0.35, 1.0)
 
 
 ## 给 aim assist 的目标列表。
@@ -979,13 +1023,21 @@ func _input(event: InputEvent) -> void:
 		var k := event as InputEventKey
 		if not k.pressed or k.echo:
 			return
+		# ── 键位（用户第三轮 PC 实测指定：R 装弹 / K 重开 / T 治疗）──
+		# 完整说明在 ESC 设置菜单里（用户："f1 到 f4 没有说明"）
+		# ESC 由 SettingsMenu 独占处理（见 ui/settings_menu.gd 的 _input），
+		# 这里不能也处理，否则会 toggle 两次等于没开。
 		match k.keycode:
 			KEY_J, KEY_SPACE:
 				_firing = true
-			KEY_K:
+			KEY_R:
 				player_weapon.start_reload()
-			KEY_L:
+			KEY_T:
 				_try_heal()
+			KEY_B:
+				_open_bag()
+			KEY_K:
+				_restart()
 			KEY_TAB:
 				debug_mode = (debug_mode + 1) % 4
 			KEY_F5:
@@ -994,8 +1046,6 @@ func _input(event: InputEvent) -> void:
 				_build_map_texture()
 				if Sfx != null:
 					Sfx.play("ui_click")
-			KEY_R:
-				_restart()
 			# ── 无障碍开关（spec §7.3 第 4 条：务必提供关闭/降低震动的选项）──
 			KEY_F1:
 				Feel.shake_enabled = not Feel.shake_enabled
@@ -1105,6 +1155,10 @@ func aim_cone_deg() -> float:
 var _toast_text := ""
 var _toast_until := 0.0
 var _toast_label: Label = null
+## 附近尸体的交互提示（真机反馈 #4）
+var corpse_label: Label = null
+## HUD 字号（_setup_view 里定，_update_hud 里用）
+var _hud_fs := 13
 
 
 func _toast(msg: String, seconds: float = 2.0) -> void:
@@ -1116,6 +1170,20 @@ func _toast(msg: String, seconds: float = 2.0) -> void:
 
 ## 真正返回藏身处（切场景），与再来一局是两条不同的路
 # ─────────────────── 背包 / 搜索面板（真机反馈 #3 / #6）───────────────────
+
+## 搜索/背包的按键提示文案（触屏与 PC 不同）
+func _bag_key_hint() -> String:
+	return '背包按钮' if _is_touch else 'B'
+
+
+## 打开设置/暂停菜单（ESC / 左上角齿轮 / 安卓返回键）
+func _open_settings() -> void:
+	if settings_menu == null:
+		return
+	if inventory_panel != null and inventory_panel.is_open():
+		inventory_panel.close()
+	settings_menu.open()
+
 
 ## 打开面板。附近有尸体就进入搜索模式，否则就是纯背包。
 func _open_bag() -> void:
@@ -1195,6 +1263,20 @@ func _go_hideout() -> void:
 		Game.go_to_hideout()
 	else:
 		_restart()
+
+
+## 供 SettingsMenu 调用（它不知道场景内部怎么切）
+func toggle_debug() -> void:
+	debug_mode = (debug_mode + 1) % 4
+
+
+func toggle_whitebox() -> void:
+	render_mode = RENDER_ART if render_mode == RENDER_WHITEBOX else RENDER_WHITEBOX
+	_build_map_texture()
+
+
+## 设置菜单打开时置位：暂停期间不处理移动/开火
+var game_paused := false
 
 
 func _restart() -> void:
@@ -1455,6 +1537,29 @@ func _update_hud() -> void:
 	_set_label(view_label, "[视图] %s%s" % [dbg[debug_mode],
 		"  ·  白模 F5 切换" if render_mode == RENDER_WHITEBOX else "  ·  美术 F5 切换"], "_cache_view")
 
+	# ── 附近尸体的交互提示（真机反馈 #4）──
+	# 用户：和敌人尸体没法交互。（战利品系统呢）
+	# 尸体其实生成了、也能搜 —— 但**没有可见的入口**，玩家不知道按什么。
+	# 所以靠近时直接把提示和按键写出来。
+	if corpse_label == null:
+		corpse_label = Label.new()
+		corpse_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		corpse_label.position = Vector2(-200, -58)
+		corpse_label.size = Vector2(400, 22)
+		corpse_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		corpse_label.add_theme_font_size_override('font_size', _hud_fs + 2)
+		corpse_label.add_theme_color_override('font_color', Color(1.0, 0.85, 0.42))
+		corpse_label.visible = false
+		hud.add_child(corpse_label)
+	var ci_near := raid.corpse_near(player_pos)
+	if ci_near >= 0 and not raid.is_over():
+		var n_stacks := (raid.corpses[ci_near]['drops'] as Array).size()
+		_set_label(corpse_label, '[%s] 搜索尸体 · %d 堆战利品'
+			% [_bag_key_hint(), n_stacks], '_cache_corpse')
+		corpse_label.visible = true
+	elif corpse_label.visible:
+		corpse_label.visible = false
+
 	# 短提示
 	if _toast_label != null:
 		var show := _time < _toast_until
@@ -1473,6 +1578,7 @@ var _cache_hud := ""
 var _cache_view := ""
 var _cache_hint := ""
 var _cache_toast := ""
+var _cache_corpse := ""
 
 
 func _set_label(l: Label, txt: String, cache_key: String) -> void:
