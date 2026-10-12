@@ -1,6 +1,6 @@
 extends SceneTree
 
-## 截图工具 —— 把游戏画面渲染出来存成 PNG
+## 截图工具 —— 把游戏画面渲染出来存成 PNG，**并支持可复现**
 ##
 ## 为什么需要：headless 没有渲染器，看不到任何画面。
 ## 这个脚本开真窗口跑若干帧，把 viewport 读回来存盘，用于人工验收。
@@ -8,10 +8,27 @@ extends SceneTree
 ## 运行（不能加 --headless）：
 ##   godot --path . --script res://test/screenshot.gd
 ##   godot --path . --script res://test/screenshot.gd -- --frames 120 --out user://shot.png
+##
+## ─────────────────────────────────────────────────────────────
+## ⭐ 可复现模式（为了给重构做**像素级前后对比**）
+## ─────────────────────────────────────────────────────────────
+## 光固定随机种子**不够**，有三个不确定性来源，都要按住：
+##   ① 地图种子 —— 每局随机 -> `--seed N`，并在 `add_child` **之前**注入
+##      （`_ready` 里会读 `_raid_seed`，加进去就晚了）
+##   ② 每帧 delta —— 真实帧率会抖，实体走的距离就不同
+##      -> 用 Godot 自带的 `--fixed-fps 60` 命令行参数（本脚本右侧说明）
+##   ③ HUD 里的 FPS / 帧耗时 —— 每次都不同
+##      -> `--hide-hud`：截图前把 HUD 与触屏控件藏起来，只比世界部分
+##
+## 用法：
+##   godot --path . --fixed-fps 60 --script res://test/screenshot.gd \
+##     -- --seed 12345 --frames 260 --hide-hud --out res://art/_raw/x.png
 
 var _frames := 0
 var _target := 90
 var _out := "res://art/_raw/_screenshot.png"
+var _seed := 0
+var _hide_hud := false
 var _scene = null
 
 
@@ -23,6 +40,10 @@ func _initialize() -> void:
 			_target = int(args[i + 1]); i += 2
 		elif args[i] == "--out" and i + 1 < args.size():
 			_out = args[i + 1]; i += 2
+		elif args[i] == "--seed" and i + 1 < args.size():
+			_seed = int(args[i + 1]); i += 2
+		elif args[i] == "--hide-hud":
+			_hide_hud = true; i += 1
 		else:
 			i += 1
 
@@ -32,14 +53,38 @@ func _initialize() -> void:
 		quit(1)
 		return
 	_scene = ps.instantiate()
+	# ⚠️ 必须在 add_child 之前设：_ready -> _setup_sim 会读 _raid_seed
+	if _seed != 0:
+		_scene.set("_raid_seed", _seed)
+		seed(_seed)          # 同时固定全局 RNG（敌人朝向等用 randf_range）
 	root.add_child(_scene)
-	print("已实例化场景，等待 %d 帧后截图" % _target)
+
+	if _hide_hud:
+		# RaidHud / 触屏控件都是 CanvasLayer，直接整个藏掉
+		var hud = _scene.get("raid_hud")
+		if hud != null:
+			hud.visible = false
+		var touch = _scene.get("touch")
+		if touch != null:
+			touch.visible = false
+
+	print("已实例化场景，等待 %d 帧后截图（seed=%d hide_hud=%s）" % [
+		_target, _seed, str(_hide_hud)])
 
 
 func _process(_delta: float) -> bool:
 	_frames += 1
 	if _frames < _target:
 		return false
+
+	if _hide_hud:
+		# 每帧都可能被 HUD 自己设回 visible，截图前再按一次
+		var hud = _scene.get("raid_hud")
+		if hud != null:
+			hud.visible = false
+		var touch = _scene.get("touch")
+		if touch != null:
+			touch.visible = false
 
 	var img := root.get_texture().get_image()
 	if img == null:

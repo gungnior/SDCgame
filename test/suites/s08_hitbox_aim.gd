@@ -202,8 +202,13 @@ func _test_cone_no_xray() -> void:
 	_check(bl.contains("raycast_cells"), "复用标准 DDA（不漏格）")
 
 	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
-	_check(rs.contains("Ballistics.los_distance"), "锥体逐条射线做裁切")
-	_check(rs.contains("screen_diag_cells"),
+	# ⚠️ 视野锥的**绘制**已搬到 view/raid_drawer.gd（拆分上帝对象），
+	#    但「开火用 visible 不用 has_lock」这条**逻辑**还在场景里 —— 分开查。
+	#    （这已是本次重构中第 4 次遇到"源码文本断言因代码搬家而失效"：
+	#      它把「代码在哪」和「代码对不对」绑在了一起。）
+	var dr := FileAccess.get_file_as_string("res://view/raid_drawer.gd")
+	_check(dr.contains("Ballistics.los_distance"), "锥体逐条射线做裁切")
+	_check(dr.contains("screen_diag_cells"),
 		"视觉半径不超过屏幕对角线（屏幕外看不见，不白算）")
 	# 自动射击必须用 visible，不是 has_lock
 	_check(rs.contains('_lock_info.get("visible", false)'),

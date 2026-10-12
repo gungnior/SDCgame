@@ -234,6 +234,15 @@ func _test_hud_perf_metric() -> void:
 		"HUD 模块也不得使用它")
 	_check(rh.contains("Tel.last_avg_ms()"), "HUD 用遥测的墙钟均值")
 	_check(rh.contains("Tel.last_worst_ms()"), "HUD 用遥测的墙钟最慢值")
+	# 世界绘制已抽到 view/raid_drawer.gd（拆分上帝对象）
+	var dr := FileAccess.get_file_as_string("res://view/raid_drawer.gd")
+	_check(not rs.contains("func _draw()"),
+		"场景自己不再 _draw（世界图形全在 RaidDrawer）")
+	_check(dr.contains("func _draw()") and dr.contains("scene."),
+		"RaidDrawer 持有 _draw 并读场景状态")
+	_check(rs.contains("drawer.queue_redraw()"),
+		"场景把重绘委托给 drawer（防代码回流）")
+	_check(rs.contains("drawer = RaidDrawer.new()"), "场景创建了 drawer")
 	_check(rs.contains("raid_hud.refresh()"),
 		"场景把 HUD 刷新委托给 RaidHud（而不是把逻辑留回场景里）")
 	var tel := FileAccess.get_file_as_string("res://telemetry/telemetry.gd")
