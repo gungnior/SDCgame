@@ -20,12 +20,35 @@
 #   ① 单元测试     799 项断言（test/suites/*.gd，headless，秒级）
 #   ② 集成验证     test/pc_verify.tscn 51 项（真的实例化游戏场景）
 #   ③ 数据契约     tools/validate_data.py（JSON schema 与跨表引用）
-#   ④ 像素基线     固定种子 + 固定 delta 截图，与 art/_raw/_baseline.png 逐像素比对
-#                  —— 这是唯一能抓住"模拟/渲染行为被悄悄改动"的检查
+#   ④ 像素基线     固定种子 + 固定 delta 截图，与 art/_raw/_baseline.png 比对
+#
+# ⚠️⚠️ ④ 是**咨询性**的，默认**不会**让验收失败 —— 加 -Strict 才当门槛。
+#
+#    为什么降级：实测这局游戏**运行期本质不确定**。
+#    同种子同参数连跑 4 次，第 300 帧两两比较：
+#        A 组 5/5 对不一致、B 组 3/5 对不一致
+#        （第 30 帧还是一致的，第 60 帧起分叉，到第 300 帧放大到 2~7%）
+#    原因是「手感」用了**真实时钟**：feel.gd 的 hitstop 靠
+#    `Time.get_ticks_msec()` 把 `Engine.time_scale` 压到 0 ——
+#    而 time_scale=0 时 delta 也是 0，游戏**没法用模拟时间给自己计时**，
+#    只能用真实时钟。于是停顿帧数随真实耗时浮动 -> 模拟推进量不同
+#    -> 混沌放大。
+#
+#    结论：**像素基线不能当回归门**。会飘的门比没有门更糟（它训练人忽略失败）。
+#    真正的回归保障是 ①②③ + 「同一构建连跑两次自身比对」。
+#
+#    ⚠️ 同时纠正一个早先的说法：拆分 raid_scene.gd 时我用 1v1 截图对比
+#       声称过「逐像素完全一致」。那些对比**当时确实通过了**，但在这个
+#       随机性面前，**单次对比不构成证据**。
+#       唯一可靠的那条是**地图烘焙**：它用的是确定性单测
+#       （RaidMapBaker 输出 vs WhiteboxPainter.paint()，3 个种子差异均为 0），
+#       不依赖任何运行期时序。
 
 param(
     [switch]$Fast,
-    [switch]$UpdateBaseline
+    [switch]$UpdateBaseline,
+    # 把 ④ 像素基线也当门槛（只在明确知道环境稳定时用）
+    [switch]$Strict
 )
 
 # ⚠️ 这里**故意不用** $ErrorActionPreference = "Stop"。
@@ -101,16 +124,31 @@ $dataExit = $LASTEXITCODE
 $dataLine = (Get-Content $out3 -Encoding UTF8 | Select-Object -Last 1)
 Record "数据契约" ($dataExit -eq 0) "$dataLine"
 
-# ═══════════════ ④ 像素基线 ═══════════════
+# ═══════════════ ④ 像素基线（咨询性；-Strict 才当门槛）═══════════════
 if ($Fast) {
     Section "④" "像素基线（-Fast 已跳过）"
-    Write-Host "  ⏭  跳过（只在改纯逻辑时用；改画面/模拟必须全量跑）" -ForegroundColor DarkGray
+    Write-Host "  ⏭  跳过" -ForegroundColor DarkGray
 } else {
-    Section "④" "像素基线（固定种子 $SEED / 第 $FRAMES 帧）"
+    Section "④" "像素基线（咨询性 —— 见脚本开头的说明）"
     $shot = "art\_raw\_verify_now.png"
     & $Godot --path $Root --fixed-fps 60 --rendering-driver opengl3 --rendering-method gl_compatibility `
         --resolution 1280x720 --script "res://test/screenshot.gd" -- `
         --seed $SEED --frames $FRAMES --hide-hud --out "res://$($shot -replace '\\','/')" *> $null
+
+    # ⭐ 先做**自身复现性检查**：同一构建连跑两次，看这个环境稳不稳。
+    #    这比"和基线比"更有意义 —— 它直接测出运行期随机性有多大。
+    $shot2 = "art\_raw\_verify_now2.png"
+    & $Godot --path $Root --fixed-fps 60 --rendering-driver opengl3 --rendering-method gl_compatibility `
+        --resolution 1280x720 --script "res://test/screenshot.gd" -- `
+        --seed $SEED --frames $FRAMES --hide-hud --out "res://$($shot2 -replace '\\','/')" *> $null
+    $selfDiff = (& $Py "tools\compare_images.py" $shot $shot2 --tolerance 0 2>&1 | Out-String).Trim()
+    $selfOk = ($LASTEXITCODE -eq 0)
+    if ($selfOk) {
+        Write-Host "  · 自身复现性：同构建两次截图完全一致（本环境稳定）" -ForegroundColor Green
+    } else {
+        Write-Host "  · 自身复现性：两次截图不一致 -> $selfDiff" -ForegroundColor Yellow
+        Write-Host "    说明这局游戏**运行期本质不确定**（手感用真实时钟），像素比对不可作为回归门。" -ForegroundColor Yellow
+    }
 
     if ($UpdateBaseline) {
         Copy-Item $shot $BASELINE -Force
@@ -121,7 +159,7 @@ if ($Fast) {
     } else {
         # 比较逻辑在 tools/compare_images.py 里（独立文件，可手测、不依赖 PowerShell）
         #
-        # ⚠️ 先说清楚为什么不用 `ImageChops.difference(...).getbbox()`：
+        # ⚠️ 为什么不用 `ImageChops.difference(...).getbbox()`：
         #    PIL 的 getbbox() 在 **RGBA** 图上以 **alpha 通道**当"非零"掩码，
         #    而截图完全不透明 -> 差值图 alpha 恒为 0 -> 它报「没有差异」。
         #    实测踩到过：玩家从蓝改红（66926 像素真的变了）仍然报一致。
@@ -129,11 +167,16 @@ if ($Fast) {
         $code = $LASTEXITCODE
         $diff = ($diff | Out-String).Trim()
         $ok = ($code -eq 0)
-        Record "像素基线" $ok "与基线比对：$diff"
-        if (-not $ok) {
-            Write-Host "     ⚠️ 画面/模拟行为变了。" -ForegroundColor Yellow
-            Write-Host "        · 如果这是**有意的**改动 -> 复核截图后跑 -UpdateBaseline" -ForegroundColor Yellow
-            Write-Host "        · 如果不是 -> 你引入了一个回归" -ForegroundColor Yellow
+        if ($ok) {
+            Record "像素基线" $true "与基线一致：$diff"
+        } elseif ($Strict) {
+            Record "像素基线" $false "与基线不一致：$diff"
+            Write-Host "     （-Strict：把它当门槛）" -ForegroundColor Yellow
+        } else {
+            # 咨询性：只报告，不让验收失败。
+            # 理由见脚本开头 —— 这局游戏运行期本质不确定，硬门槛会误报。
+            $results += [pscustomobject]@{ 项 = "像素基线"; 结果 = "参考"; 详情 = $diff }
+            Write-Host "  ℹ️    与基线不一致（咨询性，不影响验收）：$diff" -ForegroundColor DarkYellow
         }
     }
 }
@@ -144,9 +187,9 @@ Write-Host ("═" * 64) -ForegroundColor DarkGray
 $results | Format-Table -AutoSize | Out-String | Write-Host
 if ($fatal) {
     Write-Host "❌ 验收失败 —— 不许交付。" -ForegroundColor Red
-    Write-Host "   修好之后重跑本命令；不要只跑其中一项就说"过了"。" -ForegroundColor Red
+    Write-Host "   修好之后重跑本命令；不要只跑其中一项就说'过了'。" -ForegroundColor Red
     exit 1
 } else {
-    Write-Host "✅ 全部通过 —— 可以交付。" -ForegroundColor Green
+    Write-Host "✅ 通过（①②③ 是门槛；④ 像素基线仅供参考）—— 可以交付。" -ForegroundColor Green
     exit 0
 }

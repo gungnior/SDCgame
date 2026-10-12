@@ -138,6 +138,18 @@ func _ready() -> void:
 
 # ═══════════════════════ 初始化 ═══════════════════════
 
+## 随机朝向 —— 走 **_rng**，不走全局 RNG。
+##
+## ⚠️ 为什么要有这个函数：全局 `randf_range` 会被别的系统消耗，
+##    最典型的是 `audio/sfx.gd` 给每个音效随机挑音高 ——
+##    **消耗次数随音频状态浮动**。
+##    后果实测过：同种子同参数两次截图，世界区域差 5.76%
+##    （敌人朝向不同 -> AI 行为分化 -> 位置全乱）。
+##    **可复现的 bug 报告**是本项目的硬需求，所以游戏逻辑一律走 _rng。
+func _rng_dir() -> Vector2:
+	return Vector2(_rng.randf_range(-1.0, 1.0), _rng.randf_range(-1.0, 1.0)).normalized()
+
+
 func _setup_sim() -> void:
 	reg = DataRegistry.new()
 	if not reg.load_all("A"):
@@ -239,7 +251,13 @@ func _setup_sim() -> void:
 			var a := EnemyAgent.new(eid, d, Ballistics.cell_center(r.center))
 			if d.is_ranged():
 				a.equip(reg.get_weapon("weapon_pistol"), 60)
-			a.facing = Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized()
+			# ⚠️ 用 **_rng**（由 _raid_seed 播种）而**不是全局 randf_range**。
+			#    全局 RNG 会被别的系统消耗 —— 最典型的是 audio/sfx.gd 给每个音效
+			#    随机挑音高，**消耗次数随音频状态浮动**。
+			#    后果实测过：同种子同参数的两次截图，世界区域差 5.76%
+			#    （敌人朝向不同 -> AI 行为分化 -> 位置全乱）。
+			#    **可复现的 bug 报告**是本项目的硬需求，所以游戏逻辑一律走 _rng。
+			a.facing = _rng_dir()
 			squad.add_member(a)
 			agents.append(a)
 			eid += 1
@@ -252,7 +270,7 @@ func _setup_sim() -> void:
 				var a2 := EnemyAgent.new(eid, d2, Ballistics.cell_center(r.center))
 				if d2.is_ranged():
 					a2.equip(reg.get_weapon("weapon_pistol"), 60)
-				a2.facing = Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized()
+				a2.facing = _rng_dir()
 				squad.add_member(a2)
 				agents.append(a2)
 				eid += 1
