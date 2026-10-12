@@ -385,9 +385,10 @@ func _test_hearing_cache() -> void:
 func _test_corpse_interaction_visible() -> void:
 	# 用户 PC 实测："和敌人尸体没法交互。（战利品系统呢）"
 	# 尸体其实已经生成、也能搜 —— 问题是【没有可见入口】。
-	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
 	var rh := FileAccess.get_file_as_string("res://view/raid_hud.gd")
-	_check(rs.contains("_spawn_corpse(tgt)"), "击杀后会生成尸体容器")
+	# ⚠️ `_spawn_corpse(tgt)` 随 _try_fire 搬到了 raid_sim_runner.gd。
+	#    这是「行为存在」类断言 -> 用视图层合并源码查。
+	_check(_view_src().contains("_spawn_corpse(tgt)"), "击杀后会生成尸体容器")
 	# ⚠️ 尸体提示的绘制已搬到 view/raid_hud.gd（拆分上帝对象）。
 	_check(rh.contains("corpse_label"), "HUD 有『附近有尸体』的提示")
 	_check(rh.contains("func bag_key_hint"), "提示里带按键（触屏/PC 文案不同）")

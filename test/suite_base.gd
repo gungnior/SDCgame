@@ -54,3 +54,39 @@ func _open_grid(w: int = 12, h: int = 8) -> LogicalGrid:
 	var g := LogicalGrid.new(w, h)
 	g.carve_rect(Rect2i(1, 1, w - 2, h - 2))
 	return g
+
+
+# ─────────────────────── 视图层源码读取 ───────────────────────
+#
+# ⚠️ **为什么需要这个**
+# 项目里有一批"源码文本断言"（`_check(src.contains("..."))`）用来防止代码回流 ——
+# 它们本身是有价值的，但有一个通病：
+# **把「代码在哪」和「代码对不对」绑在了一起。**
+#
+# 拆分 raid_scene.gd（1676 行）到 5 个文件的过程中，这类断言**失效了 6 次**：
+#   HUD  / 地图烘焙 / 世界绘制 / 视野锥 / 键位分派 / 模拟调度
+# 每次代码一搬，断言就红 —— 而它想守的其实只是"这段逻辑存在"。
+#
+# 所以分两类写：
+#   · **行为存在**（"自动射击看 visible 不看粘性"）-> 用 `_view_src()` 查整个视图层，
+#     代码在层内怎么搬都不会误报
+#   · **结构关系**（"场景必须委托、不许自己长回来"）-> 用具体文件名查，
+#     这正是防回流要盯的东西
+const VIEW_LAYER_FILES := [
+	"res://view/raid_scene.gd",
+	"res://view/raid_hud.gd",
+	"res://view/raid_drawer.gd",
+	"res://view/raid_map_baker.gd",
+	"res://view/raid_input.gd",
+	"res://view/raid_sim_runner.gd",
+]
+
+
+## 视图层全部源码拼接。用于"这段逻辑存在于视图层某处"的断言。
+func _view_src() -> String:
+	var parts: Array[String] = []
+	for p in VIEW_LAYER_FILES:
+		if ResourceLoader.exists(p) or FileAccess.file_exists(p):
+			parts.append(FileAccess.get_file_as_string(p))
+	return "\n".join(parts)
+

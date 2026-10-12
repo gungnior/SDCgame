@@ -60,10 +60,15 @@ func _test_touch_input_isolation() -> void:
 	_check(not src.contains("is InputEventScreenTouch"),
 		"raid_scene 不再自己处理触摸事件（交给 VirtualJoystick / TouchButton）")
 	_check(not src.contains("_touch_move_id"), "遗留的自绘摇杆状态已清除")
-	_check(src.contains("touch.is_firing()"),
+	# ⚠️ 这几条是「行为存在」类断言 —— 用视图层合并源码查。
+	#    它们原来查 raid_scene.gd，但读取触屏状态的代码随 _tick_player
+	#    搬到了 raid_sim_runner.gd。用 _view_src() 之后，
+	#    代码在视图层内再怎么搬都不会误报（见 suite_base.gd 的说明）。
+	var vsrc := _view_src()
+	_check(vsrc.contains("touch.is_firing()"),
 		"开火状态确实读取了触屏开火按钮（否则按钮点了没反应）")
-	_check(src.contains("touch.move_vector()"), "移动读取触屏摇杆")
-	_check(src.contains("touch.aim_vector()"), "瞄准读取触屏摇杆")
+	_check(vsrc.contains("touch.move_vector()"), "移动读取触屏摇杆")
+	_check(vsrc.contains("touch.aim_vector()"), "瞄准读取触屏摇杆")
 
 	# 触屏按钮必须按 finger index 分别记录（T-12）
 	var btn := FileAccess.get_file_as_string("res://ui/touch_button.gd")

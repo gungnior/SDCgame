@@ -148,11 +148,12 @@ func _test_no_double_hit_roll() -> void:
 	#         而 pick() 在 push < 0.22 时直接返回空 -> PC 上子弹磁性几乎从不生效。
 	#    本测试做**源码级守卫**，防止双重判定被加回来。
 	var src := FileAccess.get_file_as_string("res://view/raid_scene.gd")
+	var vsrc := _view_src()      # 视图层合并：行为存在类断言用它
 	_check(not src.is_empty(), "能读到 raid_scene.gd")
-	_check(not src.contains("_rng.randf() <= clampf(0.30 + acc"),
+	_check(not vsrc.contains("_rng.randf() <= clampf(0.30 + acc"),
 		"命中判定里不再有第二次随机数（双重判定会表现为『子弹穿过去』）")
-	_check(src.contains("if tgt != null:"), "pick 找到目标即为命中")
-	_check(src.contains("_spread_radius_factor"),
+	_check(vsrc.contains("if tgt != null:"), "pick 找到目标即为命中")
+	_check(vsrc.contains("_spread_radius_factor"),
 		"散布改为收缩有效 hitbox（逻辑只有一处）")
 	_check(src.contains("return 0.55"),
 		"桌面 _aim_push 给恒定推力（返回 0 会让 pick 直接失效）")
@@ -211,9 +212,12 @@ func _test_cone_no_xray() -> void:
 	_check(dr.contains("screen_diag_cells"),
 		"视觉半径不超过屏幕对角线（屏幕外看不见，不白算）")
 	# 自动射击必须用 visible，不是 has_lock
-	_check(rs.contains('_lock_info.get("visible", false)'),
+	# ⚠️ 这段逻辑随 _try_fire 搬到了 raid_sim_runner.gd —— 用视图层合并源码查，
+	#    代码在层内再搬也不会误报。
+	var vsrc2 := _view_src()
+	_check(vsrc2.contains('_lock_info.get("visible", false)'),
 		"自动射击要求【当前可见】而不是锁定粘性")
-	_check(not rs.contains("Game.auto_fire and auto_aim.has_lock()"),
+	_check(not vsrc2.contains("Game.auto_fire and auto_aim.has_lock()"),
 		"不得再用 has_lock 决定开火")
 
 	var aa := FileAccess.get_file_as_string("res://sim/combat/auto_aim.gd")
