@@ -36,6 +36,7 @@ func _ready() -> void:
 	# ALWAYS：即使 get_tree().paused = true 也要能继续接受点击
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build()
+	_force_always(self)
 
 
 func _build() -> void:
@@ -229,8 +230,14 @@ func open() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	if _ext != null:
 		_ext.set("game_paused", true)
-	# 暂停整棵树（菜单自己 process_mode = ALWAYS，不受影响）
+	# ⚠️ 暂停整棵树之前，必须把【整棵子树的 process_mode 都设成 ALWAYS】。
+	#    只设菜单自己是没用的：TouchButton 子节点默认 INHERIT，
+	#    暂停后它们的 _gui_input 根本不会被调用 —— 菜单看得见、点不动，
+	#    表现就是"游戏卡死了"（用户实测）。
+	_force_always(self)
 	get_tree().paused = true
+	if Game != null:
+		Game.pause_owner = self
 	# 刷新所有开关的显示（可能被 F1~F4 改过）
 	for c in _root.get_children():
 		if c is HBoxContainer:
@@ -241,11 +248,20 @@ func open() -> void:
 		Sfx.play("ui_open")
 
 
+## 递归把整棵子树的 process_mode 设成 ALWAYS —— 暂停时仍能收输入/动画
+func _force_always(n: Node) -> void:
+	n.process_mode = Node.PROCESS_MODE_ALWAYS
+	for ch in n.get_children():
+		_force_always(ch)
+
+
 func close() -> void:
 	_open = false
 	visible = false
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	get_tree().paused = false
+	if Game != null:
+		Game.pause_owner = null
 	if _ext != null:
 		_ext.set("game_paused", false)
 	if Sfx != null:

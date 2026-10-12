@@ -30,11 +30,28 @@ var hitstop_enabled := true
 var flash_enabled := true
 
 var _ready_done := false
+## 当前负责暂停的菜单（安全网用）。谁开暂停谁登记，关闭时清空。
+## ⚠️ 加这个是因为真机上出现过"暂停之后没能恢复"：
+##    一旦负责暂停的菜单被释放/异常退出，树会永远停在 paused=true，
+##    而 Tel 之类的 ALWAYS 节点还在跑 -> 玩家看到的是"游戏卡死"。
+var pause_owner: Node = null
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	ensure_loaded()
+
+
+func _process(_delta: float) -> void:
+	# ── 暂停安全网 ──
+	# 如果树被暂停，但【没有任何有效节点在为这次暂停负责】，
+	# 就强制恢复 —— 否则游戏会永久卡在静止状态（真机踩过）。
+	if not get_tree().paused:
+		return
+	if pause_owner == null or not is_instance_valid(pause_owner):
+		pause_owner = null
+		get_tree().paused = false
+		push_warning("[Game] 检测到无主的暂停，已强制恢复")
 
 
 func ensure_loaded() -> void:
