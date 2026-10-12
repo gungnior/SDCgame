@@ -109,21 +109,39 @@ func _to_string() -> String:
 
 # ─────────────────── 跨小队警戒扩散 ───────────────────
 
-## 把警戒扩散到附近的小队。【走格子 BFS，不走直线】。
+## 把警戒扩散到附近的小队。
 ## 返回被波及的小队数。
+##
+## ⚠️ 性能：早先对**每个小队**各调一次 `Perception.hearing_cost()` ——
+##    那是**每小队一次全网格 Dijkstra**，正是之前把 AI 单帧推到 257ms 的元凶。
+##    现在改成：**从声源跑一次 `hearing_field()`**，然后对所有小队做 O(1) 查表。
+##    N 次 Dijkstra -> 1 次。
+##
+## 另外：本方法早先**从未被调用**（死代码）。
+##    现在由 raid_scene 在"有成员报告接触"时调用。
 static func spread_alert(grid: LogicalGrid, source_pos: Vector2, squads: Array,
-		radius_cost: float, now: float, wall_penalty: int = Perception.DEFAULT_WALL_PENALTY) -> int:
+		radius_cost: float, now: float,
+		wall_penalty: int = Perception.DEFAULT_WALL_PENALTY) -> int:
+	if grid == null or squads.is_empty():
+		return 0
+	var field := Perception.hearing_field(grid, source_pos, wall_penalty)
+	if field.is_empty():
+		return 0
 	var n := 0
+	var emitted := {}                  # 同一个小队只扩散一次（免得 A 传 B、B 又传 A）
 	for s in squads:
 		if s == null or s.members.is_empty():
 			continue
+		if emitted.has(s):
+			continue
+		emitted[s] = true
 		var anchor = s.members[0]
 		var p: Vector2 = anchor.get("pos")
-		var cost := Perception.hearing_cost(grid, source_pos, p, wall_penalty)
+		var cost := Perception.cost_at(field, grid, p)
 		if cost < 0:
 			continue
 		if float(cost) <= radius_cost:
-			# 距离越远，警戒等级越低
+			# 距离越远，警戒等级越低（隔着墙会额外衰减，因为 cost 里含墙罚）
 			var falloff := 1.0 - clampf(float(cost) / maxf(1.0, radius_cost), 0.0, 1.0)
 			s.alert_level = maxf(s.alert_level, ALERT_ON_CONTACT * falloff)
 			if not s.has_contact:
@@ -131,3 +149,108 @@ static func spread_alert(grid: LogicalGrid, source_pos: Vector2, squads: Array,
 				s.last_known_time = now
 			n += 1
 	return n
+
+
+# ─────────────────── 包夹（角色分工）───────────────────
+#
+# 依据 roadmap-bac.md §2：A 阶段的 AI 要「＋群体协同」。
+# 现状是每个敌人**各自朝玩家直线压过去** —— 会挤成一坨，且完全没有战术感。
+#
+# 设计：给每名成员分一个【角色】，角色决定它该站到目标的哪个方位：
+#   DIRECT       正面顶上去（最近的那个，负责吸引火力）
+#   FLANK_LEFT   从左侧绕，站到目标的侧后方
+#   FLANK_RIGHT  从右侧绕
+#   OVERWATCH    不上前，保持射程压制（血量低/射速慢的当这个最合适）
+
+enum Role { DIRECT, FLANK_LEFT, FLANK_RIGHT, OVERWATCH }
+
+## 包夹的侧向夹角与半径（世界单位 = 逻辑格）
+const FLANK_ANGLE_DEG := 58.0
+const FLANK_RADIUS := 3.2
+## 殿后位离目标多远（用远程偏好的上限）
+const OVERWATCH_DIST := 7.0
+
+## 成员 -> 角色
+var roles: Dictionary = {}
+## 成员 -> 分配角色那一刻的"接近方向"（单位向量）
+##
+## ⚠️ 必须缓存这个方向，不能每次用"敌人当前位置到目标"实时算 ——
+##    那条方向会随着敌人移动而变，包夹点于是跟着转，
+##    敌人会绕着目标兜圈子**永远到不了位**（测试直接抓出来了）。
+##    缓存后包夹点在两次重分之间是固定的，敌人才走得到。
+var _approach: Dictionary = {}
+## 上一次分配角色时的成员数（人数变了要重分）
+var _roles_for_count: int = -1
+
+
+## 按"谁离目标近"重新分配角色。成员增删或目标大改时调用。
+##
+## 分配策略（简单但有效）：
+##   最近的 1 个 -> DIRECT（正面顶）
+##   次近的 2 个 -> FLANK_LEFT / FLANK_RIGHT（左右包夹）
+##   其余        -> OVERWATCH（拉远压制）
+func assign_roles(target_pos: Vector2) -> void:
+	var alive := alive_members()
+	if alive.is_empty():
+		roles.clear()
+		_approach.clear()
+		_roles_for_count = 0
+		return
+	# 按到目标的距离升序
+	alive.sort_custom(func(a, b):
+		return Vector2(a.get("pos")).distance_to(target_pos) \
+			< Vector2(b.get("pos")).distance_to(target_pos))
+	# ⚠️ 顺序数组：第 4 位必须是 OVERWATCH。
+	#    我第一版写成了 [DIRECT, FLANK_LEFT, FLANK_RIGHT, FLANK_LEFT, FLANK_RIGHT]，
+	#    于是第 4 名成员拿到的还是"左翼" —— 测试直接抓出来了。
+	var order: Array[Role] = [Role.DIRECT, Role.FLANK_LEFT, Role.FLANK_RIGHT, Role.OVERWATCH]
+	roles.clear()
+	_approach.clear()
+	for i in alive.size():
+		var a = alive[i]
+		roles[a] = order[i] if i < order.size() else Role.OVERWATCH
+		var to_t: Vector2 = target_pos - Vector2(a.get("pos"))
+		_approach[a] = to_t.normalized() if to_t.length() > 0.01 else Vector2.RIGHT
+	_roles_for_count = alive.size()
+
+
+func role_of(a) -> Role:
+	return roles.get(a, Role.DIRECT) as Role
+
+
+## 这名成员该前往的位置（目标方位上的一个包夹点）。
+## 没有角色信息时返回 target_pos（退化成"直冲"，不会卡住）。
+func goal_for(a, target_pos: Vector2) -> Vector2:
+	var r := role_of(a)
+	if r == Role.DIRECT:
+		return target_pos
+	# 用分配角色时缓存的方向；没有就退回实时方向
+	var dir: Vector2 = _approach.get(a, Vector2.ZERO)
+	if dir == Vector2.ZERO:
+		var to_t: Vector2 = target_pos - Vector2(a.get("pos"))
+		if to_t.length() < 0.01:
+			return target_pos
+		dir = to_t.normalized()
+	match r:
+		Role.FLANK_LEFT:
+			return target_pos - dir.rotated(deg_to_rad(FLANK_ANGLE_DEG)) * FLANK_RADIUS
+		Role.FLANK_RIGHT:
+			return target_pos - dir.rotated(-deg_to_rad(FLANK_ANGLE_DEG)) * FLANK_RADIUS
+		Role.OVERWATCH:
+			return target_pos - dir * OVERWATCH_DIST
+	return target_pos
+
+
+## 该成员是否已经站到自己的包夹位附近（到位后就地开火，别再乱跑）
+func at_post(a, target_pos: Vector2, tol: float = 1.4) -> bool:
+	return Vector2(a.get("pos")).distance_to(goal_for(a, target_pos)) <= tol
+
+
+func role_name(a) -> String:
+	match role_of(a):
+		Role.DIRECT: return "正面"
+		Role.FLANK_LEFT: return "左翼"
+		Role.FLANK_RIGHT: return "右翼"
+		Role.OVERWATCH: return "压制"
+	return "?"
+

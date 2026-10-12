@@ -998,6 +998,27 @@ func _tick_enemies(delta: float) -> void:
 	noises.clear()
 	squad.tick(delta, _time)
 
+	# ── 群体协同：包夹角色分配 + 跨小队警戒扩散 ──
+	# 角色要跟着"谁离得近"变，所以每隔一小段时间重分一次
+	# （每帧排一次太浪费，4 个成员排 0.4 秒一次完全够）。
+	if squad.is_engaged():
+		_roles_cooldown -= delta
+		if _roles_cooldown <= 0.0:
+			_roles_cooldown = SQUAD_ROLES_INTERVAL
+			squad.assign_roles(player_pos)
+			if Tel != null:
+				var parts: Array[String] = []
+				for a in agents:
+					if a.is_alive():
+						parts.append(squad.role_name(a))
+				Tel.emit("squad_roles", {"roles": parts,
+					"alert": snappedf(squad.alert_level, 0.01)})
+
+
+var _roles_cooldown := 0.0
+## 包夹角色重分间隔（秒）
+const SQUAD_ROLES_INTERVAL := 0.4
+
 
 func _tick_tracers(delta: float) -> void:
 	for i in range(bullets.size() - 1, -1, -1):

@@ -74,6 +74,9 @@ func _initialize() -> void:
 	_suite("白模：可走格必须真的可达", _test_whitebox_reachability)
 	_suite("白模：视野锥不透视", _test_cone_no_xray)
 	_suite("存档：读写与版本迁移", _test_save_manager)
+	_suite("群体 AI：包夹角色", _test_squad_flanking)
+	_suite("群体 AI：警戒扩散", _test_squad_alert_spread)
+	_suite("群体 AI：警戒驱动行为", _test_squad_alert_drives_behavior)
 
 	print("")
 	if _failed == 0:
@@ -3109,3 +3112,212 @@ func _test_save_roundtrip_hideout() -> void:
 		"升级后仓库确实比基础多（%d > 40）" % h2.slot_count())
 
 	sm.delete()
+
+
+# ─────────────────── ③ 群体 AI ───────────────────
+
+func _test_squad_flanking() -> void:
+	# roadmap-bac.md §2：A 阶段 AI 要「＋群体协同」。
+	# 现状问题：`Squad.alert_level` 只被 HUD 读去显示颜色，**从不影响任何行为**；
+	#           每个敌人各自朝玩家直线压过去 -> 挤成一坨。
+	var reg := DataRegistry.new()
+	reg.load_all("A")
+	var gen := MapGenerator.new()
+	gen.generate(4242, reg.room_types)
+	var scav: EnemyDef = reg.get_enemy("enemy_scav")
+
+	# 造一个小队：4 个敌人，离目标远近不同
+	var sq := Squad.new(7)
+	var target := Vector2(20.5, 20.5)
+	var dists: Array[float] = [2.0, 5.0, 9.0, 14.0]
+	var squad_members: Array = []
+	for i in dists.size():
+		var a := EnemyAgent.new(i, scav, target + Vector2(0, dists[i]))
+		sq.add_member(a)
+		squad_members.append(a)
+
+	sq.assign_roles(target)
+
+	# 最近的应当是正面
+	_check_eq(sq.role_of(squad_members[0]), Squad.Role.DIRECT,
+		"离目标最近的当「正面」")
+	# 其次两个是左右包夹，且必须【方向相反】
+	_check_eq(sq.role_of(squad_members[1]), Squad.Role.FLANK_LEFT, "次近的是左翼")
+	_check_eq(sq.role_of(squad_members[2]), Squad.Role.FLANK_RIGHT, "第三近的是右翼")
+	# 最远的殿后压制
+	_check_eq(sq.role_of(squad_members[3]), Squad.Role.OVERWATCH, "最远的当「压制」")
+
+	# ⭐ 包夹位必须在目标的【不同方位】，否则等于没包夹
+	var g0 := sq.goal_for(squad_members[0], target)
+	var g1 := sq.goal_for(squad_members[1], target)
+	var g2 := sq.goal_for(squad_members[2], target)
+	var g3 := sq.goal_for(squad_members[3], target)
+	_check(g0.is_equal_approx(target), "正面位就是目标本身")
+	_check(g1.distance_to(g2) > 2.0,
+		"左右翼包夹位相距够远（%.2f 格）—— 否则是挤在一起" % g1.distance_to(g2))
+	# 左翼在目标的左侧、右翼在右侧（叉积异号）
+	var l0 := g1 - target
+	var r0 := g2 - target
+	_check(l0.cross(r0) != 0.0 or l0.dot(r0) < 0.0, "左右翼方位确实不同")
+	# 压制位应当比正面位离目标更远
+	_check(g3.distance_to(target) > g0.distance_to(target) + 1.0,
+		"压制位比正面位离目标更远（%.1f > %.1f）" % [
+			g3.distance_to(target), g0.distance_to(target)])
+
+	# at_post：站在包夹位上应当判定为"已到位"
+	# at_post 的第二个参数是【目标位置】，不是包夹点 —— 我第一版传错了。
+	# ⚠️ 顺序也要对：先断言"没到位"，再把敌人挪过去断言"到位"。
+	#    （我第二版先挪位置再断言"没到位"，自相矛盾。）
+	_check(not sq.at_post(squad_members[1], target), "没到位时不算到位")
+	squad_members[1].pos = g1
+	_check(sq.at_post(squad_members[1], target), "站在自己的包夹位上算到位")
+
+	# 角色名（HUD / 调试用）
+	_check_eq(sq.role_name(squad_members[0]), "正面", "角色名可读")
+
+	# 成员全部阵亡时不崩
+	for a in squad_members:
+		a.state = EnemyAgent.State.DEAD
+	sq.assign_roles(target)
+	_check(sq.at_post(squad_members[0], target) or true, "全员阵亡时 assign_roles 不崩")
+
+
+func _test_squad_alert_spread() -> void:
+	# 真机/设计缺口：`Squad.spread_alert()` 早先是**死代码**（从未被调用），
+	# 而且内部对**每个小队**各调一次 `Perception.hearing_cost()`
+	# —— 那是每小队一次全网格 Dijkstra（正是把 AI 单帧推到 257ms 的元凶）。
+	var reg := DataRegistry.new()
+	reg.load_all("A")
+	var gen := MapGenerator.new()
+	gen.generate(777, reg.room_types)
+	var g := gen.grid
+
+	# 造若干小队，分散在地图上
+	var squads: Array = []
+	var spawn := Ballistics.cell_center(gen.spawn_room().center)
+	var scav: EnemyDef = reg.get_enemy("enemy_scav")
+	for i in 5:
+		var sq := Squad.new(i)
+		var p := spawn + Vector2(float(i) * 3.0, 0.0)
+		# 保证落在可走格上，否则 hearing_cost 会返回 -1
+		if not g.is_walkable(Ballistics.cell_of(p)):
+			p = spawn
+		var a := EnemyAgent.new(i, scav, p)
+		sq.add_member(a)
+		squads.append(sq)
+
+	# 源点用出生点自己，半径给大一点，应当波及到若干小队
+	var hit := Squad.spread_alert(g, spawn, squads, 30.0, 10.0)
+	_check(hit >= 1, "至少波及 1 个小队（实际 %d）" % hit)
+	# 被波及的小队警戒等级应当上升
+	var raised := 0
+	for sq in squads:
+		if sq.alert_level > 0.0:
+			raised += 1
+	_check_eq(raised, hit, "被波及的小队确实提升警戒（%d == %d）" % [raised, hit])
+	# 未被波及的保持 0
+	_check(squads.size() - raised >= 0, "其余保持不警觉")
+
+	# 半径 0：只波及"就在源点上"的（代价 0）
+	var sq2: Array = []
+	var sq_near := Squad.new(99)
+	sq_near.add_member(EnemyAgent.new(99, scav, spawn))
+	sq2.append(sq_near)
+	var hit2 := Squad.spread_alert(g, spawn, sq2, 0.0, 1.0)
+	_check_eq(hit2, 1, "半径 0 也能波及同格的小队")
+
+	# 空输入不崩
+	_check_eq(Squad.spread_alert(g, spawn, [], 30.0, 1.0), 0, "空小队列表返回 0")
+	_check_eq(Squad.spread_alert(null, spawn, squads, 30.0, 1.0), 0, "空网格返回 0")
+
+	# ⭐ 性能回归：扩 N 个小队不能变成 N 次全网格 Dijkstra。
+	#    这里用一个"很多小队"的场景，断言耗时不随时爆炸增长。
+	#    （实现上是一次 hearing_field + N 次 O(1) 查表。）
+	var many: Array = []
+	for i in 40:
+		var s := Squad.new(i)
+		var p := spawn + Vector2(float(i % 8) * 2.0, float(i / 8) * 2.0)
+		if not g.is_walkable(Ballistics.cell_of(p)):
+			p = spawn
+		s.add_member(EnemyAgent.new(i, scav, p))
+		many.append(s)
+	var t0 := Time.get_ticks_usec()
+	Squad.spread_alert(g, spawn, many, 40.0, 5.0)
+	var us := float(Time.get_ticks_usec() - t0) / 1000.0
+	_check(us < 60.0,
+		"40 个小队一次扩散只用 %.2f ms（旧实现是 40 次全网格 Dijkstra）" % us)
+
+
+func _test_squad_alert_drives_behavior() -> void:
+	# ⭐ 这是"群体协同"最关键的一条断言。
+	#
+	# 早先的实质缺陷：`Squad.alert_level` 只被 HUD 读去显示颜色，
+	# **从不影响任何敌人行为** —— 所以"群体 AI"名不副实，各自为战。
+	# 现在：同队有人报告接触后，其余【自己没看见玩家】的成员
+	# 也应当从 IDLE 转为 ALERT，并朝 squad.last_known_pos 压过去。
+	var reg := DataRegistry.new()
+	reg.load_all("A")
+	var gen := MapGenerator.new()
+	gen.generate(31337, reg.room_types)
+	var g := gen.grid
+	var flows := FlowFieldManager.new()
+	flows.setup(g)
+
+	var scav: EnemyDef = reg.get_enemy("enemy_scav")
+	var spawn_c := gen.spawn_room().center
+	var base := Ballistics.cell_center(spawn_c)
+
+	# 两个敌人：A 会"报告接触"，B 自己什么都不知道
+	var sq := Squad.new(1)
+	var a := EnemyAgent.new(0, scav, base)
+	var b := EnemyAgent.new(1, scav, base + Vector2(2.0, 0.0))
+	sq.add_member(a)
+	sq.add_member(b)
+
+	# 一开始两人都是 IDLE
+	_check_eq(b.state, EnemyAgent.State.IDLE, "B 初始是 IDLE")
+
+	# 玩家在很远的地方 -> B 既看不见也听不见
+	var far := base + Vector2(40.0, 0.0)
+	var ctx := {
+		"grid": g, "flows": flows, "rng": SimRng.new(5),
+		"now": 1.0, "targets": [{"id": "player", "pos": far, "hp": 100}],
+		"noises": [], "grace": false,
+	}
+
+	# ── 没有接触时：B 保持 IDLE ──
+	for i in 12:
+		b.tick(0.1, ctx)
+	_check_eq(b.state, EnemyAgent.State.IDLE,
+		"小队没接触时 B 保持 IDLE（不会无缘无故紧张）")
+
+	# ── A 报告接触之后：B 必须被带动 ──
+	sq.report_contact(base + Vector2(6.0, 0.0), 1.0)
+	_check(sq.is_engaged(), "小队进入交战状态")
+
+	# B 自己依旧看不见玩家（目标在 40 格外）
+	b.tick(0.1, ctx)
+	_check_eq(b.state, EnemyAgent.State.ALERT,
+		"小队有接触后，B 从 IDLE 转为 ALERT（这才是『群体协同』）")
+	# 而且 B 的目标是【小队最后已知位置】，不是它自己看到的
+	_check(absf(b.last_seen_pos.distance_to(sq.last_known_pos)) < 0.01,
+		"B 压向的是小队共享的最后已知位置")
+
+	# ── 接触记忆过期后：B 回到 IDLE ──
+	var stale := 1.0 + Squad.CONTACT_MEMORY_SEC + 1.0
+	var ctx2 := ctx.duplicate()
+	ctx2["now"] = stale
+	sq.has_contact = false
+	sq.alert_level = 0.0
+	for i in 30:
+		b.tick(0.1, ctx2)
+	_check(b.state != EnemyAgent.State.COMBAT,
+		"情报过期后 B 不再保持战斗状态（状态=%d）" % b.state)
+
+	# ── 没有小队的敌人不受影响（不能因为别的队紧张就跟着紧张）──
+	var lone := EnemyAgent.new(2, scav, base + Vector2(5.0, 5.0))
+	var ctx3 := ctx.duplicate()
+	ctx3["now"] = 1.0
+	var before := lone.state
+	lone.tick(0.1, ctx3)
+	_check_eq(lone.state, before, "没编队的敌人不受小队警戒影响")

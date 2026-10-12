@@ -29,6 +29,8 @@ const MELEE_RANGE_CELLS := 1.2
 const RANGED_PREFERRED_MIN := 5.0
 const RANGED_PREFERRED_MAX := 9.0
 ## 失去视野后继续搜索的时长
+## 被【同队】的接触/噪声惊动后，压向最后已知位置的持续时间
+const SQUAD_ALERT_DURATION := 7.0
 const SEARCH_DURATION := 8.0
 
 var id: int = 0
@@ -172,6 +174,20 @@ func tick(delta: float, ctx: Dictionary) -> void:
 	if prof != null:
 		prof.mark("ai_act")
 
+	# ── ⭐ 小组警戒扩散：别人发现了，我也该压过去 ──
+	#
+	# 这就是"群体协同"的落地。早先 `Squad.alert_level` 只被 HUD 读去显示颜色，
+	# **从不影响任何敌人行为** —— 所以"群体 AI"实际上只是各自为战。
+	# 现在：同队有人报告接触/噪声后，其余成员即使自己没看见，
+	# 也会朝 squad.last_known_pos 压过去。
+	if state == State.IDLE and squad != null:
+		var fresh := (now - squad.last_known_time) <= Squad.CONTACT_MEMORY_SEC
+		if fresh and (squad.has_contact or squad.is_alerted()):
+			last_seen_pos = squad.last_known_pos
+			target_pos = squad.last_known_pos
+			alert_timer = SQUAD_ALERT_DURATION
+			state = State.ALERT
+
 	# ── 状态行为 ──
 	match state:
 		State.IDLE:
@@ -248,13 +264,25 @@ func _find_audible_noise(grid: LogicalGrid, noises: Array,
 func _combat(delta: float, targets: Array, rng: SimRng, seen: Dictionary) -> void:
 	var dist := pos.distance_to(target_pos)
 
+	# ── ⭐ 包夹：不直接冲玩家，而是冲自己那个"包夹位" ──
+	#
+	# 早先每个敌人**各自朝玩家直线压过去** -> 挤成一坨，毫无战术感。
+	# 现在由 Squad 分发角色（正面 / 左翼 / 右翼 / 压制），
+	# 每个人赶赴目标方位上的一个点，形成交叉火力。
+	# 没有小队时退化为原来的直冲。
+	var goal := target_pos
+	if squad != null:
+		goal = squad.goal_for(self, target_pos)
+
 	if def.is_ranged():
 		# 保持距离：太近后退、太远靠近、合适则原地
-		var dir_to := (target_pos - pos)
-		if dist > RANGED_PREFERRED_MAX:
+		var dir_to := (goal - pos)
+		var d_goal := dir_to.length()
+		if d_goal > RANGED_PREFERRED_MAX * 0.5:
 			move_dir = dir_to.normalized()
 		elif dist < RANGED_PREFERRED_MIN:
-			move_dir = -dir_to.normalized()
+			# 玩家贴脸了：即使要后退也优先拉开，否则等于送
+			move_dir = -(target_pos - pos).normalized()
 		else:
 			move_dir = Vector2.ZERO
 
@@ -265,7 +293,11 @@ func _combat(delta: float, targets: Array, rng: SimRng, seen: Dictionary) -> voi
 			return
 		_fire_at(targets, dist, rng)
 	else:
-		# 近战：贴身
+		# 近战：贴身。有包夹位就先绕到包夹位，到位了再扑
+		var to_goal := goal - pos
+		if squad != null and not squad.at_post(self, target_pos):
+			move_dir = to_goal.normalized() if to_goal.length() > 0.0001 else Vector2.ZERO
+			return
 		move_dir = (target_pos - pos).normalized() if dist > 0.0001 else Vector2.ZERO
 		if dist <= MELEE_RANGE_CELLS and attack_cooldown <= 0.0 and reaction_timer <= 0.0:
 			attack_cooldown = def.attack_cooldown
