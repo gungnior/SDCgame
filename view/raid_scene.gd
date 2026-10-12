@@ -21,6 +21,9 @@ const CELL_PX := 48.0          ## 1 逻辑格 = 48 px（T-31）
 const PLAYER_SPEED := 3.2      ## 逻辑格 / 秒
 const NOISE_LOUD := 22.0       ## 开枪的响度（米）
 const NOISE_QUIET := 7.0       ## 走路的响度
+## 曳光存活时间。
+## ⚠️ 早先只有 0.06s（约 3.6 帧），安卓真机反馈"开火只听到声音看不到子弹"。
+const TRACER_TTL := 0.13
 
 # ─── 颜色 ───
 const C_WALL := Color(0.13, 0.14, 0.18)
@@ -45,7 +48,9 @@ var agents: Array = []
 var squad: Squad
 var vitals: Vitals
 var medical: MedicalSystem
-var bullets: Array = []          ## 表现层专用：曳光弹 {from, to, ttl}
+var bullets: Array = []          ## 表现层专用：曳光弹 {from, to, ttl, own}
+## 枪口火光（独立于粒子画，保证一定看得见）{pos, dir, ttl}
+var muzzle_flash: Array = []
 var noises: Array = []
 var drops_on_ground: Array = []  ## {pos, item_id, count}
 
@@ -74,6 +79,7 @@ var debug_mode := 0              ## 0 普通 1 流向场 2 房间图 3 声音范
 var fx: FxPool = null            ## CPUParticles2D 池（T-03）
 var touch: TouchControls = null  ## 双摇杆 + 动作按钮
 var flash_rect: ColorRect = null ## 受击闪白覆盖层
+var result_overlay: ResultOverlay = null   ## 结算界面（含触屏重开按钮）
 var _prev_shots: Dictionary = {} ## agent.id -> 已开火数（用于播放枪声）
 var _step_accum := 0.0
 var _last_hint_shown := false
@@ -81,6 +87,11 @@ var _hitstop_events := 0         ## 本局触发过几次 hitstop（调试）
 
 var _rng := SimRng.new(20261012)
 var _time := 0.0
+## 是否触屏设备（决定提示文案与 HUD 字号）
+var _is_touch := false
+## 本局地图种子。<=0 表示"开新局时随机"（见 _setup_sim）
+var _raid_seed := 0
+var hideout: Hideout = null      ## 藏身处跨局持久（重启不重置资金）
 
 # ─── 地形贴图 ───
 # 设计：把整张地图【烘焙成一张 81x81 像素图】，用 nearest 放大 16 倍绘制。
@@ -114,8 +125,16 @@ func _setup_sim() -> void:
 		push_error("数据加载失败：%s" % str(reg.errors))
 		return
 
+	# ⚠️ 每局换种子。
+	#    早先这里写死 20261012，结果真机上"每局地图和出生点完全一样" ——
+	#    玩家反馈"并没有随机出生"。同种子可复现是开发期的需要，
+	#    正式游玩必须每局不同（T-32 的种子纪律：可复现 ≠ 写死）。
+	if _raid_seed <= 0:
+		_raid_seed = randi() & 0x7FFFFFFF
+	_rng = SimRng.new(_raid_seed)
+
 	gen = MapGenerator.new()
-	if not gen.generate(20261012, reg.room_types):
+	if not gen.generate(_raid_seed, reg.room_types):
 		push_error("地图生成失败：%s" % str(gen.errors))
 		return
 
@@ -123,8 +142,10 @@ func _setup_sim() -> void:
 	flows.setup(gen.grid)
 
 	# 藏身处（跨局持久）
-	var hideout := Hideout.new(reg.items, 3000)
-	hideout.wallet += 5000
+	if hideout == null:
+		hideout = Hideout.new(reg.items, 3000)
+		hideout.wallet += 5000
+		hideout.wallet += 5000
 
 	raid = RaidSession.new(reg.items, _rng, hideout.stash)
 	raid.load_map(gen)
@@ -166,6 +187,10 @@ func _setup_sim() -> void:
 
 
 func _setup_view() -> void:
+	# 触屏设备：决定提示文案与 HUD 字号
+	_is_touch = DisplayServer.is_touchscreen_available() \
+		or OS.has_feature("mobile") or OS.get_name() == "Android"
+
 	camera = Camera2D.new()
 	camera.zoom = Vector2(1.0, 1.0)
 	add_child(camera)
@@ -174,22 +199,24 @@ func _setup_view() -> void:
 	hud = CanvasLayer.new()
 	add_child(hud)
 
+	# 手机上字号要更大（真机反馈：默认 13px 在手机上偏小）
+	var fs := 16 if _is_touch else 13
+
 	hud_label = Label.new()
 	hud_label.position = Vector2(10, 6)
-	hud_label.add_theme_font_size_override("font_size", 13)
+	hud_label.add_theme_font_size_override("font_size", fs)
 	hud_label.add_theme_color_override("font_color", Color(0.92, 0.94, 0.96))
 	hud.add_child(hud_label)
 
 	hint_label = Label.new()
 	hint_label.position = Vector2(10, 342)
-	hint_label.add_theme_font_size_override("font_size", 11)
+	hint_label.add_theme_font_size_override("font_size", fs - 2)
 	hint_label.add_theme_color_override("font_color", Color(0.6, 0.65, 0.72))
-	hint_label.text = "WASD 移动 · J/空格 开火 · K 换弹 · L 治疗 · Tab 调试视图 · R 重开"
 	hud.add_child(hint_label)
 
 	view_label = Label.new()
 	view_label.position = Vector2(10, 328)
-	view_label.add_theme_font_size_override("font_size", 11)
+	view_label.add_theme_font_size_override("font_size", fs - 2)
 	view_label.add_theme_color_override("font_color", Color(0.75, 0.80, 0.88))
 	hud.add_child(view_label)
 
@@ -225,6 +252,15 @@ func _setup_feel_and_touch() -> void:
 		if Sfx != null:
 			Sfx.play("reload_start"))
 	touch.heal_pressed.connect(_try_heal)
+
+	# ── 结算界面（触屏可用的重开出口）──
+	result_overlay = ResultOverlay.new()
+	result_overlay.restart_requested.connect(_restart)
+	result_overlay.hideout_requested.connect(_restart)
+	var ro_layer := CanvasLayer.new()
+	ro_layer.layer = 40
+	ro_layer.add_child(result_overlay)
+	add_child(ro_layer)
 
 
 ## 载入程序化生成的 16x16 tile（art/tiles/，由 tools/art/gen_tiles.py 产出）
@@ -374,11 +410,40 @@ func _process(delta: float) -> void:
 		raid.hp = vitals.hp
 		if vitals.dead:
 			raid.take_damage(9999)
+	else:
+		_show_result_once()
+		# ⚠️ 回合结束后绝不能还卡在 hitstop 里（Engine.time_scale = 0）
+		#    否则画面完全不动，玩家会以为"游戏卡死了"（安卓真机反馈）
+		if Engine.time_scale <= 0.0:
+			Engine.time_scale = 1.0
 
 	_update_camera()
 	_update_hud()
 	_update_flash()
 	queue_redraw()
+
+
+## 结算只弹一次（避免每帧重建文本）
+func _show_result_once() -> void:
+	if result_overlay == null or result_overlay.is_shown():
+		return
+	var win := raid.phase_name() == "EXTRACTED"
+	var rep: Dictionary = raid.settle()
+	var lines: Array = []
+	if win:
+		lines.append("用时 %.0f 秒   剩余 HP %d" % [raid.raid_seconds - raid.time_left, raid.hp])
+		lines.append("带出战利品 %d 堆，价值 %d 元" % [
+			(rep.get("brought_out", []) as Array).size(), int(rep.get("brought_out_value", 0))])
+	else:
+		lines.append("死因：%s" % raid.death_reason)
+		lines.append("携带的 %d 格装备全部丢失（价值 %d 元）" % [
+			int(rep.get("lost_slots", 0)), int(rep.get("lost_value", 0))])
+	lines.append("击杀 %d   搜刮容器 %d" % [raid.enemies_killed, raid.containers_looted])
+	lines.append("地图种子 %d" % _raid_seed)
+	result_overlay.show_result(win, lines)
+	# 结算时把摇杆/按钮整体收起（否则会透过结算遮罩露出来）
+	if touch != null:
+		touch.set_controls_visible(false)
 
 
 ## 受击闪白 —— ★★★★ 项（spec §7.3）
@@ -542,7 +607,8 @@ func _try_fire() -> void:
 		if Sfx != null and player_pos.distance_to(shot_to) < 34.0:
 			Sfx.play_at("hit_concrete", shot_to, player_pos, 4.0, 22.0)
 
-	bullets.append({"from": player_pos, "to": shot_to, "ttl": 0.06})
+	bullets.append({"from": player_pos, "to": shot_to, "ttl": TRACER_TTL, "own": true})
+	muzzle_flash.append({"pos": player_pos, "dir": shot_dir, "ttl": 0.07})
 
 
 ## 武器类别 -> 音效后缀（gun_{kind}_player / _enemy）
@@ -622,6 +688,13 @@ func _tick_enemies(delta: float) -> void:
 				Sfx.play_at("gun_%s_enemy" % kind, a.pos, player_pos, 7.0, 30.0)
 			if fx != null:
 				fx.burst("muzzle", a.pos + a.facing * 0.3, a.facing, 0.8)
+			# 敌人开火也要看得见曳光（真机反馈：只听到声音看不到子弹）
+			var e_to: Vector2 = a.pos + a.facing * 6.0
+			var e_wall: Variant = Ballistics.first_blocking_cell(gen.grid, a.pos, e_to)
+			if e_wall != null:
+				e_to = Vector2(e_wall.x + 0.5, e_wall.y + 0.5)
+			bullets.append({"from": a.pos, "to": e_to, "ttl": TRACER_TTL, "own": false})
+			muzzle_flash.append({"pos": a.pos, "dir": a.facing, "ttl": 0.06})
 
 	# 敌人造成的伤害回写到 vitals
 	var target_hp := int((ctx["targets"][0] as Dictionary)["hp"])
@@ -649,6 +722,10 @@ func _tick_tracers(delta: float) -> void:
 		bullets[i]["ttl"] -= delta
 		if bullets[i]["ttl"] <= 0.0:
 			bullets.remove_at(i)
+	for i in range(muzzle_flash.size() - 1, -1, -1):
+		muzzle_flash[i]["ttl"] -= delta
+		if muzzle_flash[i]["ttl"] <= 0.0:
+			muzzle_flash.remove_at(i)
 
 
 func _update_camera() -> void:
@@ -777,7 +854,20 @@ func _try_heal() -> void:
 func _restart() -> void:
 	agents.clear()
 	bullets.clear()
+	muzzle_flash.clear()
 	drops_on_ground.clear()
+	_prev_shots.clear()
+	_step_accum = 0.0
+	_time = 0.0
+	# 新一局：换种子、清手感状态、收起结算界面
+	_raid_seed = 0                 # <=0 -> _setup_sim 会随机
+	if Feel != null:
+		Feel.reset()
+	Engine.time_scale = 1.0
+	if result_overlay != null:
+		result_overlay.hide_result()
+	if touch != null:
+		touch.set_controls_visible(true)
 	_setup_sim()
 
 
@@ -900,9 +990,31 @@ func _draw() -> void:
 		draw_rect(Rect2(ctr + Vector2(-10, -15), Vector2(20 * hpr, 3)), Color(0.9, 0.3, 0.3), true)
 
 	# ── 曳光 ──
+	# ⚠️ 早先 ttl 只有 0.06s（约 3.6 帧）且线很细，真机上"只听到枪声看不到子弹"。
+	#    现在加长到 0.13s，加粗，并在头部画一个亮点。
 	for b in bullets:
-		draw_line((b["from"] as Vector2) * CELL_PX, (b["to"] as Vector2) * CELL_PX,
-			Color(1.0, 0.92, 0.55, 0.85), 2.0)
+		var a: Vector2 = (b["from"] as Vector2) * CELL_PX
+		var c: Vector2 = (b["to"] as Vector2) * CELL_PX
+		var own: bool = bool(b.get("own", true))
+		var life: float = clampf(float(b["ttl"]) / TRACER_TTL, 0.0, 1.0)
+		var col := (Color(1.0, 0.94, 0.58) if own else Color(1.0, 0.72, 0.55))
+		col.a = 0.35 + 0.65 * life
+		draw_line(a, c, col, 3.0 if own else 2.0)
+		draw_circle(c, 3.0 if own else 2.0, col)
+
+	# ── 枪口火光（画在粒子之外，保证一定看得见）──
+	for m in muzzle_flash:
+		var p: Vector2 = (m["pos"] as Vector2) * CELL_PX
+		var d: Vector2 = m["dir"] as Vector2
+		var t: float = clampf(float(m["ttl"]) / 0.07, 0.0, 1.0)
+		var f := Vector2(-d.y, d.x)
+		# 一个朝向前方的四角星形闪
+		var tip := p + d * (16.0 + 10.0 * t)
+		var s1 := p + f * 7.0 - d * 4.0
+		var s2 := p - f * 7.0 - d * 4.0
+		draw_colored_polygon(PackedVector2Array([tip, s1, p - d * 3.0, s2]),
+			Color(1.0, 0.90, 0.52, 0.85 * t))
+		draw_circle(p + d * 6.0, 5.0 + 4.0 * t, Color(1.0, 0.78, 0.35, 0.55 * t))
 
 	# ── 玩家 ──
 	var pc := player_pos * CELL_PX
@@ -943,6 +1055,17 @@ func _update_hud() -> void:
 			lines.append("阵亡：%s（装备已丢失）按 R 重开" % raid.death_reason)
 
 	var dbg := ["普通", "流场方向", "房间图", "声音范围"]
+	# 结算界面弹出时藏掉 HUD 正文（否则会和结算文字叠在一起，真机截图里很难看）
+	var over := result_overlay != null and result_overlay.is_shown()
+	hud_label.visible = not over
+	hint_label.visible = not over
+	view_label.visible = not over
+	if over:
+		return
 	hud_label.text = "\n".join(lines)
 	view_label.text = "[视图] %s" % dbg[debug_mode]
-	hint_label.text = "WASD 移动 · J/空格 开火 · K 换弹 · L 治疗 · Tab 视图 · R 重开 · F1 震动 · F2 hitstop · F3 闪白 · F4 强度 · M 静音"
+	# ⚠️ 提示必须按平台给（真机反馈：安卓上显示的是 WASD/J/K/L 键盘键位）
+	if _is_touch:
+		hint_label.text = "左摇杆移动 · 右摇杆瞄准 · ◉ 开火 · ⟳ 换弹 · ✚ 治疗"
+	else:
+		hint_label.text = "WASD 移动 · J/空格 开火 · K 换弹 · L 治疗 · Tab 视图 · R 重开 · F1~F4 无障碍 · M 静音"

@@ -49,6 +49,9 @@ func _initialize() -> void:
 	_suite("触屏：子弹磁性 AimAssist", _test_aim_assist)
 	_suite("手感 Feel（hitstop/震动/闪白）", _test_feel)
 	_suite("音效库 Sfx", _test_sfx_bank)
+	_suite("真机修复：出生安全区", _test_spawn_safety)
+	_suite("真机修复：死亡结算", _test_death_settlement)
+	_suite("真机修复：结算界面与触屏接口", _test_result_overlay_exists)
 
 	print("")
 	if _failed == 0:
@@ -1876,3 +1879,118 @@ func _test_sfx_bank() -> void:
 
 	_check(s.stats().contains("音效"), "stats 可读：%s" % s.stats())
 	s.queue_free()
+
+
+# ─────────────────── 真机反馈修复的回归测试 ───────────────────
+
+func _test_spawn_safety() -> void:
+	# ⚠️ 安卓真机反馈：出生点贴脸遇敌 -> 几秒内被打死，活不到能观察地图。
+	#    已在 map_generator 加出生安全区。这里把它钉死，防回归。
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+
+	var seeds: Array[int] = [11, 222, 3333, 44444, 555555, 6789, 20261012, 99999, 31337, 7654321]
+	var checked := 0
+	var violations := 0
+	var worst := 999
+	var budgets: Array[int] = []
+
+	for s in seeds:
+		var gen := MapGenerator.new()
+		if not gen.generate(s, reg.room_types):
+			continue
+		checked += 1
+		budgets.append(gen.total_enemy_budget())
+		var spawn := gen.spawn_room()
+		var depths := gen.graph.bfs_depths(spawn.id)
+		for r in gen.graph.rooms:
+			if r.enemy_budget <= 0:
+				continue
+			var d: int = int(depths.get(r.id, 999))
+			worst = mini(worst, d)
+			if d <= MapGenerator.SPAWN_SAFE_GRAPH_DIST:
+				violations += 1
+
+	_check(checked >= 8, "抽查了 %d 张地图" % checked)
+	_check_eq(violations, 0, "任何一张地图的出生安全区内都没有敌人")
+	_check(worst > MapGenerator.SPAWN_SAFE_GRAPH_DIST,
+		"所有地图的最近敌人都 > %d 跳（最差 %d 跳）" % [MapGenerator.SPAWN_SAFE_GRAPH_DIST, worst])
+
+	# 敌人总量要克制（调低密度前平均 36，真机反馈太密）
+	var avg := 0.0
+	for b in budgets:
+		avg += float(b)
+	avg /= maxf(1.0, float(budgets.size()))
+	_check(avg <= 30.0, "平均敌人预算 %.1f <= 30" % avg)
+	_check(avg >= 6.0, "平均敌人预算 %.1f >= 6（不能少到没压力）" % avg)
+
+	# 出生点自身永远 0 敌人
+	var g2 := MapGenerator.new()
+	g2.generate(1234, reg.room_types)
+	_check_eq(g2.spawn_room().enemy_budget, 0, "出生房间本身 0 敌人")
+
+
+func _test_death_settlement() -> void:
+	# ⚠️ 真机反馈：死亡后无法重开、看起来像卡死。
+	#    除了 UI 补了重开按钮，数据层也要能说清"丢了多少"。
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+	var gen := MapGenerator.new()
+	gen.generate(31337, reg.room_types)
+
+	var stash := Inventory.new(40, reg.items, 999.0)
+	var raid := RaidSession.new(reg.items, SimRng.new(9), stash)
+	raid.load_map(gen)
+	raid.start(120.0)
+
+	var common: LootTableDef = reg.get_loot_table("loot_common")
+	raid.loot_container(common, 2, 4)
+	raid.loot_container(common, 2, 4)
+	var carried := raid.carry.used_slots()
+	_check(carried > 0, "死亡前携带了 %d 格" % carried)
+
+	raid.take_damage(99999)
+	_check(raid.is_over(), "已阵亡")
+	_check_eq(raid.lost_slots, carried, "记录丢失格数 = 死亡前携带数（%d）" % raid.lost_slots)
+
+	var rep := raid.settle()
+	_check_eq(int(rep["lost_slots"]), carried, "结算报告含 lost_slots")
+	_check(not bool(rep["extracted"]), "未撤离")
+	_check_eq(int(rep["brought_out_value"]), 0, "什么都没带出来")
+	_check_eq(rep["phase"], "DEAD", "阶段 DEAD")
+
+	# 撤离成功时不该报"丢失"
+	var raid2 := RaidSession.new(reg.items, SimRng.new(10), stash)
+	raid2.load_map(gen)
+	raid2.start(120.0)
+	raid2.loot_container(common, 2, 3)
+	raid2.extract()
+	var rep2 := raid2.settle()
+	_check(bool(rep2["extracted"]), "撤离成功")
+	_check_eq(int(rep2["lost_slots"]), 0, "撤离成功时没有丢失")
+
+
+func _test_result_overlay_exists() -> void:
+	# 结算界面必须存在且可实例化 —— 它是手机上唯一的"再来一局"出口
+	var s: GDScript = load("res://ui/result_overlay.gd")
+	_check(s != null, "result_overlay.gd 可载入")
+	var ov: Node = s.new()
+	root.add_child(ov)
+	# _ready 只在进树时跑；这里手动触发一次，保证后续断言有意义
+	if not ov.has_method("show_result"):
+		_check(false, "result_overlay 缺少 show_result")
+	else:
+		_check(true, "result_overlay 有 show_result")
+	_check(ov.has_signal("restart_requested"), "有 restart_requested 信号")
+	ov.queue_free()
+
+	# 触屏控件也要有"整体收起"接口（结算时藏起来，不然会透过遮罩露出来）
+	var ts: GDScript = load("res://ui/touch_controls.gd")
+	_check(ts != null, "touch_controls.gd 可载入")
+	var tc: Node = ts.new()
+	root.add_child(tc)
+	_check(tc.has_method("set_controls_visible"), "有 set_controls_visible")
+	_check(tc.has_method("release_all"), "有 release_all")
+	_check(tc.has_method("move_vector") and tc.has_method("aim_vector"), "有移动/瞄准读取接口")
+	_check(tc.has_method("aim_push"), "有 aim_push（aim assist 靠它判断推力）")
+	tc.queue_free()

@@ -7,7 +7,7 @@
     "max_count": 1,
     "loot_table_id": "loot_common",
     "enemy_budget_min": 0,
-    "enemy_budget_max": 1,
+    "enemy_budget_max": 0,
     "min_graph_dist": 0,
     "stage": "B"
   },
@@ -19,7 +19,7 @@
     "max_count": 12,
     "loot_table_id": "loot_common",
     "enemy_budget_min": 1,
-    "enemy_budget_max": 3,
+    "enemy_budget_max": 2,
     "min_graph_dist": 1,
     "stage": "B"
   },

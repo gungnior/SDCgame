@@ -17,6 +17,11 @@ extends RefCounted
 const MAX_ATTEMPTS := 24
 const CYCLE_RATIO := 0.15          ## TinyKeep 用 15%
 const BSP_MIN_ROOM_CELLS := 3      ## 房间最小 3x3 逻辑格
+## 出生点周围多少跳内不刷敌人。
+## ⚠️ 安卓真机实测：没有这条时玩家一出生就贴脸遇敌，几秒内被打死。
+const SPAWN_SAFE_GRAPH_DIST := 2
+## 上一局出生安全区清掉了几个房间的敌人（调试/测试用）
+var spawn_safe_cleared := 0
 const BSP_MAX_DEPTH := 5           ## 最多 2^5 = 32 个叶子
 const ROOM_INSET := 1              ## 房间四周留 1 格，避免房间互相贴住
 
@@ -251,7 +256,29 @@ func _try_assign_with_spawn(spawn_idx: int, spawn_def: RoomTypeDef, extract_def:
 				r.room_type_id = common_def.id
 				r.loot_table_id = common_def.loot_table_id
 				r.enemy_budget = common_def.roll_enemy_budget(rng)
+
+	# ── 出生安全区 ──
+	# ⚠️ 实测（安卓真机）：没有这条时，玩家一出生就贴脸遇敌，几秒内被打死，
+	#    根本活不到能观察地图的程度。所以出生点周围 SPAWN_SAFE_GRAPH_DIST 跳内
+	#    **一律不刷敌人**。
+	_apply_spawn_safe_zone(spawn_idx)
 	return true
+
+
+## 把出生点周围 N 跳内的敌人预算清零
+func _apply_spawn_safe_zone(spawn_idx: int) -> void:
+	var depths := graph.bfs_depths(spawn_idx)
+	var cleared := 0
+	for r in graph.rooms:
+		if r.id == spawn_idx:
+			r.enemy_budget = 0
+			continue
+		var d: int = int(depths.get(r.id, 999))
+		if d <= SPAWN_SAFE_GRAPH_DIST:
+			if r.enemy_budget > 0:
+				cleared += 1
+			r.enemy_budget = 0
+	spawn_safe_cleared = cleared
 
 
 func _shuffle(a: Array[int]) -> void:

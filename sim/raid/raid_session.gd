@@ -165,12 +165,27 @@ func _on_death(reason: String) -> void:
 	phase = Phase.DEAD
 	# ⚠️ 搜打撤的灵魂：死亡掉落【全部】携带装备。
 	#    只有 stash 是安全的。
+	# 先记下丢了多少格，供结算界面显示（清空后就数不出来了）
+	lost_slots = carry.used_slots()
+	lost_value = LootRoller.total_value(_carry_as_drops(), _items)
 	carry.clear()
 	extract_progress = 0.0
 	death_reason = reason
 
 
+## 把当前携带物转成掉落数组（用于统计价值）
+func _carry_as_drops() -> Array:
+	var out: Array = []
+	for s in carry.slots:
+		if s != null:
+			out.append({"item_id": s["item_id"], "count": int(s["count"])})
+	return out
+
+
 var death_reason: String = ""
+## 阵亡时丢掉的格数与价值（结算界面用）
+var lost_slots: int = 0
+var lost_value: int = 0
 
 
 ## 主动撤离（也用于撤离进度走满时）
@@ -208,6 +223,8 @@ func settle() -> Dictionary:
 		"brought_out_value": LootRoller.total_value(brought, _items),
 		"containers_looted": containers_looted,
 		"enemies_killed": enemies_killed,
+		"lost_slots": lost_slots,
+		"lost_value": lost_value,
 		"damage_taken": damage_taken,
 		"damage_dealt": damage_dealt,
 		"time_used": raid_seconds - time_left,

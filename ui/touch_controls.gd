@@ -244,3 +244,10 @@ func release_all() -> void:
 	for b in [fire_btn, reload_btn, heal_btn]:
 		if b != null:
 			b.force_release()
+
+
+## 结算/暂停时整体收起（否则摇杆与按钮会透过结算遮罩露出来，很乱）
+func set_controls_visible(on: bool) -> void:
+	visible = on
+	if not on:
+		release_all()
