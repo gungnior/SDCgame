@@ -666,7 +666,9 @@ func _try_fire() -> void:
 		Sfx.play("gun_%s_player" % _weapon_kind(w))
 	Tel.mark("fire_fx")
 	if fx != null:
-		fx.burst("muzzle", player_pos + player_aim * 0.34, player_aim)
+		# ⚠️ 不再喷枪口火光粒子 —— 火光已经由 _draw() 的星形多边形画了，
+		#    粒子是重复的。真机实测：CPUParticles2D.restart() 在移动端很贵
+		#    （enemy_fx 阶段测到过 25ms），能省一次就省一次。
 		var side := Vector2(-player_aim.y, player_aim.x)
 		fx.burst("casing", player_pos + side * 0.22 + player_aim * 0.1, side, 1.0)
 	# 自己开枪只给最轻的 kick（spec §7.3：不能每枪都大震）
@@ -790,6 +792,10 @@ func _drop_loot(a: EnemyAgent) -> void:
 
 
 func _tick_enemies(delta: float) -> void:
+	# 每帧重置流场构建预算。
+	# ⚠️ 真机 profiler 实测：不限制时，玩家一移动会让多个敌人同帧各自建流场，
+	#    AI 的 act 阶段冲到 32ms。现在每帧最多建 1 个，其余敌人本帧直走。
+	flows.begin_frame()
 	# 出生宽限期：开局这几秒敌人不索敌（让玩家先看清地形）
 	# 实测：没有它时玩家 3.3 秒就死，0 击杀（安卓真机遥测）
 	var grace := _time < GRACE_SECONDS
@@ -802,6 +808,9 @@ func _tick_enemies(delta: float) -> void:
 		"noises": noises if not grace else [],
 		"grace": grace,
 		"hearing_cache": _hearing_cache,
+		# 性能探针（鸭子类型）—— 让 AI 内部也能打阶段标记，
+		# 而 sim/ 不必依赖 Tel autoload
+		"prof": Tel,
 	}
 	# ⚠️ 听觉：**按「噪声」建代价场**，而不是按敌人。
 	#    噪声每帧只有 1~3 个且位置固定 -> 缓存命中率极高；
@@ -827,8 +836,7 @@ func _tick_enemies(delta: float) -> void:
 			if Sfx != null:
 				Sfx.play_at("gun_%s_enemy" % kind, a.pos, player_pos, 7.0, 30.0)
 			Tel.mark("enemy_fx")
-			if fx != null:
-				fx.burst("muzzle", a.pos + a.facing * 0.3, a.facing, 0.8)
+			# 敌人枪口火光同样只靠 _draw 的多边形，不喷粒子（见上）
 			# 敌人开火也要看得见曳光（真机反馈：只听到声音看不到子弹）
 			var e_to: Vector2 = a.pos + a.facing * 6.0
 			var e_wall: Variant = Ballistics.first_blocking_cell(gen.grid, a.pos, e_to)

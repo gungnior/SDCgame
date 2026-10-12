@@ -637,7 +637,8 @@ func _test_flow_field_manager() -> void:
 	_check_eq(mgr.build_count, 1, "同一目标格 20 次询问只构建 1 次")
 	_check_eq(mgr.hit_count, 19, "命中 19 次")
 
-	# 换目标格 → 新建
+	# 换目标格 → 新建（⚠️ 必须跨帧：每帧最多建 1 个流场，见 MAX_BUILDS_PER_FRAME）
+	mgr.begin_frame()
 	mgr.direction_for(extract.center, spawn.center)
 	_check_eq(mgr.build_count, 2, "换目标格后重建 1 次")
 	_check_eq(mgr.field_count(), 2, "缓存里 2 份流场")
@@ -645,12 +646,42 @@ func _test_flow_field_manager() -> void:
 	# 失效后重建
 	mgr.invalidate_all()
 	_check_eq(mgr.field_count(), 0, "invalidate_all 清空缓存")
+	mgr.begin_frame()
 	mgr.direction_for(spawn.center, extract.center)
 	_check_eq(mgr.build_count, 3, "失效后重新构建")
 
 	# 方向可用性：出生点的敌人应当能朝撤离点走
 	var d := mgr.direction_for(spawn.center, extract.center)
 	_check(d != Vector2i.ZERO, "敌人能拿到朝目标的方向 %s" % str(d))
+
+	# ── ⭐ 每帧构建预算（真机性能优化的关键）──
+	# ⚠️ 没有它时：玩家一移动，多个敌人同帧各自建流场，AI 的 act 阶段冲到 32ms
+	var mgr2 := FlowFieldManager.new()
+	mgr2.setup(gen.grid)
+	# 取一个与出生点/撤离点都不同的房间，否则缓存命中和新建会混在一起（踩过）
+	var cells: Array[Vector2i] = [spawn.center, extract.center]
+	for r in gen.graph.rooms:
+		if r.center != spawn.center and r.center != extract.center:
+			cells.append(r.center)
+			break
+	mgr2.begin_frame()
+	var built := 0
+	for c in cells:
+		if mgr2.field_for(c) != null:
+			built += 1
+	_check_eq(built, 1, "同一帧内最多只建 1 个流场（实际 %d）" % built)
+	_check_eq(mgr2.defer_count, cells.size() - 1, "其余 %d 次被推迟" % (cells.size() - 1))
+	# 下一帧应当能继续建（注意：要数「构建次数」而不是「返回非空」——
+	# 已缓存的格子返回非空但不构建，我第一版断言就写错了）
+	mgr2.begin_frame()
+	var before := mgr2.build_count
+	for c in cells:
+		mgr2.field_for(c)
+	_check_eq(mgr2.build_count - before, 1, "下一帧再建 1 个")
+	# 已经建好的场不再受预算限制（缓存命中永远可用）
+	mgr2.begin_frame()
+	_check(mgr2.field_for(cells[0]) != null, "已缓存的场不受预算限制")
+	_check(mgr2.field_for(cells[1]) != null, "已缓存的场不受预算限制（第 2 个）")
 
 	# 缓存裁剪
 	for i in 30:

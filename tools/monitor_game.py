@@ -276,6 +276,12 @@ def main():
     if shot_dir:
         shot_dir.mkdir(parents=True, exist_ok=True)
 
+    # ⚠️ 增量落盘：每次读完一行就 flush。
+    #    否则只能等脚本退出才写文件 —— 而真机排查时我想【边玩边看】，
+    #    等退出再看得多跑一轮。
+    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+    logf = open(a.out, "w", encoding="utf-8")
+
     print("   ── 开始监听（Ctrl+C 结束并汇总）──\n")
     t0 = time.time()
     try:
@@ -285,6 +291,8 @@ def main():
             if d is None:
                 continue
             rep.add(d)
+            logf.write(json.dumps(d, ensure_ascii=False) + "\n")
+            logf.flush()
 
             now = time.time()
             if a.duration and now - t0 >= a.duration:
@@ -325,7 +333,10 @@ def main():
             pass
 
     print(rep.summary())
-    rep.dump(a.out)
+    try:
+        logf.close()
+    except Exception:
+        pass
     print(f"\n  原始日志 -> {a.out}")
     if shot_dir:
         print(f"  设备截图 -> {shot_dir}")

@@ -131,6 +131,12 @@ func tick(delta: float, ctx: Dictionary) -> void:
 		return
 
 	# ── 感知：先看，再听 ──
+	# prof：可选的性能探针（由调用方从 ctx 传入）。
+	# 用鸭子类型而不是直接引用 Tel autoload —— 否则 sim/ 会依赖视图层，
+	# 导致 headless 测试编译失败（实测踩过：Identifier not found: Sfx）。
+	var prof: Variant = ctx.get("prof")
+	if prof != null:
+		prof.mark("ai_see")
 	var seen := _find_visible_target(grid, targets)
 	if not seen.is_empty():
 		var sp: Vector2 = seen["pos"]
@@ -151,6 +157,8 @@ func tick(delta: float, ctx: Dictionary) -> void:
 
 	# ── 听觉（只在非交战时才需要，交战中已经知道位置）──
 	if state != State.COMBAT and state != State.SEARCH:
+		if prof != null:
+			prof.mark("ai_hear")
 		var noise := _find_audible_noise(grid, ctx.get("noises", []),
 			ctx.get("hearing_cache"))
 		if not noise.is_empty():
@@ -161,6 +169,8 @@ func tick(delta: float, ctx: Dictionary) -> void:
 			state = State.ALERT
 			if squad != null:
 				squad.report_noise(np, now)
+	if prof != null:
+		prof.mark("ai_act")
 
 	# ── 状态行为 ──
 	match state:
@@ -323,7 +333,18 @@ func _move_toward(flows: FlowFieldManager, goal: Vector2) -> void:
 		return
 	var d := flows.direction_for(my_cell, goal_cell)
 	if d == Vector2i.ZERO:
-		move_dir = Vector2.ZERO
+		# ── 回退：朝目标直走 ──
+		# 走到这里有两种情况：
+		#   ① 目标不可达（流场给不出方向）
+		#   ② **本帧的流场构建预算用尽**（见 FlowFieldManager.MAX_BUILDS_PER_FRAME）
+		# ② 是真机性能优化的关键：玩家一移动，多个敌人的目标格同时变化，
+		#   若同一帧全建流场，AI 的 act 阶段会冲到 32ms（安卓 profiler 实测）。
+		#   预算外的敌人这一帧直走，下一帧就能拿到精确流场 —— 观感上完全看不出。
+		var to := goal - pos
+		if to.length() > 0.01:
+			move_dir = to.normalized()
+		else:
+			move_dir = Vector2.ZERO
 		return
 	move_dir = Vector2(d).normalized()
 

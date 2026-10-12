@@ -191,7 +191,7 @@ func _flush_stats() -> void:
 		"spikes": _spike_window,
 		"spikes_total": _spike_total,
 		# 最慢的三个阶段：名字 / 最慢ms / 累计ms
-		"phases": _top_phases(3),
+		"phases": _top_phases(5),
 		"nodes": Performance.get_monitor(Performance.OBJECT_NODE_COUNT),
 		"orphans": Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT),
 		"draws": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),

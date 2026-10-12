@@ -11,6 +11,18 @@ extends RefCounted
 var _grid: LogicalGrid = null
 var _fields: Dictionary = {}        ## target_cell(Vector2i) -> FlowField
 
+# ── 每帧构建预算 ──
+#
+# ⚠️ 真机 profiler 实测：敌人 AI 的 act 阶段单帧冲到 **32 ms**。
+#    根因：玩家一移动，多个敌人的目标格**在同一帧**同时变化，
+#    每个敌人都触发一次全网格 Dijkstra 建场（`_tick_enemies` 里 4 个敌人 = 4 次 = 32ms）。
+#    流场晚一两帧更新在观感上**完全看不出**（敌人还在朝大致正确的方向走），
+#    所以给出每帧构建上限；超出的敌人这一帧退化为"朝目标直走"。
+const MAX_BUILDS_PER_FRAME := 1
+
+var _builds_this_frame := 0
+var defer_count: int = 0            ## 因预算被推迟的次数（调试/测试用）
+
 ## 统计（用于验证"只在换格时重建"这条优化真的生效）
 var build_count: int = 0            ## 实际构建次数
 var hit_count: int = 0              ## 缓存命中次数
@@ -21,9 +33,17 @@ func setup(grid: LogicalGrid) -> void:
 	_fields.clear()
 	build_count = 0
 	hit_count = 0
+	_builds_this_frame = 0
+	defer_count = 0
 
 
-## 取目标格对应的流场；不存在则构建。
+## 每帧开始时调用一次，重置构建预算。
+func begin_frame() -> void:
+	_builds_this_frame = 0
+
+
+## 取目标格对应的流场；不存在则构建（**受每帧预算限制**）。
+## 预算用尽时返回 null —— 调用方应退化为"直接朝目标走"，下一帧就能拿到精确流场。
 func field_for(target_cell: Vector2i) -> FlowField:
 	if _grid == null:
 		return null
@@ -31,11 +51,17 @@ func field_for(target_cell: Vector2i) -> FlowField:
 		hit_count += 1
 		return _fields[target_cell]
 
+	# 预算用尽：本帧不再建场（否则 AI 单帧会冲到几十毫秒）
+	if _builds_this_frame >= MAX_BUILDS_PER_FRAME:
+		defer_count += 1
+		return null
+
 	var f := FlowField.new()
 	f.load_from_grid(_grid)
 	f.build(target_cell)
 	_fields[target_cell] = f
 	build_count += 1
+	_builds_this_frame += 1
 	return f
 
 
