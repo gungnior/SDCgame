@@ -10,6 +10,38 @@
 **搜打撤**（2D 像素俯视角撤离射击）· Godot 4.7.2 · GDScript · 安卓 + PC。
 非商业、免费发布、GPL-3.0、代码开源。
 
+### 工作区位置与**可移植性约定**
+
+```
+当前工作区：D:\AAAASDC          （原 D:\aaaaadsh 保留为备份，未删除）
+工具链：    <项目根>\_install\   （Godot 二进制 + Python + TEMP + 音频素材）
+```
+
+⭐ **所有脚本必须相对项目自身定位，不许写死盘符。**
+
+这条不是洁癖 —— 这个工作区是给「人 + DSH + WorkBuddy」共用的。
+写死 `D:\AAAASDC\...` 的话，任何人把仓库克隆/移动到别处，验收就全废。
+
+**正确写法**：
+
+```powershell
+# PowerShell：脚本在 tools/ 下 -> 项目根是上一级
+$Root  = Split-Path -Parent $PSScriptRoot
+$Godot = Join-Path $Root "_install\godot\Godot_v4.7.2-stable_win64_console.exe"
+```
+
+```python
+# Python：脚本在 tools/audio/ 下 -> 项目根是上两级
+PROJ = Path(__file__).resolve().parents[2]
+SFX  = PROJ / "_install" / "sfx"
+```
+
+`tools\verify_all.ps1` 已按这个原则改过 —— 它在任何位置都能跑，
+且会自己找 `_install/` 与 Python。**新增脚本照这个写法，不要引入新的绝对路径。**
+
+> 迁移时已核实：在 `D:\AAAASDC` 从零重建 `.godot` 后，
+> 验收退出码 0（799 项单测 + 51 项集成 + 数据契约全过），游戏窗口正常启动。
+
 ---
 
 ## 1. ⭐ 验收：只有一条命令

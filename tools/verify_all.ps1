@@ -61,11 +61,45 @@ $ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-$Godot = "D:\aaaaadsh\_install\godot\Godot_v4.7.2-stable_win64_console.exe"
-$Py = "C:\Users\xxx\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
-$env:TMP = "D:\aaaaadsh\_install\tmp"
-$env:TEMP = "D:\aaaaadsh\_install\tmp"
+# ─────────────────────────────────────────────────────────────
+# ⭐ 工具链路径**全部相对项目自身**解析，不写死盘符。
+#
+# 为什么：这个工作区是给「人 + DSH + WorkBuddy」共用的。
+# 写死 `D:\AAAASDC\...` 的话，任何人把仓库克隆/移动到别处，验收就全废。
+# 现在无论项目在哪个盘、哪个目录，只要 `_install/` 跟着走就能跑。
+#
+# 顺序：① 先找项目内的 _install/（自包含，推荐）
+#       ② 找不到就退回环境里已知的 Python（只影响 Python，Godot 没有回退）
+# ─────────────────────────────────────────────────────────────
+$Godot = Join-Path $Root "_install\godot\Godot_v4.7.2-stable_win64_console.exe"
+
+# Python 优先用项目内的（如果打包进来了），否则用宿主环境那个
+$PyCandidates = @(
+    (Join-Path $Root "_install\python\python.exe"),
+    (Join-Path $Root "_install\dependencies\python\python.exe"),
+    "$env:LOCALAPPDATA\dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe",
+    "C:\Users\xxx\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+)
+$Py = $null
+foreach ($c in $PyCandidates) { if (Test-Path $c) { $Py = $c; break } }
+
+# TEMP 也放项目内，避免污染系统临时目录（并保证多次运行互不干扰）
+$TmpDir = Join-Path $Root "_install\tmp"
+if (-not (Test-Path $TmpDir)) { New-Item -ItemType Directory -Force -Path $TmpDir | Out-Null }
+$env:TMP = $TmpDir
+$env:TEMP = $TmpDir
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+if (-not (Test-Path $Godot)) {
+    Write-Host "❌ 找不到 Godot：$Godot" -ForegroundColor Red
+    Write-Host "   这个项目假设 _install/godot/ 跟着仓库走。请确认它没被 .gitignore 之类排除掉。" -ForegroundColor Red
+    exit 2
+}
+if ($Py -eq $null) {
+    Write-Host "❌ 找不到 Python。试过：" -ForegroundColor Red
+    $PyCandidates | ForEach-Object { Write-Host "     $_" -ForegroundColor Red }
+    exit 2
+}
 
 # 像素基线的固定参数 —— **改这里等于改验收标准，要单独说明理由**
 $BASELINE = "art\_raw\_baseline.png"
@@ -87,8 +121,6 @@ function Record($name, $ok, $detail) {
     $color = if ($ok) { "Green" } else { "Red" }
     Write-Host ("  {0,-6} {1}" -f $(if ($ok) { "✅" } else { "❌" }), $detail) -ForegroundColor $color
 }
-
-if (-not (Test-Path $Godot)) { Write-Host "❌ 找不到 Godot: $Godot" -ForegroundColor Red; exit 2 }
 
 # ── 预热导入（避免首次运行把 import 警告算成失败）──
 & $Godot --headless --path $Root --import *> $null

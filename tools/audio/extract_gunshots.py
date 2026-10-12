@@ -23,10 +23,17 @@ from pathlib import Path
 
 import numpy as np
 
-SRC = Path(r"D:\aaaaadsh\_install\sfx\firearm\Prepared SFX Library")
-META = Path(r"D:\aaaaadsh\_install\sfx\meta\Prepared Master Sheet.csv")
+# ⭐ 路径相对脚本自身解析，不写死盘符 ——
+#    这个工作区给「人 + DSH + WorkBuddy」共用，写死盘符的话
+#    别人把仓库挪到别处，这些工具就全废了。
+#    本文件在 tools/audio/ 下，所以项目根是上两级。
+PROJ = Path(__file__).resolve().parents[2]
+SFX = PROJ / "_install" / "sfx"
+
+SRC = SFX / "firearm" / "Prepared SFX Library"
+META = SFX / "meta" / "Prepared Master Sheet.csv"
 # ⚠️ 落到暂存区而不是 art/ —— 否则同一批 WAV 会被 Godot 导入两遍，白白撑大 APK
-OUT = Path(r"D:\aaaaadsh\_install\sfx\staged_guns")
+OUT = SFX / "staged_guns"
 
 TARGET_SR = 44100
 

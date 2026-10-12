@@ -20,8 +20,10 @@ import shutil
 import sys
 from pathlib import Path
 
-SRC = Path(r"D:\aaaaadsh\_install\sfx")
-PROJ = Path(r"D:\aaaaadsh")
+# ⭐ 路径相对脚本自身解析，不写死盘符（同 extract_gunshots.py 的理由）。
+#    本文件在 tools/audio/ 下，所以项目根是上两级。
+PROJ = Path(__file__).resolve().parents[2]
+SRC = PROJ / "_install" / "sfx"
 OUT = PROJ / "art" / "sfx"
 
 GUNS = OUT / "guns"
