@@ -26,8 +26,13 @@ var loot_tables: Dictionary = {}  # table_id   -> LootTableDef
 var room_types: Dictionary = {}   # room_id    -> RoomTypeDef
 
 ## 接口按 C 的形状先留好（roadmap-bac.md §1 约束 3）。B/A 阶段为空。
-var attachments: Dictionary = {}  # attachment_id -> (A 阶段实现)
-var recipes: Dictionary = {}      # recipe_id     -> (C 阶段实现)
+var attachments: Dictionary = {}  # attachment_id -> AttachmentDef
+var recipes: Dictionary = {}      # recipe_id     -> RecipeDef
+## C 阶段新增（2026-10-13）
+var containers: Dictionary = {}   # container_id  -> ContainerDef（房间里可搜的容器）
+var maps: Dictionary = {}         # map_id        -> MapThemeDef（森林/城区/军事基地）
+## 任务（C 阶段）。框架在 sim/mission_system.gd，本表是纯内容（GameDesigner 填）。
+var missions: Dictionary = {}     # mission_id    -> Dictionary（原始任务定义）
 
 # ─────────────── 诊断 ───────────────
 var errors: Array[String] = []
@@ -50,6 +55,9 @@ func load_all(stage: String = "B") -> bool:
 	room_types.clear()
 	attachments.clear()
 	recipes.clear()
+	containers.clear()
+	maps.clear()
+	missions.clear()
 
 	_load_items()
 	_load_weapons()
@@ -57,6 +65,10 @@ func load_all(stage: String = "B") -> bool:
 	_load_loot_tables()
 	_load_room_types()
 	_load_attachments()
+	_load_recipes()
+	_load_containers()
+	_load_maps()
+	_load_missions()
 
 	_validate_cross_refs()
 	_validate_map_constraints()
@@ -73,10 +85,11 @@ func _allowed(stage_value: String) -> bool:
 	return _stage_rank(stage_value) <= _stage_rank(max_stage)
 
 
-func _read_json(table: String) -> Variant:
+func _read_json(table: String, optional: bool = false) -> Variant:
 	var path := "%s/%s.json" % [DATA_DIR, table]
 	if not FileAccess.file_exists(path):
-		errors.append("[%s] 文件不存在: %s" % [table, path])
+		if not optional:
+			errors.append("[%s] 文件不存在: %s" % [table, path])
 		return null
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
@@ -172,7 +185,7 @@ func _load_enemies() -> void:
 
 
 func _load_attachments() -> void:
-	var data: Variant = _read_json("attachments")
+	var data: Variant = _read_json("attachments", true)
 	if data == null:
 		return                       # A 阶段才有的表，B 阶段允许缺失
 	if not (data is Array):
@@ -193,6 +206,118 @@ func _load_attachments() -> void:
 			errors.append("[attachments] id 重复: %s" % a.id)
 			continue
 		attachments[a.id] = a
+
+
+func _load_recipes() -> void:
+	var data: Variant = _read_json("recipes", true)
+	if data == null:
+		return                       # C 阶段才有的表，B/A 阶段允许缺失
+	if not (data is Array):
+		errors.append("[recipes] 顶层必须是数组")
+		return
+	for row in data:
+		if not (row is Dictionary):
+			continue
+		var r := RecipeDef.from_dict(row)
+		if r.id.is_empty():
+			errors.append("[recipes] 有条目缺少 id")
+			continue
+		if not _allowed(r.stage):
+			continue
+		if not RecipeDef.STATIONS.has(r.station):
+			errors.append("[recipes] %s: station='%s' 非法（合法：%s）" % [r.id, r.station, str(RecipeDef.STATIONS)])
+		if recipes.has(r.id):
+			errors.append("[recipes] id 重复: %s" % r.id)
+			continue
+		if r.output_item_id.is_empty():
+			errors.append("[recipes] %s: 缺少 output_item_id" % r.id)
+		recipes[r.id] = r
+
+
+## 容器类型（C 阶段）。房间通过 room.containers 挂靠它。
+func _load_containers() -> void:
+	var data: Variant = _read_json("containers", true)
+	if data == null:
+		return
+	if not (data is Array):
+		errors.append("[containers] 顶层必须是数组")
+		return
+	for row in data:
+		if not (row is Dictionary):
+			continue
+		var c := ContainerDef.from_dict(row)
+		if c.id.is_empty():
+			errors.append("[containers] 有条目缺少 id")
+			continue
+		if not _allowed(c.stage):
+			continue
+		if containers.has(c.id):
+			errors.append("[containers] id 重复: %s" % c.id)
+			continue
+		containers[c.id] = c
+
+
+## 地图主题（C 阶段）。森林/城区/军事基地……
+func _load_maps() -> void:
+	var data: Variant = _read_json("maps", true)
+	if data == null:
+		return
+	if not (data is Array):
+		errors.append("[maps] 顶层必须是数组")
+		return
+	for row in data:
+		if not (row is Dictionary):
+			continue
+		var m := MapThemeDef.from_dict(row)
+		if m.id.is_empty():
+			errors.append("[maps] 有条目缺少 id")
+			continue
+		if not _allowed(m.stage):
+			continue
+		if maps.has(m.id):
+			errors.append("[maps] id 重复: %s" % m.id)
+			continue
+		maps[m.id] = m
+
+
+## 任务（C 阶段）。纯内容表，框架在 sim/mission_system.gd。
+## 每条：id / name / stage / objectives[{type, need}] / reward{wallet, items[{item_id, count}]}
+func _load_missions() -> void:
+	var data: Variant = _read_json("missions", true)
+	if data == null:
+		return                       # 允许暂时为空表（框架就绪、内容待填）
+	if not (data is Array):
+		errors.append("[missions] 顶层必须是数组")
+		return
+	for row in data:
+		if not (row is Dictionary):
+			errors.append("[missions] 存在非对象条目")
+			continue
+		if not row.has("id") or str(row["id"]).is_empty():
+			errors.append("[missions] 有条目缺少 id")
+			continue
+		var mid := str(row["id"])
+		if not _allowed(str(row.get("stage", "C"))):
+			continue
+		if missions.has(mid):
+			errors.append("[missions] id 重复: %s" % mid)
+			continue
+		# 目标结构校验
+		var objs: Variant = row.get("objectives", [])
+		if not (objs is Array) or objs.is_empty():
+			errors.append("[missions] %s: objectives 必须是非空数组" % mid)
+			continue
+		for o in objs:
+			if not (o is Dictionary) or not o.has("type") or not o.has("need"):
+				errors.append("[missions] %s: 目标必须是 {type, need}" % mid)
+				continue
+			if int(o["need"]) <= 0:
+				errors.append("[missions] %s: 目标 need 必须 > 0" % mid)
+		missions[mid] = row
+
+
+func get_mission(id: String) -> Dictionary:
+	return missions.get(id, {})
 
 
 func _load_loot_tables() -> void:
@@ -294,6 +419,48 @@ func _validate_cross_refs() -> void:
 		if not r.loot_table_id.is_empty() and not loot_tables.has(r.loot_table_id):
 			errors.append("[rooms] %s: loot_table_id='%s' 在 loot_tables 中不存在" % [rid, r.loot_table_id])
 
+	# 配方交叉引用：输入/输出都必须是已加载的物品
+	for rid in recipes:
+		var r: RecipeDef = recipes[rid]
+		if not r.output_item_id.is_empty() and not items.has(r.output_item_id):
+			errors.append("[recipes] %s: output_item_id='%s' 在 items 中不存在" % [rid, r.output_item_id])
+		for g in r.inputs:
+			if not items.has(g.item_id):
+				errors.append("[recipes] %s: 输入 item_id='%s' 在 items 中不存在" % [rid, g.item_id])
+
+	# ── 容器 → 掉落表（2026-10-13）──
+	for cid in containers:
+		var c: ContainerDef = containers[cid]
+		if c.loot_table_id.is_empty():
+			errors.append("[containers] %s: 缺少 loot_table_id" % cid)
+		elif not loot_tables.has(c.loot_table_id):
+			errors.append("[containers] %s: loot_table_id='%s' 在 loot_tables 中不存在" % [cid, c.loot_table_id])
+
+	# ── 房间 → 容器 ──
+	for rid in room_types:
+		var rt: RoomTypeDef = room_types[rid]
+		for cr in rt.containers:
+			if not containers.has(cr.container_id):
+				errors.append("[rooms] %s: container_id='%s' 在 containers 中不存在" % [rid, cr.container_id])
+
+	# ── 地图主题 → 房间 / 敌人 ──
+	for mid in maps:
+		var m: MapThemeDef = maps[mid]
+		for k in m.room_weights:
+			if not room_types.has(str(k)):
+				errors.append("[maps] %s: room_weights 里的 '%s' 在 rooms 中不存在" % [mid, k])
+		for k in m.enemy_weights:
+			if not enemies.has(str(k)):
+				errors.append("[maps] %s: enemy_weights 里的 '%s' 在 enemies 中不存在" % [mid, k])
+
+	# ── 任务奖励物品必须存在 ──
+	for mid in missions:
+		var r: Dictionary = missions[mid].get("reward", {})
+		for it in r.get("items", []):
+			var iid := str(it.get("item_id", ""))
+			if not items.has(iid):
+				errors.append("[missions] %s: 奖励物品 '%s' 在 items 中不存在" % [mid, iid])
+
 
 ## 地图生成硬约束（tech-stack.md §5.9 T-34）
 func _validate_map_constraints() -> void:
@@ -338,8 +505,41 @@ func get_loot_table(id: String) -> LootTableDef:
 	return loot_tables.get(id)
 
 
+func get_recipe(id: String) -> RecipeDef:
+	return recipes.get(id)
+
+
+func get_container(id: String) -> ContainerDef:
+	return containers.get(id)
+
+
+func get_map(id: String) -> MapThemeDef:
+	return maps.get(id)
+
+
+## 所有【普通房间主题】定义（room_type == "common"），按 id 稳定排序。
+## MapGenerator 用它给普通房间按 weight 分配主题 —— 这就是"更多房间类型"。
+func common_room_defs() -> Array[RoomTypeDef]:
+	var out: Array[RoomTypeDef] = []
+	for k in room_types:
+		var r: RoomTypeDef = room_types[k]
+		if r.room_type == "common":
+			out.append(r)
+	out.sort_custom(func(a, b): return a.id < b.id)
+	return out
+
+
+func room_def_of_type(t: String) -> RoomTypeDef:
+	for k in room_types:
+		var r: RoomTypeDef = room_types[k]
+		if r.room_type == t:
+			return r
+	return null
+
+
 func summary() -> String:
-	return "items=%d weapons=%d enemies=%d loot=%d rooms=%d (stage<=%s)" % [
+	return "items=%d weapons=%d enemies=%d loot=%d rooms=%d containers=%d maps=%d recipes=%d (stage<=%s)" % [
 		items.size(), weapons.size(), enemies.size(),
-		loot_tables.size(), room_types.size(), max_stage,
+		loot_tables.size(), room_types.size(), containers.size(), maps.size(),
+		recipes.size(), max_stage,
 	]

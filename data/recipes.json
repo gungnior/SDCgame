@@ -1,0 +1,170 @@
+[
+  {
+    "id": "recipe_medkit_from_parts",
+    "name": "拼装医疗包",
+    "name_en": "Assemble Medkit",
+    "station": "lab",
+    "inputs": [
+      { "item_id": "medical_bandage", "count": 1 },
+      { "item_id": "medical_painkiller", "count": 1 },
+      { "item_id": "consumable_water", "count": 1 }
+    ],
+    "output_item_id": "medical_kit",
+    "output_count": 1,
+    "time": 8.0,
+    "stage": "C"
+  },
+  {
+    "id": "recipe_stim_pack",
+    "name": "配制兴奋剂",
+    "name_en": "Brew Combat Stim",
+    "station": "lab",
+    "inputs": [
+      { "item_id": "medical_painkiller", "count": 2 },
+      { "item_id": "valuables_capacitor", "count": 1 }
+    ],
+    "output_item_id": "medical_stim",
+    "output_count": 2,
+    "time": 5.0,
+    "stage": "C"
+  },
+  {
+    "id": "recipe_armor_heavy_upgrade",
+    "name": "重甲改造",
+    "name_en": "Upgrade to Heavy Armor",
+    "station": "bench",
+    "inputs": [
+      { "item_id": "armor_medium", "count": 1 },
+      { "item_id": "armor_plate", "count": 1 }
+    ],
+    "output_item_id": "armor_heavy",
+    "output_count": 1,
+    "time": 10.0,
+    "stage": "C"
+  },
+  {
+    "id": "recipe_tactical_rig",
+    "name": "战术背心组装",
+    "name_en": "Assemble Tactical Rig",
+    "station": "bench",
+    "inputs": [
+      { "item_id": "backpack_assault", "count": 1 },
+      { "item_id": "armor_medium", "count": 1 }
+    ],
+    "output_item_id": "backpack_tactical",
+    "output_count": 1,
+    "time": 8.0,
+    "stage": "C"
+  },
+  {
+    "id": "recipe_ammo_rifle_batch",
+    "name": "批量复装步枪弹",
+    "name_en": "Repress Rifle Ammo",
+    "station": "bench",
+    "inputs": [
+      { "item_id": "valuables_copperwire", "count": 2 },
+      { "item_id": "consumable_can", "count": 1 }
+    ],
+    "output_item_id": "ammo_rifle",
+    "output_count": 30,
+    "time": 6.0,
+    "stage": "C"
+  },
+  {
+    "id": "recipe_ammo_pistol_batch",
+    "name": "批量复装手枪弹",
+    "name_en": "Repress Pistol Ammo",
+    "station": "bench",
+    "inputs": [
+      { "item_id": "valuables_screwdriver", "count": 1 },
+      { "item_id": "consumable_energybar", "count": 1 }
+    ],
+    "output_item_id": "ammo_pistol",
+    "output_count": 30,
+    "time": 5.0,
+    "stage": "C"
+  },
+  {
+    "id": "recipe_shell_batch",
+    "name": "复装霰弹",
+    "name_en": "Repress Shells",
+    "station": "bench",
+    "inputs": [
+      { "item_id": "valuables_copperwire", "count": 1 },
+      { "item_id": "valuables_battery", "count": 1 }
+    ],
+    "output_item_id": "ammo_shell",
+    "output_count": 12,
+    "time": 6.0,
+    "stage": "C"
+  },
+  {
+    "id": "recipe_surgical_kit",
+    "name": "外科手术包",
+    "name_en": "Assemble Surgical Kit",
+    "station": "lab",
+    "inputs": [
+      { "item_id": "medical_kit", "count": 1 },
+      { "item_id": "medical_antibiotic", "count": 2 }
+    ],
+    "output_item_id": "medical_surgical",
+    "output_count": 1,
+    "time": 12.0,
+    "stage": "C"
+  },
+  {
+    "id": "recipe_dogtag_necklace",
+    "name": "军牌项链",
+    "name_en": "Dogtag Necklace",
+    "station": "bench",
+    "inputs": [
+      { "item_id": "valuables_dogtag", "count": 3 }
+    ],
+    "output_item_id": "valuables_goldchain",
+    "output_count": 1,
+    "time": 4.0,
+    "stage": "C"
+  },
+  {
+    "id": "recipe_jewelry_set",
+    "name": "珠宝套装",
+    "name_en": "Jewelry Set",
+    "station": "bench",
+    "inputs": [
+      { "item_id": "valuables_silvercoin", "count": 3 },
+      { "item_id": "valuables_goldchain", "count": 1 }
+    ],
+    "output_item_id": "valuables_jewelry",
+    "output_count": 1,
+    "time": 4.0,
+    "stage": "C"
+  },
+  {
+    "id": "recipe_ration_pack",
+    "name": "军用口粮包",
+    "name_en": "Ration Pack",
+    "station": "kitchen",
+    "inputs": [
+      { "item_id": "consumable_can", "count": 2 },
+      { "item_id": "consumable_water", "count": 2 }
+    ],
+    "output_item_id": "consumable_ration",
+    "output_count": 2,
+    "time": 3.0,
+    "stage": "C"
+  },
+  {
+    "id": "recipe_coffee_brew",
+    "name": "冲泡咖啡",
+    "name_en": "Brew Coffee",
+    "station": "kitchen",
+    "inputs": [
+      { "item_id": "consumable_water", "count": 1 },
+      { "item_id": "consumable_vodka", "count": 1 }
+    ],
+    "output_item_id": "consumable_coffee",
+    "output_count": 2,
+    "time": 2.0,
+    "stage": "C"
+  }
+]

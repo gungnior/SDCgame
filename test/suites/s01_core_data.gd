@@ -34,7 +34,9 @@ func _test_data_content() -> void:
 	reg.load_all("B")
 
 	# B 阶段的数量（roadmap-bac.md §3）
-	_check_eq(reg.items.size(), 15, "items = 15")
+	# ⚠️ 15 -> 18：2026-10-12 起**武器也做成 item**（id 与 weapons.json 一致），
+	#    目的：让"敌人掉枪 -> 进背包 -> 装备"链路统一。B 档 3 把枪因此计入 items。
+	_check_eq(reg.items.size(), 18, "items = 18（含 3 把 B 档枪，武器已作为 item）")
 	_check_eq(reg.weapons.size(), 3, "weapons = 3")
 	_check_eq(reg.enemies.size(), 2, "enemies = 2")
 	_check_eq(reg.loot_tables.size(), 3, "loot_tables = 3")

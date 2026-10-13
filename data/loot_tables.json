@@ -316,8 +316,416 @@
         "weight": 5,
         "min": 1,
         "max": 1
+      },
+      {
+        "item_id": "ammo_rifle_ap",
+        "weight": 8,
+        "min": 5,
+        "max": 15
+      },
+      {
+        "item_id": "ammo_pistol_ap",
+        "weight": 8,
+        "min": 5,
+        "max": 15
+      },
+      {
+        "item_id": "ammo_shell_ap",
+        "weight": 5,
+        "min": 4,
+        "max": 10
       }
     ],
     "stage": "B"
+  },
+  {
+    "id": "loot_armory",
+    "name": "军械库",
+    "entries": [
+      {
+        "item_id": "weapon_pistol",
+        "weight": 20,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "weapon_rifle",
+        "weight": 14,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "weapon_smg",
+        "weight": 12,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "ammo_rifle",
+        "weight": 40,
+        "min": 20,
+        "max": 60
+      },
+      {
+        "item_id": "ammo_rifle_ap",
+        "weight": 18,
+        "min": 10,
+        "max": 30
+      },
+      {
+        "item_id": "ammo_pistol",
+        "weight": 30,
+        "min": 20,
+        "max": 60
+      },
+      {
+        "item_id": "ammo_pistol_ap",
+        "weight": 14,
+        "min": 10,
+        "max": 30
+      },
+      {
+        "item_id": "ammo_shell",
+        "weight": 18,
+        "min": 8,
+        "max": 20
+      },
+      {
+        "item_id": "armor_light",
+        "weight": 16,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "armor_medium",
+        "weight": 10,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "armor_plate",
+        "weight": 20,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "armor_helmet_light",
+        "weight": 14,
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "stage": "C"
+  },
+  {
+    "id": "loot_medical",
+    "name": "医疗室",
+    "entries": [
+      {
+        "item_id": "medical_bandage",
+        "weight": 40,
+        "min": 2,
+        "max": 5
+      },
+      {
+        "item_id": "medical_kit",
+        "weight": 20,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "medical_painkiller",
+        "weight": 30,
+        "min": 1,
+        "max": 3
+      },
+      {
+        "item_id": "medical_tourniquet",
+        "weight": 26,
+        "min": 1,
+        "max": 3
+      },
+      {
+        "item_id": "medical_antibiotic",
+        "weight": 18,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "medical_stim",
+        "weight": 14,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "medical_surgical",
+        "weight": 10,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "medical_splint",
+        "weight": 16,
+        "min": 1,
+        "max": 2
+      }
+    ],
+    "stage": "C"
+  },
+  {
+    "id": "loot_dorm",
+    "name": "宿舍区",
+    "entries": [
+      {
+        "item_id": "consumable_can",
+        "weight": 30,
+        "min": 1,
+        "max": 3
+      },
+      {
+        "item_id": "consumable_water",
+        "weight": 26,
+        "min": 1,
+        "max": 3
+      },
+      {
+        "item_id": "consumable_cigarette",
+        "weight": 20,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "consumable_coffee",
+        "weight": 16,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "consumable_vodka",
+        "weight": 14,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "consumable_energybar",
+        "weight": 20,
+        "min": 1,
+        "max": 3
+      },
+      {
+        "item_id": "valuables_watch_broken",
+        "weight": 14,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_screwdriver",
+        "weight": 16,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "valuables_silvercoin",
+        "weight": 12,
+        "min": 1,
+        "max": 3
+      },
+      {
+        "item_id": "key_dorm",
+        "weight": 8,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "medical_bandage",
+        "weight": 20,
+        "min": 1,
+        "max": 2
+      }
+    ],
+    "stage": "C"
+  },
+  {
+    "id": "loot_warehouse",
+    "name": "仓库",
+    "entries": [
+      {
+        "item_id": "valuables_screwdriver",
+        "weight": 20,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "valuables_copperwire",
+        "weight": 18,
+        "min": 1,
+        "max": 3
+      },
+      {
+        "item_id": "valuables_battery",
+        "weight": 16,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "valuables_circuit",
+        "weight": 12,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "valuables_capacitor",
+        "weight": 10,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "valuables_camera",
+        "weight": 8,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_radio",
+        "weight": 8,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "key_warehouse",
+        "weight": 6,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "consumable_ration",
+        "weight": 22,
+        "min": 1,
+        "max": 3
+      },
+      {
+        "item_id": "armor_plate",
+        "weight": 12,
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "stage": "C"
+  },
+  {
+    "id": "loot_lab",
+    "name": "实验室",
+    "entries": [
+      {
+        "item_id": "valuables_gpu",
+        "weight": 10,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_hdd",
+        "weight": 12,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "valuables_lens",
+        "weight": 10,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_capacitor",
+        "weight": 14,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "key_labcard",
+        "weight": 8,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "medical_stim",
+        "weight": 16,
+        "min": 1,
+        "max": 2
+      },
+      {
+        "item_id": "medical_surgical",
+        "weight": 12,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "item_id": "valuables_circuit",
+        "weight": 16,
+        "min": 1,
+        "max": 2
+      }
+    ],
+    "stage": "C"
+  },
+  {
+    "id": "loot_ammo",
+    "name": "弹药箱",
+    "entries": [
+      {
+        "item_id": "ammo_pistol",
+        "weight": 30,
+        "min": 20,
+        "max": 60
+      },
+      {
+        "item_id": "ammo_pistol_ap",
+        "weight": 16,
+        "min": 10,
+        "max": 30
+      },
+      {
+        "item_id": "ammo_pistol_hp",
+        "weight": 16,
+        "min": 10,
+        "max": 30
+      },
+      {
+        "item_id": "ammo_rifle",
+        "weight": 30,
+        "min": 20,
+        "max": 60
+      },
+      {
+        "item_id": "ammo_rifle_ap",
+        "weight": 16,
+        "min": 10,
+        "max": 30
+      },
+      {
+        "item_id": "ammo_rifle_hp",
+        "weight": 16,
+        "min": 10,
+        "max": 30
+      },
+      {
+        "item_id": "ammo_shell",
+        "weight": 20,
+        "min": 8,
+        "max": 20
+      },
+      {
+        "item_id": "ammo_shell_ap",
+        "weight": 10,
+        "min": 5,
+        "max": 15
+      },
+      {
+        "item_id": "ammo_shell_hp",
+        "weight": 10,
+        "min": 5,
+        "max": 15
+      }
+    ],
+    "stage": "C"
   }
 ]

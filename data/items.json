@@ -61,7 +61,10 @@
     "icon": "res://art/items/ammo_pistol.png",
     "value": 2,
     "desc": "9mm 通用弹药",
-    "stage": "B"
+    "stage": "B",
+    "ammo_type": "standard",
+    "pen": 3,
+    "flesh": 1.0
   },
   {
     "id": "ammo_rifle",
@@ -73,7 +76,10 @@
     "icon": "res://art/items/ammo_rifle.png",
     "value": 3,
     "desc": "5.56 制式弹药",
-    "stage": "B"
+    "stage": "B",
+    "ammo_type": "standard",
+    "pen": 3,
+    "flesh": 1.0
   },
   {
     "id": "ammo_shell",
@@ -85,7 +91,10 @@
     "icon": "res://art/items/ammo_shell.png",
     "value": 4,
     "desc": "12 号霰弹",
-    "stage": "B"
+    "stage": "B",
+    "ammo_type": "standard",
+    "pen": 3,
+    "flesh": 1.0
   },
   {
     "id": "armor_light",
@@ -97,7 +106,9 @@
     "icon": "res://art/items/armor_light.png",
     "value": 200,
     "desc": "牺牲防护换机动",
-    "stage": "B"
+    "stage": "B",
+    "armor": 3,
+    "durability": 60
   },
   {
     "id": "armor_heavy",
@@ -109,7 +120,9 @@
     "icon": "res://art/items/armor_heavy.png",
     "value": 650,
     "desc": "防护高但拖慢移速",
-    "stage": "B"
+    "stage": "B",
+    "armor": 9,
+    "durability": 120
   },
   {
     "id": "backpack_tactical",
@@ -121,7 +134,10 @@
     "icon": "res://art/items/backpack_tactical.png",
     "value": 350,
     "desc": "大幅提升负重上限",
-    "stage": "B"
+    "stage": "B",
+    "durability": 300,
+    "carry_slots": 14,
+    "carry_weight": 30.0
   },
   {
     "id": "consumable_can",
@@ -291,7 +307,9 @@
     "icon": "res://art/items/armor_helmet_light.png",
     "value": 150,
     "desc": "轻便，防御有限",
-    "stage": "A"
+    "stage": "A",
+    "armor": 2,
+    "durability": 40
   },
   {
     "id": "armor_helmet_heavy",
@@ -303,7 +321,9 @@
     "icon": "res://art/items/armor_helmet_heavy.png",
     "value": 500,
     "desc": "重而可靠，影响负重",
-    "stage": "A"
+    "stage": "A",
+    "armor": 5,
+    "durability": 70
   },
   {
     "id": "armor_medium",
@@ -315,7 +335,9 @@
     "icon": "res://art/items/armor_medium.png",
     "value": 400,
     "desc": "攻守平衡的选择",
-    "stage": "A"
+    "stage": "A",
+    "armor": 6,
+    "durability": 90
   },
   {
     "id": "armor_plate",
@@ -327,7 +349,9 @@
     "icon": "res://art/items/armor_plate.png",
     "value": 300,
     "desc": "可替换插板，补甲用",
-    "stage": "A"
+    "stage": "A",
+    "armor": 2,
+    "durability": 40
   },
   {
     "id": "backpack_assault",
@@ -339,7 +363,10 @@
     "icon": "res://art/items/backpack_assault.png",
     "value": 600,
     "desc": "容量与灵活兼顾",
-    "stage": "A"
+    "stage": "A",
+    "durability": 300,
+    "carry_slots": 18,
+    "carry_weight": 38.0
   },
   {
     "id": "backpack_large",
@@ -351,7 +378,10 @@
     "icon": "res://art/items/backpack_large.png",
     "value": 1100,
     "desc": "装得多，但也更重",
-    "stage": "A"
+    "stage": "A",
+    "durability": 350,
+    "carry_slots": 24,
+    "carry_weight": 50.0
   },
   {
     "id": "consumable_energybar",
@@ -640,5 +670,225 @@
     "value": 0,
     "desc": "开办公室的门",
     "stage": "A"
+  },
+  {
+    "id": "weapon_pistol",
+    "name": "手枪",
+    "name_en": "Pistol",
+    "category": "weapon",
+    "weight": 1.1,
+    "stack_max": 1,
+    "icon": "res://art/guns/weapon_pistol/base.png",
+    "value": 250,
+    "desc": "可装备的枪械",
+    "stage": "B",
+    "durability": 150
+  },
+  {
+    "id": "weapon_rifle",
+    "name": "步枪",
+    "name_en": "Assault Rifle",
+    "category": "weapon",
+    "weight": 3.6,
+    "stack_max": 1,
+    "icon": "res://art/guns/weapon_rifle/base.png",
+    "value": 900,
+    "desc": "可装备的枪械",
+    "stage": "B",
+    "durability": 200
+  },
+  {
+    "id": "weapon_shotgun",
+    "name": "霰弹枪",
+    "name_en": "Shotgun",
+    "category": "weapon",
+    "weight": 3.2,
+    "stack_max": 1,
+    "icon": "res://art/guns/weapon_shotgun/base.png",
+    "value": 700,
+    "desc": "可装备的枪械",
+    "stage": "B",
+    "durability": 180
+  },
+  {
+    "id": "weapon_smg",
+    "name": "冲锋枪",
+    "name_en": "SMG",
+    "category": "weapon",
+    "weight": 2.4,
+    "stack_max": 1,
+    "icon": "res://art/guns/weapon_smg/base.png",
+    "value": 600,
+    "desc": "可装备的枪械",
+    "stage": "A",
+    "durability": 220
+  },
+  {
+    "id": "weapon_dmr",
+    "name": "精确射手步枪",
+    "name_en": "DMR",
+    "category": "weapon",
+    "weight": 4.2,
+    "stack_max": 1,
+    "icon": "res://art/guns/weapon_dmr/base.png",
+    "value": 1400,
+    "desc": "可装备的枪械",
+    "stage": "A",
+    "durability": 180
+  },
+  {
+    "id": "weapon_lmg",
+    "name": "轻机枪",
+    "name_en": "LMG",
+    "category": "weapon",
+    "weight": 6.8,
+    "stack_max": 1,
+    "icon": "res://art/guns/weapon_lmg/base.png",
+    "value": 1800,
+    "desc": "可装备的枪械",
+    "stage": "A",
+    "durability": 260
+  },
+  {
+    "id": "weapon_carbine",
+    "name": "卡宾枪",
+    "name_en": "Carbine",
+    "category": "weapon",
+    "weight": 3.0,
+    "stack_max": 1,
+    "icon": "res://art/guns/weapon_carbine/base.png",
+    "value": 1100,
+    "desc": "可装备的枪械",
+    "stage": "C",
+    "durability": 200
+  },
+  {
+    "id": "weapon_rifle_sniper",
+    "name": "狙击枪",
+    "name_en": "Sniper Rifle",
+    "category": "weapon",
+    "weight": 5.5,
+    "stack_max": 1,
+    "icon": "res://art/guns/weapon_rifle_sniper/base.png",
+    "value": 2200,
+    "desc": "可装备的枪械",
+    "stage": "C",
+    "durability": 160
+  },
+  {
+    "id": "weapon_pistol_heavy",
+    "name": "重型手枪",
+    "name_en": "Heavy Pistol",
+    "category": "weapon",
+    "weight": 1.6,
+    "stack_max": 1,
+    "icon": "res://art/guns/weapon_pistol_heavy/base.png",
+    "value": 500,
+    "desc": "可装备的枪械",
+    "stage": "C",
+    "durability": 170
+  },
+  {
+    "id": "weapon_shotgun_auto",
+    "name": "自动霰弹枪",
+    "name_en": "Auto Shotgun",
+    "category": "weapon",
+    "weight": 4.0,
+    "stack_max": 1,
+    "icon": "res://art/guns/weapon_shotgun_auto/base.png",
+    "value": 1300,
+    "desc": "可装备的枪械",
+    "stage": "C",
+    "durability": 200
+  },
+  {
+    "id": "ammo_pistol_ap",
+    "name": "手枪穿甲弹",
+    "name_en": "9mm AP",
+    "category": "ammo",
+    "weight": 0.012,
+    "stack_max": 120,
+    "icon": "res://art/items/ammo_pistol.png",
+    "value": 5,
+    "desc": "穿透护甲，对无甲偏弱",
+    "ammo_type": "ap",
+    "pen": 7,
+    "flesh": 0.7,
+    "stage": "C"
+  },
+  {
+    "id": "ammo_pistol_hp",
+    "name": "手枪空尖弹",
+    "name_en": "9mm HP",
+    "category": "ammo",
+    "weight": 0.01,
+    "stack_max": 120,
+    "icon": "res://art/items/ammo_pistol.png",
+    "value": 3,
+    "desc": "对无甲伤害极高，打不穿甲",
+    "ammo_type": "hp",
+    "pen": 0,
+    "flesh": 1.4,
+    "stage": "C"
+  },
+  {
+    "id": "ammo_rifle_ap",
+    "name": "步枪穿甲弹",
+    "name_en": "5.56 AP",
+    "category": "ammo",
+    "weight": 0.014,
+    "stack_max": 120,
+    "icon": "res://art/items/ammo_rifle.png",
+    "value": 6,
+    "desc": "穿透护甲，对无甲偏弱",
+    "ammo_type": "ap",
+    "pen": 7,
+    "flesh": 0.7,
+    "stage": "C"
+  },
+  {
+    "id": "ammo_rifle_hp",
+    "name": "步枪空尖弹",
+    "name_en": "5.56 HP",
+    "category": "ammo",
+    "weight": 0.012,
+    "stack_max": 120,
+    "icon": "res://art/items/ammo_rifle.png",
+    "value": 4,
+    "desc": "对无甲伤害极高，打不穿甲",
+    "ammo_type": "hp",
+    "pen": 0,
+    "flesh": 1.4,
+    "stage": "C"
+  },
+  {
+    "id": "ammo_shell_ap",
+    "name": "霰弹独头弹",
+    "name_en": "Shotgun Slug",
+    "category": "ammo",
+    "weight": 0.035,
+    "stack_max": 120,
+    "icon": "res://art/items/ammo_shell.png",
+    "value": 7,
+    "desc": "单发重弹，破甲最好",
+    "ammo_type": "ap",
+    "pen": 8,
+    "flesh": 0.8,
+    "stage": "C"
+  },
+  {
+    "id": "ammo_shell_hp",
+    "name": "霰弹鸟弹",
+    "name_en": "Birdshot",
+    "category": "ammo",
+    "weight": 0.025,
+    "stack_max": 120,
+    "icon": "res://art/items/ammo_shell.png",
+    "value": 5,
+    "desc": "散射肉伤，对甲无力",
+    "ammo_type": "hp",
+    "pen": 0,
+    "flesh": 1.5,
+    "stage": "C"
   }
 ]
