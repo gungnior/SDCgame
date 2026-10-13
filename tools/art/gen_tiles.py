@@ -141,7 +141,7 @@ def rivets(img, color, step=5, margin=3):
 # ─────────── 各类 tile ───────────
 
 def make_floor_concrete(rng, C):
-    base = C[G_STONE + 2]
+    base = C[G_STONE + 3]
     img = blank(base)
     speckle(img, rng, [C[G_STONE + 0], C[G_STONE + 3], C[G_WALL + 3]], 30)
     for _ in range(2):
@@ -150,21 +150,21 @@ def make_floor_concrete(rng, C):
 
 
 def make_floor_asphalt(rng, C):
-    base = C[G_STONE + 1]
+    base = C[G_STONE + 2]
     img = blank(base)
     speckle(img, rng, [C[G_DARK + 2], C[G_STONE + 2], C[G_WALL + 3]], 38)
     return img
 
 
 def make_floor_dirt(rng, C):
-    base = C[G_DIRT + 1]
+    base = C[G_DIRT + 3]
     img = blank(base)
     speckle(img, rng, [C[G_DIRT + 0], C[G_DIRT + 2], C[G_DIRT + 3]], 36)
     return img
 
 
 def make_floor_metal(rng, C):
-    base = C[G_METAL + 1]
+    base = C[G_METAL + 3]
     img = blank(base)
     speckle(img, rng, [C[G_METAL + 0], C[G_METAL + 3]], 22)
     rivets(img, C[G_METAL + 2], step=7, margin=4)
@@ -175,32 +175,38 @@ def make_wall_concrete(rng, C):
     # ⚠️ 不加 top_edge/bottom_shadow：
     #    一个逻辑格铺 3x3 块砖，每块都带边 = 3 条横杠（实测踩过）。
     #    墙的轮廓交给渲染层画（见 view/raid_scene.gd 的格边描线）。
-    base = C[G_WALL + 1]
+    # W-04：墙必须明显比地板暗（消除"墙比地亮"的反转），故取墙组最暗的索引。
+    base = C[G_WALL + 0]
     img = blank(base)
-    speckle(img, rng, [C[G_WALL], C[G_WALL + 3], C[G_WALL + 4]], 30)
+    speckle(img, rng, [C[G_WALL + 0], C[G_WALL + 1], C[G_WALL + 2]], 30)
     for _ in range(2):
-        crack(img, rng, C[G_WALL], segments=3)
+        crack(img, rng, C[G_WALL + 0], segments=3)
     return img
 
 
 def make_wall_brick(rng, C):
-    brick_cols = [C[G_WOOD + 1], C[G_WOOD + 2], C[G_BLOOD + 0]]
+    # W-04：砖墙原本用了偏亮的木/锈色，平均亮度甚至超过地板 -> 改为暗墙色系 + 暗红，
+    # 既保留"砖"的辨识（砌砖纹理仍由 bricks() 画出），又保证墙面整体比地板暗。
+    brick_cols = [C[G_WALL + 1], C[G_WALL + 2], C[G_BLOOD + 0]]
     img = Image.new("RGBA", (W, H))
-    bricks(img, rng, C[G_WALL], brick_cols, brick_h=4, brick_w=8, row_offset=4)
+    bricks(img, rng, C[G_WALL + 0], brick_cols, brick_h=4, brick_w=8, row_offset=4)
     return img
 
 
 def make_wall_metal(rng, C):
-    base = C[G_METAL + 2]
+    # W-04：金属墙底色用暗墙色 G_WALL+0（而非金属组的亮色），只在肋条上用
+    #    金属组颜色 —— 这样"金属"靠纹理（竖向肋条+铆点）表达，底色仍比地板暗，
+    #    不再出现"墙比地亮"的反转。金属墙的可读性主要靠渲染层描边。
+    base = C[G_WALL + 0]
     img = blank(base)
-    # 竖向波纹
+    # 竖向波纹肋条（金属色，作为亮纹理线）。
+    # W-04：肋条保持 1px / 每 4px 一根（约占 25% 像素），避免均值被金属亮色
+    #    拉高到逼近地板；金属质感靠"肋条纹理"而非"整体提亮"来表达。
     px = img.load()
     for x in range(0, W, 4):
         for y in range(H):
-            px[x, y] = C[G_METAL + 1] + (255,)
-            if x + 1 < W:
-                px[x + 1, y] = C[G_METAL + 3] + (255,)
-    speckle(img, rng, [C[G_WOOD + 1], C[G_WOOD + 2]], 8)   # 锈迹
+            px[x, y] = C[G_METAL + 0] + (255,)
+    speckle(img, rng, [C[G_METAL + 0], C[G_WALL + 0]], 6)   # 锈迹/暗点
     return img
 
 

@@ -29,6 +29,7 @@ const TILE_NAMES := {
 var _tiles: Dictionary = {}          ## 已加载的 tile 变体：key -> Array[Image]
 var _grid: LogicalGrid = null        ## 当前地图（tile_key_for 要用）
 var _rooms: Array = []               ## 当前地图的房间（tile_key_for 要用）          # 名字 -> Array[Image]（原始像素数据）
+var _theme_id: String = ""           ## 白模主题色调（data/maps.json 的 tile_theme；"" = 历史默认）
 
 
 ## 载入程序化生成的 16x16 tile（art/tiles/，由 tools/art/gen_tiles.py 产出）
@@ -54,8 +55,10 @@ func load_tiles() -> void:
 
 
 ## 烘焙整张地图为纹理。whitebox=true 走白模，否则走美术 tile。
-func build(grid: LogicalGrid, rooms: Array, whitebox: bool) -> ImageTexture:
+## theme_id 决定白模色调（森林/城区/军事基地）；"" 保持历史默认（concrete）。
+func build(grid: LogicalGrid, rooms: Array, whitebox: bool, theme_id: String = "") -> ImageTexture:
 	set_map(grid, rooms)
+	_theme_id = theme_id
 	var te := grid.tile_extents()
 	var img := Image.create(te.x, te.y, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0.04, 0.05, 0.07))
@@ -92,7 +95,7 @@ const WB_WALL_EDGE := WhiteboxPainter.WB_WALL_EDGE
 
 
 func _build_whitebox(grid: LogicalGrid, rooms: Array, img: Image) -> void:
-	var painted := WhiteboxPainter.paint(grid, rooms)
+	var painted := WhiteboxPainter.paint(grid, rooms, _theme_id)
 	# 直接拷贝像素（尺寸一致，都是 tile_extents）
 	img.blit_rect(painted, Rect2i(Vector2i.ZERO, painted.get_size()), Vector2i.ZERO)
 
@@ -130,7 +133,7 @@ func _bake_structure(grid: LogicalGrid, img: Image) -> void:
 	var g := grid
 	var n := LogicalGrid.CELL_SIZE_TILES
 	var outline := Color(0.04, 0.05, 0.07, 1.0)
-	var ao := Color(0.0, 0.0, 0.0, 0.30)
+	var ao := Color(0.0, 0.0, 0.0, 0.45)
 	var dirs: Array[Vector2i] = [
 		Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 
@@ -140,14 +143,16 @@ func _bake_structure(grid: LogicalGrid, img: Image) -> void:
 			var origin := g.cell_to_tile_origin(cell)
 			if not g.is_walkable(cell):
 				# 墙：只在【朝向可走格】的那一侧描边，墙体内部不画线
+				# W-04：描边加粗到 2px，让墙/地板边界在 48px 逻辑格里更清晰可读
 				for d in dirs:
 					if g.is_walkable(cell + d):
-						_draw_seam(img, origin, d, n, outline, 0, 1)
+						_draw_seam(img, origin, d, n, outline, 0, 2)
 				continue
 			# 地面：贴墙的内侧压暗（廉价 AO，可读性提升很大）
+			# W-04：AO 加重到 0.45 / 3px，强化"贴墙=不可走边缘"的视觉提示
 			for d in dirs:
 				if not g.is_walkable(cell + d):
-					_draw_seam(img, origin, d, n, ao, 1, 2)
+					_draw_seam(img, origin, d, n, ao, 1, 3)
 
 
 ## 沿 cell 的某一侧画一条线。d 指向【邻居】，线画在朝邻居的那条边上。
