@@ -20,7 +20,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\pre_push_check.ps1
 | 2 | 无超大文件（>5MB 警告 / >20MB 失败） | 534MB 的 APK、2.2G 的 `_install/` 误入库，clone 变灾难 |
 | 3 | `_install/` `build/` `.godot/` `.workbuddy/` 未被跟踪 | 工具链/本地态进库，两人互相覆盖 |
 | 4 | 无 `*.keystore`/`*.jks`/`*.p12`/`*.pem`/`.env` | 签名密钥泄露（项目红线：免费开源 ≠ 公开私钥） |
-| 5 | `*.ps1` 均带 UTF-8 BOM | Win PowerShell 5.1 不带 BOM 按 ANSI 读，中文注释直接崩解析器——这个坑本项目踩过不止一次 |
+| 5 | 含非 ASCII 的 `*.ps1` 均带 UTF-8 BOM | Win PowerShell 5.1 不带 BOM 按 ANSI 读，中文注释直接崩解析器——这个坑本项目踩过不止一次（纯 ASCII 的脚本豁免，不误报） |
 | 6 | `verify_all.ps1 -Fast` 退出码 0 | 把已知会挂的代码推上去，队友第一件事就是踩雷 |
 | 7 | remote 已配置 | push 到不存在或打错的地址 |
 
@@ -57,6 +57,6 @@ clone 到任何盘符都能跑验收——所有脚本都按项目根相对定�
 | 2 超大文件 | 确认是不是 `build/`、`art/_raw/` 的东西被手动 `add` 了；`.gitignore` 已挡，正常不会挂 |
 | 3 产物入库 | `git rm -r --cached <目录>`，确认 `.gitignore` 有对应条目再 commit |
 | 4 密钥 | **立即停止 push**，删文件、删历史（`git filter-repo`），轮换密钥 |
-| 5 缺 BOM | 用 `AGENTS.md` §4 的 BOM 自检片段补（编辑工具保存时会吃掉 BOM，改完 `.ps1` 必须补） |
+| 5 缺 BOM | 只在你往脚本里写了中文/注释后出现。用 `AGENTS.md` §4 的 BOM 自检片段补（编辑工具保存时会吃掉 BOM，改完 `.ps1` 必须补）；纯 ASCII 老脚本不会误报 |
 | 6 验收非 0 | 不许 push。看 `verify_all.ps1` 输出定位，修好重跑 |
 | 7 无 remote | 见上方首次建 remote |

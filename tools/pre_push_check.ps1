@@ -9,7 +9,7 @@
     2. 无超大文件入库        —— >5MB 警告、>20MB 失败（防 APK/二进制误入）
     3. 工具链/产物未入库     —— _install/ build/ .godot/ .workbuddy/ 被跟踪就挂
     4. 无密钥凭据文件        —— *.keystore/*.jks/*.p12/*.pem/.env
-    5. *.ps1 均带 UTF-8 BOM  —— Win PowerShell 5.1 不带 BOM 按 ANSI 读，中文注释直接崩解析器
+    5. 含非 ASCII 的 *.ps1 均带 UTF-8 BOM —— Win PowerShell 5.1 不带 BOM 按 ANSI 读，中文注释直接崩解析器（纯 ASCII 的豁免，不误报）
     6. 验收退出码 0          —— verify_all.ps1 -Fast（只改文档可用 -SkipVerify 跳过）
     7. remote 已配置         —— 没配 origin 就打印配置命令，不猜
 
@@ -74,18 +74,27 @@ $secrets = @($tracked | Where-Object {
 Step "4. 无密钥凭据文件" ($secrets.Count -eq 0) ("命中 {0} 个：{1}" -f $secrets.Count, ($secrets -join ', '))
 
 # ---- 5. .ps1 BOM ----
+# 内容感知判定：含非 ASCII 且缺 BOM 才会被 PS 5.1 按 ANSI 读崩 -> FAIL；
+# 纯 ASCII 的 .ps1 没 BOM 也能正常跑 -> 放行但注明（不误报）。
 $ps1s = @($tracked | Where-Object { $_ -match '\.ps1$' })
 $noBom = @()
+$asciiOnly = @()
 foreach ($f in $ps1s) {
     $p = Join-Path $Root ($f -replace '/', '\')
     if (Test-Path -LiteralPath $p) {
         $b = [System.IO.File]::ReadAllBytes($p)
-        if (-not ($b.Length -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)) {
-            $noBom += $f
+        $hasBom = ($b.Length -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)
+        if (-not $hasBom) {
+            $text = [System.Text.Encoding]::UTF8.GetString($b)
+            if ($text -match '[^\x00-\x7F]') { $noBom += $f } else { $asciiOnly += $f }
         }
     }
 }
-Step "5. *.ps1 均带 UTF-8 BOM" ($noBom.Count -eq 0) ("检查 {0} 个，缺 BOM：{1}" -f $ps1s.Count, ($noBom -join ', '))
+$d5 = ("检查 {0} 个；含非 ASCII 且缺 BOM：{1}" -f $ps1s.Count, ($noBom -join ', '))
+if ($asciiOnly.Count -gt 0) {
+    $d5 += ("；纯 ASCII 免 BOM {0} 个（{1}）" -f $asciiOnly.Count, ($asciiOnly -join ', '))
+}
+Step "5. *.ps1 含中文时均带 UTF-8 BOM" ($noBom.Count -eq 0) $d5
 
 # ---- 6. 验收 ----
 if ($SkipVerify) {
