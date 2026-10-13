@@ -1,0 +1,61 @@
+[
+  {
+    "id": "m_first_blood",
+    "name": "初战告捷",
+    "stage": "B",
+    "desc": "在战区中击杀 3 名敌人，证明你不是猎物。",
+    "objectives": [
+      { "type": "kill", "need": 3 }
+    ],
+    "reward": {
+      "wallet": 200,
+      "items": [
+        { "item_id": "ammo_pistol", "count": 20 }
+      ]
+    }
+  },
+  {
+    "id": "m_extract_basic",
+    "name": "全身而退",
+    "stage": "B",
+    "desc": "活着走到撤离点并完成撤离。这是搜打撤的全部意义。",
+    "objectives": [
+      { "type": "extract", "need": 1 }
+    ],
+    "reward": {
+      "wallet": 300,
+      "items": []
+    }
+  },
+  {
+    "id": "m_salvager",
+    "name": "拾荒者",
+    "stage": "A",
+    "desc": "搜刮 10 次容器或尸体，把战利品带回家。",
+    "objectives": [
+      { "type": "loot", "need": 10 }
+    ],
+    "reward": {
+      "wallet": 250,
+      "items": [
+        { "item_id": "medical_bandage", "count": 3 }
+      ]
+    }
+  },
+  {
+    "id": "m_hunter",
+    "name": "猎手",
+    "stage": "A",
+    "desc": "击杀 8 名敌人，并成功撤离。",
+    "objectives": [
+      { "type": "kill", "need": 8 },
+      { "type": "extract", "need": 1 }
+    ],
+    "reward": {
+      "wallet": 500,
+      "items": [
+        { "item_id": "valuables_goldwatch", "count": 1 }
+      ]
+    }
+  }
+]
