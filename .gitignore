@@ -40,10 +40,13 @@ desktop.ini
 # 美术中间产物（原图/预览/测试图），不入库
 art/_raw/
 
-# ���սű����м������߱�������ǰ��ͼ��������
+# 验收/调试临时截图，不入库
 art/_raw/_verify_now.png
 art/_raw/_det*.png
 
-# Python �ֽ��루py_compile �Ĳ�����ý��⣩
+# ---- agent 本地工作区（记忆/任务态，每人本地不同，勿提交）----
+.workbuddy/
+
+# Python 字节码（py_compile 产物），不提交
 __pycache__/
 *.pyc
