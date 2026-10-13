@@ -23,6 +23,31 @@ const STATE_NAME := {
 	State.DEAD: "DEAD",
 }
 
+## ── IDLE 行为：巡视 + 轻量游走（2026-10-13 修「敌人 AI 不生效」）──
+#
+# ⚠️ 这是本轮真机反馈 #1 的**根因修复**，先把证据写在这里：
+#
+#   诊断脚本 `_install/tmp/ai_probe.gd` 复刻了 raid_scene 的生成 + 逐帧 tick：
+#     · 玩家站着不动 30 秒：森林 0/16、城区 0/35、军事基地 0/54 个敌人
+#       **没有任何一个**改变过位置或状态（全部 IDLE）。
+#     · 把每个敌人的 facing 强行指向玩家再跑 3 秒：立刻有敌人进 COMBAT。
+#   => 视野锥完全由 `facing` 决定，而 IDLE 时**朝向从不改变** ——
+#      于是除非玩家恰好走进某个敌人出生时的那个固定朝向里，
+#      这个敌人这辈子都不会发现玩家 = 玩家眼里的"雕像敌人 / AI 没生效"。
+#
+#   修法两条，都便宜且**完全确定性**（rng 一律走注入的 SimRng，见 T-32）：
+#     ① 巡视：IDLE 时按固定角速度转朝向 -> 约 5.8 秒扫满一圈
+#     ② 游走：每隔几秒在附近挑一个**可走格**走两步，房间不再死气沉沉
+## 巡视角速度（度/秒）
+const IDLE_SCAN_DEG_PER_SEC := 62.0
+## 两次游走之间的间隔（秒，随机区间）
+const IDLE_WANDER_MIN_SEC := 2.6
+const IDLE_WANDER_MAX_SEC := 5.4
+## 游走半径（逻辑格）—— 刻意很小，让敌人留在自己的房间里
+const IDLE_WANDER_RADIUS := 2.6
+## 抵达判定容差（逻辑格）
+const IDLE_ARRIVE_TOL := 0.35
+
 ## 近战进入攻击的距离（逻辑格）
 const MELEE_RANGE_CELLS := 1.2
 ## 远程敌人希望保持的距离（逻辑格）
@@ -50,6 +75,12 @@ var alert_timer: float = 0.0
 var target_pos: Vector2 = Vector2.ZERO   ## 当前想去的位置
 var last_seen_pos: Vector2 = Vector2.ZERO
 var move_dir: Vector2 = Vector2.ZERO
+
+## IDLE 巡视/游走状态（见文件头的说明）
+var idle_timer: float = 0.0              ## 距离下次挑游走点的秒数
+var idle_left: float = 0.0               ## 本次游走的剩余时长
+var wander_target: Vector2 = Vector2.ZERO
+var wandering: bool = false
 
 ## 统计（测试与调参用）
 var shots_fired: int = 0
@@ -191,7 +222,7 @@ func tick(delta: float, ctx: Dictionary) -> void:
 	# ── 状态行为 ──
 	match state:
 		State.IDLE:
-			move_dir = Vector2.ZERO
+			_idle(delta, flows, rng, grid)
 		State.ALERT:
 			alert_timer -= delta
 			_move_toward(flows, target_pos)
@@ -205,7 +236,7 @@ func tick(delta: float, ctx: Dictionary) -> void:
 				state = State.IDLE
 				move_dir = Vector2.ZERO
 		State.COMBAT:
-			_combat(delta, targets, rng, seen)
+			_combat(delta, targets, rng, seen, grid)
 		State.DEAD:
 			pass
 
@@ -217,6 +248,65 @@ func tick(delta: float, ctx: Dictionary) -> void:
 		var to_t: Vector2 = (seen["pos"] - pos)
 		if not to_t.is_zero_approx():
 			facing = to_t.normalized()
+
+
+# ─────────────────── IDLE（巡视 + 游走）───────────────────
+#
+# 见文件头「IDLE 行为」的说明。两件事都在这里做：
+#   ① 转朝向（视野锥扫起来）—— 这是"敌人能不能发现玩家"的开关
+#   ② 偶尔在附近走两步 —— 这是"房间看起来有没有人"的观感来源
+#
+# ⚠️ 巡视**必须放在感知之后**（tick 里的顺序：感知 -> 状态行为）。
+#    否则会出现"玩家明明走进视野、却被本帧的巡视转开了"的随机感。
+func _idle(delta: float, flows: FlowFieldManager, rng: SimRng, grid: LogicalGrid) -> void:
+	# ① 巡视：游走时才让朝向交给移动方向（见 tick 末尾）
+	if not wandering:
+		facing = facing.rotated(deg_to_rad(IDLE_SCAN_DEG_PER_SEC) * delta)
+		if facing.is_zero_approx():
+			facing = Vector2.RIGHT
+
+	# ② 游走：正在走 -> 到点或超时就停
+	if wandering:
+		idle_left -= delta
+		if idle_left <= 0.0 or pos.distance_to(wander_target) <= IDLE_ARRIVE_TOL:
+			wandering = false
+			move_dir = Vector2.ZERO
+			return
+		_move_toward(flows, wander_target)
+		return
+
+	# ③ 站着不动：等冷却，到点就挑一个新目标
+	move_dir = Vector2.ZERO
+	if rng == null or grid == null:
+		return                  # 没有 rng/grid（部分单测的 ctx 很简陋）-> 只巡视，不游走
+	idle_timer -= delta
+	if idle_timer > 0.0:
+		return
+	idle_timer = rng.randf_range(IDLE_WANDER_MIN_SEC, IDLE_WANDER_MAX_SEC)
+	var t := _pick_wander_cell(grid, rng)
+	if t == Vector2.ZERO:
+		return                  # 四面都是墙（角落）-> 这次放弃，下次再说
+	wander_target = t
+	wandering = true
+	idle_left = rng.randf_range(IDLE_WANDER_MIN_SEC, IDLE_WANDER_MAX_SEC)
+
+
+## 在附近挑一个**可走**格作为游走目标。找不到返回 Vector2.ZERO。
+##
+## ⚠️ 半径故意小（IDLE_WANDER_RADIUS）：敌人应该"在自己的房间里踱步"，
+##    而不是慢慢漂到地图另一头（那会让房间空掉，反而更像 AI 坏了）。
+func _pick_wander_cell(grid: LogicalGrid, rng: SimRng) -> Vector2:
+	var base := Ballistics.cell_of(pos)
+	for _i in 12:
+		var ang := rng.randf_range(0.0, TAU)
+		var rad := rng.randf_range(1.0, IDLE_WANDER_RADIUS)
+		var c := Vector2i(base.x + int(round(cos(ang) * rad)),
+			base.y + int(round(sin(ang) * rad)))
+		if c == base:
+			continue
+		if grid.is_walkable(c):
+			return Ballistics.cell_center(c)
+	return Vector2.ZERO
 
 
 # ─────────────────── 感知 ───────────────────
@@ -261,7 +351,7 @@ func _find_audible_noise(grid: LogicalGrid, noises: Array,
 
 # ─────────────────── 战斗 ───────────────────
 
-func _combat(delta: float, targets: Array, rng: SimRng, seen: Dictionary) -> void:
+func _combat(delta: float, targets: Array, rng: SimRng, seen: Dictionary, grid: LogicalGrid) -> void:
 	var dist := pos.distance_to(target_pos)
 
 	# ── ⭐ 包夹：不直接冲玩家，而是冲自己那个"包夹位" ──
@@ -273,6 +363,11 @@ func _combat(delta: float, targets: Array, rng: SimRng, seen: Dictionary) -> voi
 	var goal := target_pos
 	if squad != null:
 		goal = squad.goal_for(self, target_pos)
+		# ⭐ W-06：包夹点可能落在墙里（1 格宽走廊里 ±58°×3.2 偏移会进墙带）。
+		#    远程 _combat 直接施加 move_dir，不查墙 → 侧翼逻辑坐标穿进墙格。
+		#    把目标点夹到最近的可行走逻辑格，保证直线移动目标永远合法。
+		if grid != null:
+			goal = _snap_walkable(grid, goal)
 
 	if def.is_ranged():
 		# 保持距离：太近后退、太远靠近、合适则原地
@@ -353,6 +448,22 @@ func _apply_damage(target: Dictionary, amount: int) -> void:
 
 
 # ─────────────────── 移动 ───────────────────
+
+## 把任意目标点夹到最近的可行走逻辑格中心（W-06）。
+## 防止包夹点落在墙里时敌人直线朝墙移动、逻辑坐标穿进墙格。
+func _snap_walkable(grid: LogicalGrid, p: Vector2) -> Vector2:
+	var c := Ballistics.cell_of(p)
+	if grid.is_walkable(c):
+		return p
+	for r in range(1, 8):
+		for dy in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				if absi(dx) != r and absi(dy) != r:
+					continue  # 只看外环
+				var nc := Vector2i(c.x + dx, c.y + dy)
+				if grid.is_walkable(nc):
+					return Vector2(nc.x + 0.5, nc.y + 0.5)
+	return p  # 极端情况找不到可走格：退回原值（不抛异常）
 
 func _move_toward(flows: FlowFieldManager, goal: Vector2) -> void:
 	if flows == null:
