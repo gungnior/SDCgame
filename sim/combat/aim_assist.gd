@@ -20,6 +20,25 @@ extends RefCounted
 ##   · FOV 门限**按屏幕尺寸换算**（手机视口小，固定 90° 会过强）
 ##   · 加**视线/遮挡检查**
 ##
+## ── 2026-10-13 真机反馈 #1：辅助瞄准太强，要加"视野锥" ──
+##
+## 用户原话：
+##   "辅助瞄准太强，玩家需要加上视野锥 —— 辅助瞄准现在甚至可以
+##    玩家在看上面辅助会自动锁定到下方敌人。"
+##
+## 根因（读代码确认）：
+##   判定是「角度锥 **OR** 实体半径」两条通路取其一。近距离时垂距
+##   `perp = |aim × dir| × dist` 会趋近 0，于是**半径通路无条件放行** ——
+##   哪怕目标在正后方（夹角 ~180°）。`AimAssist.pick` 至少还有
+##   `COUNTER_UNLOCK_DEG` 兜底，而 `AutoAim.scan_nearest`（常驻视野扫描、
+##   决定锁定与自动射击）**连这个兜底都没有** ——
+##   所以玩家朝上瞄，脚边偏下的敌人照样被锁上。
+##
+## 修法：引入一个**玩家视野锥硬门限** `PLAYER_VISION_HALF_DEG`。
+##   它是"玩家能注意到目标"的绝对上限，半径通路只能在**这个锥内**放宽，
+##   永远不能越过它。锥的大小 = 枪械视野锥 ∩ 门限（见 effective_cone_deg），
+##   所以"换枪视野跟着变"依然成立，只是不再能让视野膨胀到身后。
+##
 ## 纯静态、纯逻辑，可 headless 单测。
 
 ## 基础锥半角（度）。这是"射线加粗"的粗细，不是准心吸附范围。
@@ -44,6 +63,53 @@ const MAX_BEND_CELLS := 0.55
 ## 若权重塌到接近 0，会出现"判定命中但曳光飞向别处"的矛盾观感（测试抓到过）。
 const MIN_BEND_WEIGHT := 0.55
 
+## ── 与枪械属性挂钩（2026-10-13 真机反馈 #6）──
+#
+# 用户原话："辅助瞄准的范围应该和枪械属性挂钩"。
+# 实测确认：改之前子弹磁性写死 `BASE_HALF_ANGLE_DEG = 4.2°` ——
+# **换什么枪辅助范围都一模一样**，而枪械的 `aim_cone_deg`（视野锥）
+# 只被 AutoAim（自动瞄准/自动射击）用到，磁性这条路径完全没读它。
+#
+# 现在磁性锥由枪械自己的视野锥推导：`aim_cone_deg × WEAPON_CONE_RATIO`。
+#   霰弹枪 cone 34~35° -> 磁性约 4.1°（贴脸散射武器，本来就该糊上去）
+#   步枪   cone 55°    -> 磁性约 6.6°（中庸）
+#   狙击枪 cone 30°    -> 磁性约 3.6°（越精确的枪，辅助越克制）
+const WEAPON_CONE_RATIO := 0.12
+## 磁性锥半角的上下限（防止极端数据把辅助做得过强/完全失效）
+const MIN_WEAPON_HALF_ANGLE := 2.0
+const MAX_WEAPON_HALF_ANGLE := 7.5
+## 磁性生效距离 = 枪械有效射程 × 这个比例。
+## 留一点余量：射程边缘本来就打不动，磁性跟着收一收，
+## 免得出现"准心磁到了 90 格外的敌人、这一枪却根本够不着"的割裂感。
+const ASSIST_RANGE_RATIO := 0.85
+
+## ── 玩家视野锥硬门限（2026-10-13 真机反馈 #1）──
+#
+# 任何辅助（磁性 pick / 视野扫描 scan_nearest）**一律不许**作用在
+# 夹角超过这个值的敌人身上 —— 包括"因为贴得近"而走半径通路的情况。
+# 这是"玩家在看上面，辅助却锁到下方敌人"的直接修法。
+#
+# 40° 的来历：既有武器数据里最宽的视野锥是步枪 55°，最窄狙击 30°。
+# 取 40° 让"换枪视野不同"依然可见（30~40 会不同），
+# 同时把半锥角从 55°（=110° 全视场）压到 40°（=80° 全视场）——
+# 背后的目标彻底出局，而"贴脸偏心 0.4 格"（21.8°）这类正当场景仍命中。
+const PLAYER_VISION_HALF_DEG := 40.0
+
+
+## 这个夹角是否在玩家视野锥内（辅助的绝对门限）。
+static func within_vision_cone(angle_deg: float) -> bool:
+	return angle_deg <= PLAYER_VISION_HALF_DEG
+
+
+## 有效视野锥半角 = 枪械视野锥 ∩ 玩家视野锥门限。
+##
+## **必须由绘制与逻辑共用同一个值**，否则玩家会看到"锥画得比实际能锁的大"，
+## 这正是"看着能打却打不到"的又一种来源。
+static func effective_cone_deg(weapon_cone_deg: float) -> float:
+	if weapon_cone_deg <= 0.0:
+		return PLAYER_VISION_HALF_DEG
+	return minf(weapon_cone_deg, PLAYER_VISION_HALF_DEG)
+
 
 ## 按视口尺寸换算锥半角。
 ## 手机竖屏/小视口下同样的一圈像素代表更大的角，固定角度会过强。
@@ -54,6 +120,25 @@ static func half_angle_for_viewport(viewport_width: float) -> float:
 	return BASE_HALF_ANGLE_DEG * scale
 
 
+## 由**枪械的视野锥**推导磁性锥半角（真机反馈 #6）。
+## aim_cone_deg 来自 data/weapons.json（`WeaponDef.aim_cone_deg`）。
+## 缺数据（<= 0）时回退到旧的固定值，保证不会因为数据缺失而失去辅助。
+static func half_angle_for_weapon(aim_cone_deg: float, viewport_width: float) -> float:
+	if aim_cone_deg <= 0.0:
+		return half_angle_for_viewport(viewport_width)
+	var base := clampf(aim_cone_deg * WEAPON_CONE_RATIO,
+		MIN_WEAPON_HALF_ANGLE, MAX_WEAPON_HALF_ANGLE)
+	if viewport_width <= 0.0:
+		return base
+	var scale := clampf(REF_VIEWPORT_WIDTH / viewport_width, 0.55, 1.6)
+	return base * scale
+
+
+## 磁性的有效距离（由枪械射程推导）。见 ASSIST_RANGE_RATIO。
+static func assist_range(weapon_range_m: float) -> float:
+	return maxf(2.0, weapon_range_m * ASSIST_RANGE_RATIO)
+
+
 ## 挑一个磁性目标。
 ##
 ## 参数：
@@ -62,7 +147,9 @@ static func half_angle_for_viewport(viewport_width: float) -> float:
 ##   push         瞄准摇杆推力 0~1（低于 MIN_PUSH 直接返回空 —— 回中即失效）
 ##   targets      [{id, pos, faction, alive}, ...]  —— **必须带 faction**
 ##   grid         LogicalGrid，用于遮挡检查
-##   half_angle   锥半角（度），用 half_angle_for_viewport() 算
+##   half_angle   磁性锥半角（度），用 half_angle_for_weapon() 算。
+##                ⚠️ 它只是"射线加粗的粗细"；真正的绝对上限是
+##                PLAYER_VISION_HALF_DEG（视野锥），两条通路都在它之内。
 ##   max_range    有效射程（与世界坐标同单位）
 ##   player_faction 玩家阵营，用于目标筛选
 ##   hit_radius   **实体半径**（世界单位）。见下方说明。
@@ -105,21 +192,23 @@ static func pick(origin: Vector2, aim_dir: Vector2, push: float,
 
 		var dir_t := to_t / dist
 		var dot := aim.dot(dir_t)
+		var angle_deg := rad_to_deg(acos(clampf(dot, -1.0, 1.0)))
+
+		# ── 视野锥硬门限（真机反馈 #1）──
+		# 半径通路（贴脸放宽）只在锥内生效；一旦越过门限就**一律出局**，
+		# 哪怕它近在脚边。这就是"朝上瞄却锁到下方敌人"的修法。
+		if not within_vision_cone(angle_deg):
+			continue
+
 		# 射线到实体中心的垂距（格）。角度判定在近距离不可靠，必须配合它。
 		var perp := absf(aim.cross(dir_t)) * dist
 		# 目标自身的半径（可被数据覆盖，例如大体型敌人）
 		var tr := float(t.get("radius", hit_radius))
 		if dot < cos_limit and perp > tr:
-			continue                     # 既不在锥内、也不在 hitbox 内
+			continue                     # 锥内，但既不在磁性锥、也不在 hitbox 内
 
 		# ── 约束 3：视线/遮挡检查 ──
 		if grid != null and not Ballistics.has_line_of_sight(grid, origin, tp):
-			continue
-
-		# ── 硬原则 1：玩家可超越 ──
-		# 玩家把摇杆往目标【反方向】推 = 主动脱锁
-		var angle_deg := rad_to_deg(acos(clampf(dot, -1.0, 1.0)))
-		if angle_deg > COUNTER_UNLOCK_DEG:
 			continue
 
 		# 打分：夹角越小越好、越接近实体中心越好、距离越近越好

@@ -31,11 +31,19 @@ func _test_hitbox_close_range() -> void:
 	_check(AimAssist.pick(origin, Vector2.RIGHT, 0.6, far_off, g, 4.2, 30.0).is_empty(),
 		"横向偏移 1.4 格（远超实体半径）不命中")
 
-	# 实体半径可被数据覆盖（大体型敌人）
-	var big := [{"id": "b", "pos": Vector2(6.5, 6.9), "faction": "enemy", "alive": true,
+	# 实体半径可被数据覆盖（大体型敌人）—— 但**仍必须在视野锥内**
+	# （2026-10-13 真机反馈 #1 收紧了门限：半径通路不再能越过视野锥）
+	var big := [{"id": "b", "pos": Vector2(7.6, 6.9), "faction": "enemy", "alive": true,
 		"radius": 1.6}]
 	_check(not AimAssist.pick(origin, Vector2.RIGHT, 0.6, big, g, 4.2, 30.0).is_empty(),
-		"radius=1.6 的大体型目标能命中")
+		"radius=1.6 的大体型目标能命中（横向 1.4 格 / 33.7° 仍在视野锥 40° 内）")
+
+	# ⭐ 真机反馈 #1：半径再大也不能越过【玩家视野锥】——
+	#    "玩家在看上面，辅助会自动锁定到下方敌人"就是这个漏洞。
+	var behind := [{"id": "z", "pos": Vector2(4.5, 6.9), "faction": "enemy", "alive": true,
+		"radius": 9.0}]
+	_check(AimAssist.pick(origin, Vector2.RIGHT, 0.6, behind, g, 4.2, 30.0).is_empty(),
+		"背后的超大目标（半径 9、夹角 125°）不被锁定 —— 视野锥是绝对门限")
 
 	# ⭐ 偏折上限必须按【横向距离】而不是角度 —— 否则贴脸差几度永远打不中
 	var r2 := AimAssist.pick(origin, Vector2.RIGHT, 0.6, close, g, 4.2, 30.0)

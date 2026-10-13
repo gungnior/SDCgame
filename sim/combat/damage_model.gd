@@ -99,3 +99,54 @@ static func shots_to_kill(weapon: WeaponDef, enemy: EnemyDef, distance_m: float)
 	if per_shot <= 0.0:
 		return INF
 	return float(enemy.hp) / per_shot
+
+
+# ─────────────────── 弹药 vs 护甲（2026-10-13）───────────────────
+#
+# 这是"穿甲弹 / 肉伤弹"取舍的**唯一落点**：
+#   对有甲目标 —— pen（穿甲值）越高越有效。0.25 是下界，
+#                  保证"打不穿也能磨"，不会出现 0 伤害的挫败感。
+#   对无甲目标 —— flesh（肉伤倍率）越高越有效。
+# 于是：AP 弹 pen 高 flesh 低 -> 专打有甲；HP 弹反之 -> 专打无甲。
+# 标准弹居中 = 万金油。数值与契约见 data/SCHEMA.md §1「弹药弹型」。
+
+## 穿甲系数：0.25 ~ 1.0。目标无甲时恒为 1.0。
+static func armor_multiplier(pen: float, target_armor: float) -> float:
+	if target_armor <= 0.0:
+		return 1.0
+	return 0.25 + 0.75 * clampf(pen / target_armor, 0.0, 1.0)
+
+
+## 把"基础伤害"按【弹药弹型 + 目标护甲】结算成最终伤害。
+## ammo 为 null（老数据/未指定）时退化为"无弹型加成"，保持向后兼容。
+static func resolve_vs_armor(base_damage: int, ammo: ItemDef, target_armor: float) -> int:
+	if base_damage <= 0:
+		return 0
+	var flesh := 1.0
+	var pen := 0.0
+	if ammo != null:
+		flesh = ammo.flesh_mult()
+		pen = ammo.pen
+	return maxi(1, int(round(float(base_damage) * flesh * armor_multiplier(pen, target_armor))))
+
+
+## 带弹药的完整命中结算：先定部位算基础伤害，再过弹药/护甲。
+## 返回在 resolve_hit 的基础上多出：{"ammo": id, "armor": 目标护甲}
+static func resolve_hit_with_ammo(weapon: WeaponDef, ammo: ItemDef, distance_m: float,
+		extra_spread_deg: float, target_armor: float, rng: SimRng) -> Dictionary:
+	var hit := resolve_hit(weapon, distance_m, extra_spread_deg, rng)
+	hit["damage"] = resolve_vs_armor(int(hit["damage"]), ammo, target_armor)
+	hit["ammo"] = "" if ammo == null else ammo.id
+	hit["armor"] = target_armor
+	return hit
+
+
+## 对某个敌人的期望"几发打死"，考虑弹型与护甲。供平衡调参。
+static func shots_to_kill_vs_armor(weapon: WeaponDef, ammo: ItemDef, enemy: EnemyDef,
+		distance_m: float) -> float:
+	if weapon == null or enemy == null or weapon.rpm <= 0:
+		return INF
+	var per_shot := float(resolve_vs_armor(weapon.damage, ammo, float(enemy.armor)))
+	if per_shot <= 0.0:
+		return INF
+	return float(enemy.hp) / per_shot

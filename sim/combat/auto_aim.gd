@@ -55,7 +55,12 @@ static func scan_nearest(origin: Vector2, aim_dir: Vector2, half_angle_deg: floa
 	if aim_dir == Vector2.ZERO or targets.is_empty():
 		return {}
 	var aim := aim_dir.normalized()
-	var cos_limit := cos(deg_to_rad(half_angle_deg))
+	# ── 视野锥是【绝对上限】（真机反馈 #1）──
+	# 即使调用方传了更大的锥角，也不许超过玩家视野锥门限。
+	# 早先这里完全没有角度上限 —— 近距离的"半径通路"会把背后/脚下的
+	# 敌人一起放行，于是"朝上瞄却锁到下方敌人"。
+	var cone := minf(half_angle_deg, AimAssist.PLAYER_VISION_HALF_DEG)
+	var cos_limit := cos(deg_to_rad(cone))
 
 	var best: Dictionary = {}
 	var best_dist := INF
@@ -77,9 +82,13 @@ static func scan_nearest(origin: Vector2, aim_dir: Vector2, half_angle_deg: floa
 
 		var dir_t := to_t / dist
 		var dot := aim.dot(dir_t)
+		var angle_deg := rad_to_deg(acos(clampf(dot, -1.0, 1.0)))
+		# 视野锥硬门限：越过就出局，无论多近。
+		if not AimAssist.within_vision_cone(angle_deg):
+			continue
 		var perp := absf(aim.cross(dir_t)) * dist
 		var tr := float(t.get("radius", radius))
-		# 角度锥 OR 实体半径 —— 近距离必须靠半径，否则贴脸永远锁不上
+		# 锥内：角度锥 OR 实体半径 —— 近距离必须靠半径，否则贴脸永远锁不上
 		if dot < cos_limit and perp > tr:
 			continue
 
