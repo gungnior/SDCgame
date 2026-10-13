@@ -59,7 +59,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1
 
 | # | 项 | 规模 | 抓什么 | 是门槛吗 |
 |---|---|---|---|---|
-| ① | 单元测试 | **799 项断言** | 逻辑正确性（headless，秒级） | ✅ **是** |
+| ① | 单元测试 | **847 项断言**（会随套件增长） | 逻辑正确性（headless，秒级） | ✅ **是** |
 | ② | 集成验证 | **51 项** | 零件装到游戏里还转不转（真的实例化场景） | ✅ **是** |
 | ③ | 数据契约 | JSON schema | 数据表与跨表引用 | ✅ **是** |
 | ④ | 像素基线 | 固定种子截图 | 画面被明显改动 | ⚠️ **否，仅供参考**（`-Strict` 才当门槛） |
@@ -70,9 +70,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1
 
 > ⚠️ **不许只跑其中一项就说"过了"。** 更不许"看起来没问题"就交。
 
-### ⚠️ 为什么 ④ 像素基线不是门槛（实测结论）
+### ⚠️ 为什么 ④ 像素基线**曾经**不是门槛 —— 🔴 **已在 W-00 修好，现在可以用了**
 
-**这局游戏运行期本质不确定。** 同种子、同参数、同 `--fixed-fps 60` 连跑 4 次：
+> 🔴 **2026-10-12 更正（W-00）**：下面那段把"运行期不确定"归因于 hitstop 的墙钟，
+> **实测证明主因不是它，而是验收工具自己的两个 bug**：
+>
+> 1. **`--hide-hud` 静默失效** —— HUD 是 `raid_scene._ready()` 里才 new 出来的，
+>    `_initialize` 里 `get("raid_hud")` 还是 **null**，那次 hide 什么也没做。
+>    于是 HUD 那行 `FPS %d **平均 %.1f ms** 最慢 %.1f ms`（**墙钟读数**）
+>    进了"世界像素基线" —— 所谓 0.018% "帧时序噪声"的真身就是它。
+> 2. **`_mouse_aiming()` 读操作系统的鼠标速度** —— 验收跑在真窗口里，
+>    **只要有人在动鼠标**，视野锥就整块变（差 5%~7%），而模拟状态一字不差。
+>
+> 两条修掉之后：`verify_all.ps1` 的 ④ 是
+> 「自身复现性：**同构建两次截图完全一致**」+「与基线一致：**逐像素完全一致**」。
+> **所以 ④ 现在可以当粗粒度回归门用了**（是否 `-Strict` 仍维持现状）。
+> ⚠️ 跑验收时**别动鼠标**；需要严格比较用 `tools\check_determinism.ps1`（它把鼠标瞄准钉住）。
+>
+> hitstop 的墙钟问题**是真的**（单位级实测：同一个 120ms 请求，旧实现紧凑循环冻
+> **251104 帧**、每帧 +3ms 冻 **29 帧**；新实现两种都 **8 帧**），已改成帧计数。
+> 完整证据 / 未验证项见 [specs/w00-determinism.md](specs/w00-determinism.md)。
+
+**（以下为原文，保留作为"判断 → 被证伪"的记录）**
+
+**这局游戏运行期曾被判定为本质不确定。** 同种子、同参数、同 `--fixed-fps 60` 连跑 4 次：
 
 ```
 第 30 帧   ✅ 5/5 对完全一致        <- 早期是确定的
@@ -97,11 +118,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1
 > （`RaidMapBaker` 输出 vs `WhiteboxPainter.paint()`，3 个种子差异均为 0），
 > 完全不依赖运行期时序。
 
-### 想让像素比对真正可用，需要先修的东西
+### ✅ 想让像素比对真正可用，需要先修的东西 —— **W-00 已全部修完（2026-10-12）**
 
-把 `feel.gd` 的 hitstop 从**真实时钟**改成**帧计数**（或让模拟推进不依赖
-`Engine.time_scale`）。那是一个独立的、值得做的改动 —— 做完之后
-「同种子可复现」才成立，而这同时也是**可复现 bug 报告**的前提。
+原文要求：把 `feel.gd` 的 hitstop 从真实时钟改成帧计数。**已做**，并且顺带查出
+上面那两条验收工具 bug（`--hide-hud` 静默失效 / 鼠标瞄准泄漏）。
+现在 ④ 的自身复现性是**逐像素完全一致**，可以当粗粒度回归门。
+
+专项验收命令（新增）：`tools\check_determinism.ps1`
+（4 场景 × 4 次、容差 0；`-HitstopEvery 12` 是 25 次冻结的"顿帧风暴"用例）
 
 ---
 
@@ -149,9 +173,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1
 3. ④ 是咨询性的。**如果你有意改了画面**，复核截图后跑 `-UpdateBaseline`，
    并在提交信息里**说明为什么**（"基线被我重设了" 是一句需要解释的话）
 4. 在 workboard 上把任务标记完成，附上退出码
+5. ⭐ **任务「完成」或「中断」时，都必须写交接**（用户明确要求）：
+   更新 [specs/session-handoff.md](specs/session-handoff.md) 顶部，写清
+   **① 一句话状态 ② 改了哪些文件（别人别碰） ③ 复跑命令 ④ 没验证的 ⑤ 下一步**。
+   中断也要写 —— 半成品比没开工更需要交接。**只写结论，不写思考过程。**
 
-> ⚠️ **不要依赖像素基线来证明"没改坏"。** 在 hitstop 用真实时钟这个问题修好之前，
-> 它值在**明显**的画面改动上，不在细粒度回归上。细粒度靠 ①②。
+> ⚠️ **像素基线现在可以用了，但仍别用它证明"没改坏"。**
+> 它抓的是"明显改动"，细粒度回归靠 ①②。另外**跑验收时别动鼠标**
+> （`_mouse_aiming()` 读操作系统鼠标速度，会整块改变视野锥）。
 
 ### ⚠️ 关于「源码文本断言」
 
@@ -174,7 +203,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1
 
 ### 环境
 - **Godot 子进程写不了 `user://`**（沙箱）—— 存档走 `SaveManager._resolve_path()` 的回退
-- **Windows PowerShell 5.1 不带 BOM 就按 ANSI 读 `.ps1`** —— 中文会变乱码并让解析器崩
+- **Windows PowerShell 5.1 不带 BOM 就按 ANSI 读 `.ps1`** —— 中文会变乱码并让解析器崩。
+  ⚠️ **W-00 实测又踩了两次**：**编辑工具保存时会去掉 BOM**，于是
+  `tools\check_determinism.ps1` 一保存就"坏"，报的还是完全指不到 BOM 的错
+  （`Missing expression after ','` / 字符串没有结束符）。**改完 `.ps1` 必须补 BOM 并自检**：
+  ```powershell
+  $p='tools\x.ps1'; $b=[System.IO.File]::ReadAllBytes($p)
+  if (-not ($b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)) {
+      [System.IO.File]::WriteAllBytes($p, ([byte[]](0xEF,0xBB,0xBF)) + $b) }
+  $errs=$null; $null=[System.Management.Automation.Language.Parser]::ParseFile($p,[ref]$null,[ref]$errs)
+  if($errs.Count){$errs[0].Message}else{'PARSE OK'}
+  ```
+  现有 `_test_project_hygiene` 只查 `.gd/.json/.cfg/.godot/.tscn/.tres`，**恰好漏了 `.ps1`**。
+  另外**加载 `.gd` 时也别用 `Set-Content` 管道**（会把 UTF-8 中文写成乱码，
+  WorkBuddy 的 `s11_adversarial.gd` 就这么坏过一次）—— 要原样复制就用 `cmd /c "git show ... > file"`。
 - **别在 PowerShell here-string 里嵌 Python** —— 引号会被吃、`$` 会被插值。
   写成独立 `.py` 文件（`tools/compare_images.py` 就是因此拆出来的）
 - **Godot 每次启动都往 stderr 写两条无害提示**（`user://logs/godot.log`、根证书库）——
