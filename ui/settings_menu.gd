@@ -63,7 +63,7 @@ func _fit_viewport() -> void:
 
 func _build() -> void:
 	var bg := ColorRect.new()
-	bg.color = Color(0.04, 0.05, 0.07, 0.94)
+	bg.color = UITokens.fade(UITokens.BG_DEEP, 0.94)
 	bg.mouse_filter = Control.MOUSE_FILTER_STOP
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
@@ -92,7 +92,7 @@ func _build() -> void:
 	bar_row.add_theme_constant_override("separation", 12)
 	bar.add_child(bar_row)
 
-	var title := _label("设置", 26, Color(0.95, 0.97, 1.0))
+	var title := _label("设置", 26, UITokens.TEXT_HI)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	bar_row.add_child(title)
@@ -102,7 +102,7 @@ func _build() -> void:
 	resume_top.use_hold = false
 	resume_top.base_radius = 30.0
 	resume_top.custom_minimum_size = Vector2(150, 76)
-	resume_top.accent = Color(0.42, 0.82, 0.52)
+	resume_top.accent = UITokens.SUCCESS
 	resume_top.pressed_down.connect(close)
 	bar_row.add_child(resume_top)
 
@@ -111,7 +111,7 @@ func _build() -> void:
 	hb_top.use_hold = false
 	hb_top.base_radius = 30.0
 	hb_top.custom_minimum_size = Vector2(170, 76)
-	hb_top.accent = Color(0.85, 0.62, 0.42)
+	hb_top.accent = UITokens.ACCENT
 	hb_top.pressed_down.connect(func():
 		close()
 		went_hideout.emit())
@@ -138,7 +138,7 @@ func _build() -> void:
 	margin.add_child(_root)
 
 	# ── 玩法辅助 ──
-	_root.add_child(_label("辅助瞄准", 15, Color(0.72, 0.80, 0.92)))
+	_root.add_child(_label("辅助瞄准", 15, UITokens.TEXT))
 	var assist := HBoxContainer.new()
 	assist.add_theme_constant_override("separation", 8)
 	_root.add_child(assist)
@@ -147,7 +147,7 @@ func _build() -> void:
 	assist.add_child(_toggle("视野跟随", "vision_follows_lock"))
 
 	# ── 无障碍（spec §7.3 第 4 条）──
-	_root.add_child(_label("画面与手感", 15, Color(0.72, 0.80, 0.92)))
+	_root.add_child(_label("画面与手感", 15, UITokens.TEXT))
 	var acc := HBoxContainer.new()
 	acc.add_theme_constant_override("separation", 8)
 	_root.add_child(acc)
@@ -162,7 +162,7 @@ func _build() -> void:
 	acc2.add_child(_toggle("白模地图", "whitebox"))
 
 	# ── 按键说明（用户明确要求："f1 到 f4 没有说明"）──
-	_root.add_child(_label("按键", 15, Color(0.72, 0.80, 0.92)))
+	_root.add_child(_label("按键", 15, UITokens.TEXT))
 	var keys := _label(
 		"  WASD / 方向键    移动\n"
 		+ "  鼠标移动          瞄准\n"
@@ -180,7 +180,7 @@ func _build() -> void:
 		+ "  F4                特效强度 减半/全开\n"
 		+ "  M                 静音\n"
 		+ "  安卓返回键         暂停（打开本菜单）",
-		13, Color(0.78, 0.83, 0.90))
+		13, UITokens.TEXT)
 	_root.add_child(keys)
 
 	# 结尾的「继续 / 返回藏身处」已经移到【顶部固定栏】了（见 _build 开头）。
@@ -188,7 +188,7 @@ func _build() -> void:
 	# 玩家按 ESC 后完全看不到（真机反馈："esc 了看不到继续"）。
 	_root.add_child(_label(
 		"（按 ESC 或点右上角「继续」关闭本菜单）",
-		12, Color(0.55, 0.60, 0.68)))
+		12, UITokens.TEXT_LOW))
 
 
 var _bottom_hb: TouchButton = null
@@ -218,7 +218,7 @@ func _toggle(label: String, key: String) -> TouchButton:
 func _paint(b: TouchButton, key: String, label: String) -> void:
 	var on := _read_setting(key)
 	b.label_text = "%s\n%s" % [label, "开" if on else "关"]
-	b.accent = Color(0.42, 0.82, 0.52) if on else Color(0.45, 0.48, 0.55)
+	b.accent = UITokens.SUCCESS if on else UITokens.TEXT_LOW
 
 
 ## 读设置。

@@ -16,8 +16,9 @@ config/name="搜打撤"
 config/description="2D 像素俯视搜打撤 · 单机 PvE · 完全离线"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://art/icon.png"
-; 主场景 = 可玩的突袭场景（表现层最小闭环）
-run/main_scene="res://view/raid_scene.tscn"
+; 主场景 = 主菜单（主页）。流程：主菜单 -> 藏身处 -> 突袭 -> 结算 -> 藏身处…
+; 早先是 raid_scene（一启动就掉进战局，且没有退出游戏的出口）。
+run/main_scene="res://view/main_menu.tscn"
 
 [display]
 

@@ -67,7 +67,7 @@ func _build() -> void:
 		get_viewport().size_changed.connect(_fit_viewport)
 
 	var bg := ColorRect.new()
-	bg.color = Color(0.05, 0.06, 0.08, 0.95)
+	bg.color = UITokens.fade(UITokens.BG_DEEP, 0.95)
 	bg.mouse_filter = Control.MOUSE_FILTER_STOP
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
@@ -89,10 +89,10 @@ func _build() -> void:
 	row.add_theme_constant_override("separation", 12)
 	bar.add_child(row)
 
-	_title = _mk("商人", 24, Color(0.95, 0.97, 1.0))
+	_title = _mk("商人", 24, UITokens.TEXT_HI)
 	_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(_title)
-	_wallet = _mk("", 16, Color(0.95, 0.82, 0.40))
+	_wallet = _mk("", 16, UITokens.ACCENT)
 	_wallet.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(_wallet)
 
@@ -105,7 +105,7 @@ func _build() -> void:
 	close_btn.use_hold = false
 	close_btn.base_radius = 28.0
 	close_btn.custom_minimum_size = Vector2(140, 72)
-	close_btn.accent = Color(0.85, 0.55, 0.45)
+	close_btn.accent = UITokens.DANGER
 	close_btn.pressed_down.connect(close)
 	row.add_child(close_btn)
 
@@ -117,7 +117,7 @@ func _build() -> void:
 	_buy_box = _column(cols, "商人在售（点一下买）")
 	_sell_box = _column(cols, "我的仓库（点一下卖）")
 
-	_hint = _mk("", 13, Color(0.68, 0.74, 0.84))
+	_hint = _mk("", 13, UITokens.TEXT)
 	var hm := MarginContainer.new()
 	hm.add_theme_constant_override("margin_left", 20)
 	hm.add_theme_constant_override("margin_bottom", 10)
@@ -139,7 +139,7 @@ func _column(parent: Node, title: String) -> VBoxContainer:
 	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_theme_constant_override("separation", 2)
 	parent.add_child(box)
-	box.add_child(_mk(title, 15, Color(0.72, 0.80, 0.92)))
+	box.add_child(_mk(title, 15, UITokens.TEXT))
 	var sc := ScrollContainer.new()
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -190,7 +190,7 @@ func _refresh() -> void:
 		var total := unit * n
 		var can := _hideout.wallet >= total
 		_buy_box.add_child(_row("%s x%d" % [d.name, n], "%d 元" % total,
-			Color(0.45, 0.72, 0.95) if can else Color(0.42, 0.45, 0.50),
+			UITokens.INFO if can else UITokens.BORDER,
 			func(): _do_buy(id, n)))
 	# ── 仓库可卖 ──
 	_clear(_sell_box)
@@ -209,10 +209,10 @@ func _refresh() -> void:
 		var name_ := str(d2.name) if d2 != null else id
 		var unit2 := int(round(float(d2.value) * _hideout.sell_ratio())) if d2 != null else 0
 		_sell_box.add_child(_row("%s x%d" % [name_, int(counts[id])],
-			"卖 %d 元/个" % unit2, Color(0.82, 0.72, 0.42),
+			"卖 %d 元/个" % unit2, UITokens.ACCENT,
 			func(): _do_sell(id, 1)))
 	if order.is_empty():
-		_sell_box.add_child(_mk("（仓库是空的）", 13, Color(0.60, 0.64, 0.70)))
+		_sell_box.add_child(_mk("（仓库是空的）", 13, UITokens.TEXT_LOW))
 
 
 func _row(label: String, price: String, accent: Color, cb: Callable) -> Control:

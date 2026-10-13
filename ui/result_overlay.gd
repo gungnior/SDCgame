@@ -47,7 +47,7 @@ func _fit_viewport() -> void:
 
 func _build() -> void:
 	_panel = ColorRect.new()
-	_panel.color = Color(0.03, 0.04, 0.06, 0.82)
+	_panel.color = UITokens.fade(UITokens.BG_DEEP, 0.82)
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP   # 挡住下层，防止误触摇杆
 	# 零锚点：尺寸由 _layout() 手动给（避免锚点覆盖 size 的警告）
 	_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
@@ -60,21 +60,21 @@ func _build() -> void:
 
 	_body = Label.new()
 	_body.add_theme_font_size_override("font_size", 15)
-	_body.add_theme_color_override("font_color", Color(0.80, 0.84, 0.90))
+	_body.add_theme_color_override("font_color", UITokens.TEXT)
 	_body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_panel.add_child(_body)
 
 	_btn_restart = TouchButton.new()
 	_btn_restart.label_text = "再来一局"
 	_btn_restart.use_hold = false
-	_btn_restart.accent = Color(0.42, 0.82, 0.52)
+	_btn_restart.accent = UITokens.SUCCESS
 	_panel.add_child(_btn_restart)
 	_btn_restart.pressed_down.connect(func(): restart_requested.emit())
 
 	_btn_hideout = TouchButton.new()
 	_btn_hideout.label_text = "回藏身处"
 	_btn_hideout.use_hold = false
-	_btn_hideout.accent = Color(0.85, 0.72, 0.36)
+	_btn_hideout.accent = UITokens.ACCENT
 	_panel.add_child(_btn_hideout)
 	_btn_hideout.pressed_down.connect(func(): hideout_requested.emit())
 
@@ -121,7 +121,7 @@ func show_result(win: bool, stat_lines: Array) -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_title.text = "撤离成功" if win else "阵 亡"
 	_title.add_theme_color_override("font_color",
-		Color(0.45, 0.92, 0.55) if win else Color(0.95, 0.38, 0.36))
+		UITokens.SUCCESS if win else UITokens.DANGER)
 	_body.text = "\n".join(stat_lines)
 	_layout()
 	# 把摇杆/按钮也藏起来（结算时它们没有意义，还会挡住按钮）
