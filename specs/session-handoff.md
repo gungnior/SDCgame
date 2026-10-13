@@ -10,26 +10,31 @@
 
 ## 🔴 最新一轮（2026-10-13 · WorkBuddy）：git 历史落地（为两人协作清地基）
 
-> 交接时间：2026-10-13 · 执行：WorkBuddy · 提交 `fb98ee5`（17 个新提交，`fe63a0e..fb98ee5`）
+> 交接时间：2026-10-13 · 执行：WorkBuddy · 分支 `main`，76 个提交，**工作树干净、未推远端**
 > 任务板：[workboard.md](workboard.md) · 提交地图：[git-history-bootstrap.md](git-history-bootstrap.md)
 
-**① 一句话**：动手前 73 改 + 86 新文件全部未提交（横跨十几轮），已拆成 17 个逻辑提交，
-工作树清零，`verify_all.ps1 -Fast` 退出码 0（1555 单测 + 105 集成 + 数据 0 错 0 警）。
+**① 一句话**：动手前 73 改 + 86 新文件全部未提交（横跨十几轮），已拆成逻辑提交并追加
+remote 配置、push 门禁、MIT 许可证全线同步；`verify_all.ps1 -Fast` 退出码 0
+（1555 单测 + 105 集成 + 数据 0 错 0 警）。
 
-**② 改了哪些**：只动了 git 历史 + `.gitignore`（补 `.workbuddy/`）+ 三份 docs
-（`git-history-bootstrap.md` / `collab-push-checklist.md` + 任务板交接）。
-**代码零改动**（提交前后树与 HEAD 零差异，验收数字不变即是证明）。
+**② 改了哪些**：git 历史 + `.gitignore` + 五份 docs（`git-history-bootstrap.md` /
+`collab-push-checklist.md` / 任务板 / 交接 / 许可证同步）。**游戏代码零改动**。
+另交付 `tools/pre_push_check.ps1`（push 前 7 项门禁，实跑两轮，BOM 检查精修成内容感知）。
 两个一次性补丁脚本移进 `_install/tmp/` 本地留底。
-另交付 `tools/pre_push_check.ps1`：push 前 7 项门禁（脏树/超大文件/产物入库/密钥/
-含中文 ps1 的 BOM/验收退出码/remote），已实跑两轮，BOM 检查为首轮实跑后精修成内容感知。
 
 **③ 复跑命令**：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1 -Fast`
 
-**④ 没验证的**：remote 未建（W-07，需拥有者账号操作）；像素基线 ④ 本轮仍跳过；
-拆成 17 个提交后**没有逐个提交单独跑验收**（内容与已验证树逐字节相同，逐个跑是浪费，
-但若未来要挑中间提交 bisect，记得那一版的验收状态未知）。
+**④ 没验证的**：
+- **远端还没推**——拥有者需在自己终端跑 `git push -u origin main --force`
+  （远端 `github.com/gungnior/SDCgame` 有一个 GitHub 自动生成的 initial commit，
+  其内容已全部保留进本地历史，强推不丢东西；沙箱代理导致本会话推不了，
+  schannel 吊销检查过不去，只有 `GIT_SSL_NO_VERIFY=true` 才通——本机不受影响）
+- **⭐ 许可证已由 GPL-3.0 改为 MIT**（2026-10-13 拥有者拍板，以 GitHub 建库选择为准）。
+  `AGENTS.md` §5 红线等现行声明已全线同步；`feasibility.md` D-09 决策记录保留原文加推翻注记。
+  **后续一切"项目是 GPL-3.0"的旧表述以本文档为准**
+- 像素基线 ④ 仍跳过；拆出的提交没有逐个单独跑验收（内容与已验证树逐字节相同）
 
-**⑤ 下一步**：W-07 建 remote → 两人各自 clone + 自备 `_install/` 工具链 → 各跑一次验收再开工。
+**⑤ 下一步**：拥有者执行 push → 两人各自 clone + 自备 `_install/` 工具链 → 各跑一次验收再开工。
 然后按门 1 的两个缺口（死亡痛感/难度平衡）分工，见 [progress-report.md](progress-report.md) §4。
 
 ---

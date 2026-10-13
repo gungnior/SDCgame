@@ -89,18 +89,31 @@ hitstop 的墙钟问题**是真的**（单位级实测：同一个 120ms 请求�
 
 ## 待办
 
-### W-07 · 建共享 remote（两人协作的前提）—— 待拥有者操作
+### W-07 · 建共享 remote（两人协作的前提）—— 🔶 库已建、内容就绪，**差最后一条 push（拥有者终端执行）**
 
-**背景**：本地历史已清零并拆成 16 个逻辑提交（见 [git-history-bootstrap.md](git-history-bootstrap.md)），
-但仓库**至今没有 remote**，第二个人无法 clone。`.gitignore` 已挡掉 `_install/`（2.2G 工具链）、
-`build/`（534M APK）、`.godot/`，入库仅 362 个文本/小文件。
+**背景**：本地历史已拆成逻辑提交（见 [git-history-bootstrap.md](git-history-bootstrap.md)），
+remote 已配置：`https://github.com/gungnior/SDCgame.git`。
 
-**要做**：① 拥有者在 GitHub/Gitee 建空仓库（项目 MIT 免费开源，公开推符合红线；
-国内访问优先 Gitee）；② `git remote add origin <url>` + `git push -u origin master`；
-③ 两人各自 clone，`_install/` 工具链每人本地自备（AGENTS.md 已要求全脚本相对定位，
-clone 到任何盘符都能跑验收）；④ 各跑一次 `verify_all.ps1` 确认退出码 0 再开工。
+**已查明**：远端**不是空库**——GitHub 建库时自动生成了 initial commit（MIT LICENSE + 两行 README，
+`d1a56fe5`）。该提交内容已全部保留进本地历史（MIT 原文原样在 `LICENSE`，库主原话留在 README 标题下），
+因此首次推送用 `--force` 不会丢任何东西。
 
-**写入范围**：无仓库写入（remote 是账号侧操作）。
+**要做**：拥有者在**自己的终端**（沙箱代理不影响本机直连）执行：
+
+```powershell
+cd <仓库路径>
+git push -u origin main --force
+```
+
+然后两人各自 `git clone`，`_install/` 工具链每人本地自备，各跑一次 `verify_all.ps1` 确认退出码 0 再开工。
+⚠️ 本会话沙箱走 MITM 代理，git 的 schannel 吊销检查过不去（只有 `GIT_SSL_NO_VERIFY=true` 才通）——
+这是沙箱网络的事，拥有者本机不受影响。
+
+**⚠️ 连带变更（2026-10-13 拥有者拍板）**：项目许可证由 **GPL-3.0 改为 MIT**（以建库选择为准）。
+`AGENTS.md` §5 红线、README、action-plan/progress-report/art-pipeline/tech-stack 等现行声明已全线同步；
+`feasibility.md` D-09 等**决策记录保留原文、加推翻注记**（不改写历史）。
+
+**写入范围**：本轮只改 git 配置/历史与文档，未动游戏代码。
 
 ---
 
@@ -299,6 +312,7 @@ enemies 4→7（新增 C 普通敌人 + 1 Boss，ranged 反应时间均 ≥ 0.25
 | 修「地图生成坏种子 → 刷出 0 敌人」 | **WorkBuddy** | **0** | `sim/mapgen/map_generator.gd` 的 `MAX_ATTEMPTS` 24→64（诊断 16 种子：坏种子要到第 36 次才成功） |
 | **git 历史落地：未提交的全部改动拆成 16 个逻辑提交，工作树清零** | **WorkBuddy** | **0**（1555 单测 + 105 集成 + 数据 0 错 0 警） | `fe63a0e..c38f9c9`（本地，**未推 remote**）· 提交地图与拆分理由见 [git-history-bootstrap.md](git-history-bootstrap.md) |
 | **push 前门禁：`tools/pre_push_check.ps1`（7 项检查）+ 清单文档** | **WorkBuddy** | 脚本已实跑两轮（含一次全量验收 exit 0） | `b50edc6`、`ef6b361` · [collab-push-checklist.md](collab-push-checklist.md) |
+| **remote 配置 + 许可证拍板 MIT + 文档全线同步（分支改名 main）** | **WorkBuddy** | 0（验收未重跑：本轮零代码改动；推前请拥有者本机复跑门禁） | `9105114`、`b0af01b`、`3bac6e6` · **push 待拥有者执行，见 W-07** |
 
 ---
 
