@@ -1,0 +1,74 @@
+[
+  {
+    "id": "container_crate",
+    "name": "木箱",
+    "capacity": 12,
+    "loot_table_id": "loot_common",
+    "search_time": 1.5,
+    "desc": "最常见的容器，什么都有点",
+    "stage": "B"
+  },
+  {
+    "id": "container_supply_case",
+    "name": "补给箱",
+    "capacity": 16,
+    "loot_table_id": "loot_extract",
+    "search_time": 2.5,
+    "desc": "撤离点附近的补给，价值高",
+    "stage": "B"
+  },
+  {
+    "id": "container_weapon_rack",
+    "name": "枪架",
+    "capacity": 10,
+    "loot_table_id": "loot_armory",
+    "search_time": 2.0,
+    "desc": "军械库的枪械架",
+    "stage": "C"
+  },
+  {
+    "id": "container_ammo_box",
+    "name": "弹药箱",
+    "capacity": 14,
+    "loot_table_id": "loot_ammo",
+    "search_time": 1.5,
+    "desc": "各口径弹药，含穿甲弹",
+    "stage": "C"
+  },
+  {
+    "id": "container_med_cabinet",
+    "name": "药柜",
+    "capacity": 10,
+    "loot_table_id": "loot_medical",
+    "search_time": 2.0,
+    "desc": "医疗室药品柜",
+    "stage": "C"
+  },
+  {
+    "id": "container_locker",
+    "name": "储物柜",
+    "capacity": 12,
+    "loot_table_id": "loot_dorm",
+    "search_time": 1.5,
+    "desc": "宿舍区的私人储物柜",
+    "stage": "C"
+  },
+  {
+    "id": "container_cargo_crate",
+    "name": "货运箱",
+    "capacity": 20,
+    "loot_table_id": "loot_warehouse",
+    "search_time": 2.0,
+    "desc": "仓库大件货运箱",
+    "stage": "C"
+  },
+  {
+    "id": "container_lab_case",
+    "name": "实验柜",
+    "capacity": 12,
+    "loot_table_id": "loot_lab",
+    "search_time": 2.5,
+    "desc": "实验室的加密柜",
+    "stage": "C"
+  }
+]

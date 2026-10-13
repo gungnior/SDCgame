@@ -9,6 +9,8 @@
     "enemy_budget_min": 0,
     "enemy_budget_max": 0,
     "min_graph_dist": 0,
+    "containers": [],
+    "weight": 0,
     "stage": "B"
   },
   {
@@ -21,6 +23,14 @@
     "enemy_budget_min": 1,
     "enemy_budget_max": 2,
     "min_graph_dist": 1,
+    "containers": [
+      {
+        "container_id": "container_crate",
+        "count_min": 1,
+        "count_max": 2
+      }
+    ],
+    "weight": 6,
     "stage": "B"
   },
   {
@@ -33,6 +43,119 @@
     "enemy_budget_min": 1,
     "enemy_budget_max": 2,
     "min_graph_dist": 5,
+    "containers": [
+      {
+        "container_id": "container_supply_case",
+        "count_min": 1,
+        "count_max": 1
+      }
+    ],
+    "weight": 0,
     "stage": "B"
+  },
+  {
+    "id": "room_armory",
+    "name": "军械库",
+    "room_type": "common",
+    "min_count": 1,
+    "max_count": 3,
+    "loot_table_id": "loot_armory",
+    "enemy_budget_min": 2,
+    "enemy_budget_max": 3,
+    "min_graph_dist": 3,
+    "containers": [
+      {
+        "container_id": "container_weapon_rack",
+        "count_min": 1,
+        "count_max": 1
+      },
+      {
+        "container_id": "container_ammo_box",
+        "count_min": 1,
+        "count_max": 2
+      }
+    ],
+    "weight": 2,
+    "stage": "C"
+  },
+  {
+    "id": "room_medical",
+    "name": "医疗室",
+    "room_type": "common",
+    "min_count": 1,
+    "max_count": 3,
+    "loot_table_id": "loot_medical",
+    "enemy_budget_min": 1,
+    "enemy_budget_max": 2,
+    "min_graph_dist": 2,
+    "containers": [
+      {
+        "container_id": "container_med_cabinet",
+        "count_min": 1,
+        "count_max": 2
+      }
+    ],
+    "weight": 2,
+    "stage": "C"
+  },
+  {
+    "id": "room_dorm",
+    "name": "宿舍区",
+    "room_type": "common",
+    "min_count": 2,
+    "max_count": 5,
+    "loot_table_id": "loot_dorm",
+    "enemy_budget_min": 1,
+    "enemy_budget_max": 2,
+    "min_graph_dist": 2,
+    "containers": [
+      {
+        "container_id": "container_locker",
+        "count_min": 1,
+        "count_max": 3
+      }
+    ],
+    "weight": 4,
+    "stage": "C"
+  },
+  {
+    "id": "room_warehouse",
+    "name": "仓库",
+    "room_type": "common",
+    "min_count": 1,
+    "max_count": 3,
+    "loot_table_id": "loot_warehouse",
+    "enemy_budget_min": 2,
+    "enemy_budget_max": 3,
+    "min_graph_dist": 3,
+    "containers": [
+      {
+        "container_id": "container_cargo_crate",
+        "count_min": 2,
+        "count_max": 4
+      }
+    ],
+    "weight": 3,
+    "stage": "C"
+  },
+  {
+    "id": "room_lab",
+    "name": "实验室",
+    "room_type": "common",
+    "min_count": 1,
+    "max_count": 2,
+    "loot_table_id": "loot_lab",
+    "enemy_budget_min": 1,
+    "enemy_budget_max": 2,
+    "min_graph_dist": 4,
+    "containers": [
+      {
+        "container_id": "container_lab_case",
+        "count_min": 1,
+        "count_max": 2
+      }
+    ],
+    "weight": 1,
+    "stage": "C"
   }
 ]

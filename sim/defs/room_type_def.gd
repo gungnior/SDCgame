@@ -12,6 +12,30 @@ const TYPES := ["spawn", "common", "extract"]
 const MIN_EXTRACT_COUNT := 2      ## 撤离点至少两个，否则玩家无选择
 const MIN_EXTRACT_GRAPH_DIST := 4 ## 防止出生即撤离
 
+
+## 该房间会生成的一个容器（及其数量区间）。
+## 这是「房间类型 → 容器 → 物品」三级对应关系的中间那一环。
+class ContainerRef extends RefCounted:
+	var container_id: String = ""
+	var count_min: int = 0
+	var count_max: int = 0
+
+	static func from_dict(d: Dictionary) -> ContainerRef:
+		var o := ContainerRef.new()
+		o.container_id = str(d.get("container_id", ""))
+		o.count_min = int(d.get("count_min", 0))
+		o.count_max = int(d.get("count_max", 0))
+		return o
+
+	## 抽这个容器生成几个。rng 必须注入（T-32）。
+	func roll_count(rng: SimRng) -> int:
+		if count_max <= count_min:
+			return count_min
+		return rng.randi_range(count_min, count_max)
+
+	func _to_string() -> String:
+		return "ContainerRef(%s x%d-%d)" % [container_id, count_min, count_max]
+
 var id: String = ""
 var name: String = ""
 var room_type: String = "common"
@@ -22,6 +46,11 @@ var enemy_budget_min: int = 0
 var enemy_budget_max: int = 0
 var min_graph_dist: int = 0
 var stage: String = "B"
+## 该房间生成哪些容器（2026-10-13）
+var containers: Array[ContainerRef] = []
+## 主题分配权重。**多个 common 类房间类型**按它按比例分配到普通房间上。
+## 0 = 不参与（spawn/extract 用）。
+var weight: int = 0
 
 
 static func from_dict(d: Dictionary) -> RoomTypeDef:
@@ -36,6 +65,11 @@ static func from_dict(d: Dictionary) -> RoomTypeDef:
 	o.enemy_budget_max = int(d.get("enemy_budget_max", 0))
 	o.min_graph_dist = int(d.get("min_graph_dist", 0))
 	o.stage = str(d.get("stage", "B"))
+	o.weight = int(d.get("weight", 0))
+	var raw: Array = d.get("containers", [])
+	for c in raw:
+		if c is Dictionary:
+			o.containers.append(ContainerRef.from_dict(c))
 	return o
 
 

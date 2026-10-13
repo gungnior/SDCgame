@@ -1,0 +1,71 @@
+[
+  {
+    "id": "map_forest",
+    "name": "森林",
+    "map_w": 56,
+    "map_h": 56,
+    "enemy_density": 0.7,
+    "tile_theme": "dirt",
+    "room_weights": {
+      "room_common": 6,
+      "room_dorm": 2,
+      "room_warehouse": 1,
+      "room_armory": 1,
+      "room_medical": 1
+    },
+    "enemy_weights": {
+      "enemy_infected": 6,
+      "enemy_scav": 3,
+      "enemy_raider": 1
+    },
+    "desc": "植被茂密的荒野，感染体多、武装分子少",
+    "stage": "C"
+  },
+  {
+    "id": "map_urban",
+    "name": "城区",
+    "map_w": 64,
+    "map_h": 64,
+    "enemy_density": 1.1,
+    "tile_theme": "concrete",
+    "room_weights": {
+      "room_common": 4,
+      "room_dorm": 5,
+      "room_warehouse": 3,
+      "room_armory": 2,
+      "room_medical": 2
+    },
+    "enemy_weights": {
+      "enemy_infected": 2,
+      "enemy_scav": 4,
+      "enemy_raider": 4,
+      "enemy_marksman": 1
+    },
+    "desc": "废弃街区，宿舍与仓库密集，拾荒者与劫掠者混编",
+    "stage": "C"
+  },
+  {
+    "id": "map_military",
+    "name": "军事基地",
+    "map_w": 72,
+    "map_h": 72,
+    "enemy_density": 1.4,
+    "tile_theme": "metal",
+    "room_weights": {
+      "room_common": 2,
+      "room_armory": 5,
+      "room_warehouse": 4,
+      "room_medical": 3,
+      "room_lab": 2,
+      "room_dorm": 1
+    },
+    "enemy_weights": {
+      "enemy_scav": 2,
+      "enemy_raider": 5,
+      "enemy_marksman": 3,
+      "enemy_brute": 2
+    },
+    "desc": "守备森严的基地，军械库与实验室，重装单位出没",
+    "stage": "C"
+  }
+]

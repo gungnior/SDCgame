@@ -14,7 +14,12 @@ extends RefCounted
 ##
 ## 纯 RefCounted，无 Node 依赖，可 headless 单测。
 
-const MAX_ATTEMPTS := 24
+## ⚠️ 24 -> 64（2026-10-12 实测）：
+##   多数种子需要重试 **2~18 次**才能通过图论校验（房间多、撤离点距离约束难满足），
+##   24 次余量太小 —— 实测 seed 476761045 会**耗尽 24 次仍失败**，
+##   表现为"点开始下一局却生成不出地图 / 刷不出敌人"（集成测试正好撞到）。
+##   放宽到 64 后该 seed 可通过；这是**兜底余量**，不是约束本身的修复。
+const MAX_ATTEMPTS := 64
 const CYCLE_RATIO := 0.15          ## TinyKeep 用 15%
 const BSP_MIN_ROOM_CELLS := 3      ## 房间最小 3x3 逻辑格
 ## 出生点周围多少跳内不刷敌人。
@@ -38,11 +43,23 @@ var grid_h: int = 27
 ## 由 data/rooms.json 注入
 var _room_defs: Dictionary = {}
 
+## 地图主题（2026-10-13）。决定地图多大、房间配额、敌人池与密度、白模色调。
+##
+## ⚠️ **null = 旧行为**：普通房间只用同一个 room_common 定义、
+##    不按密度缩放敌人、不生成容器。这样所有既有测试（不传 theme）
+##    的行为**逐字节不变** —— 新能力全靠显式传主题开启。
+var theme: MapThemeDef = null
+## 本局实际刷出的可搜索容器总数（生成后统计）
+var container_total: int = 0
+
 
 ## 主入口。room_defs 是 {room_type_id: RoomTypeDef}。
 ## 成功返回 true；失败时 errors 里有原因。
-func generate(seed_value: int, room_defs: Dictionary, w: int = 27, h: int = 27) -> bool:
+## theme 传 null 时保持旧行为（见 theme 字段的说明）。
+func generate(seed_value: int, room_defs: Dictionary, w: int = 27, h: int = 27,
+		p_theme: MapThemeDef = null) -> bool:
 	_room_defs = room_defs
+	theme = p_theme
 	grid_w = w
 	grid_h = h
 	errors.clear()
@@ -92,6 +109,9 @@ func _try_generate(seed_value: int) -> bool:
 	# ⑥ 分配房间类型（按图距离）
 	if not _assign_room_types():
 		return false
+
+	# ⑥.5 容器布点（按房间类型挂靠；只有带主题时才生成）
+	_place_containers()
 
 	# ⑦ 校验：连通性 + 地图硬约束
 	if not grid.is_fully_connected():
@@ -232,6 +252,7 @@ func _try_assign_with_spawn(spawn_idx: int, spawn_def: RoomTypeDef, extract_def:
 		r.room_type_id = ""
 		r.loot_table_id = ""
 		r.enemy_budget = 0
+		r.container_spawns.clear()
 
 	var spawn_room := graph.get_room(spawn_idx)
 	spawn_room.room_type_id = spawn_def.id
@@ -249,13 +270,22 @@ func _try_assign_with_spawn(spawn_idx: int, spawn_def: RoomTypeDef, extract_def:
 		r.loot_table_id = extract_def.loot_table_id
 		r.enemy_budget = extract_def.roll_enemy_budget(rng)
 
+	# ── 普通房间：分配「房间主题」（可有多个 common 类定义）──
+	# theme == null 时退化为旧行为：全部用同一个 common 定义（room_common）。
+	var pool := _common_defs()
+	if pool.is_empty() and common_def != null:
+		pool.append(common_def)
 	for r in graph.rooms:
 		if r.room_type == "common" or r.room_type.is_empty():
 			r.room_type = "common"
-			if common_def != null:
-				r.room_type_id = common_def.id
-				r.loot_table_id = common_def.loot_table_id
-				r.enemy_budget = common_def.roll_enemy_budget(rng)
+			var cd: RoomTypeDef = _pick_common_def(pool)
+			if cd != null:
+				r.room_type_id = cd.id
+				r.loot_table_id = cd.loot_table_id
+				r.enemy_budget = cd.roll_enemy_budget(rng)
+
+	# ── 敌人密度：按地图主题把总数拉向「房间数 × density」──
+	_apply_enemy_density()
 
 	# ── 出生安全区 ──
 	# ⚠️ 实测（安卓真机）：没有这条时，玩家一出生就贴脸遇敌，几秒内被打死，
@@ -279,6 +309,109 @@ func _apply_spawn_safe_zone(spawn_idx: int) -> void:
 				cleared += 1
 			r.enemy_budget = 0
 	spawn_safe_cleared = cleared
+
+
+# ─────────────────── 房间主题 / 敌人密度 / 容器（2026-10-13）───────────────────
+
+## 所有 room_type == "common" 的定义，**按 id 稳定排序**（保证可复现）
+func _common_defs() -> Array[RoomTypeDef]:
+	var out: Array[RoomTypeDef] = []
+	for k in _room_defs:
+		var d: RoomTypeDef = _room_defs[k]
+		if d.room_type == "common":
+			out.append(d)
+	out.sort_custom(func(a, b): return a.id < b.id)
+	return out
+
+
+## 给一个普通房间抽「房间主题」（军械库 / 医疗室 / 宿舍 / 仓库 / 实验室 …）。
+##   · 有主题且主题里配了权重 -> 按 theme.room_weights 抽
+##   · 否则退回各定义自带的 `weight` 字段
+##   · theme == null -> 取第一个（= room_common），保持旧行为
+func _pick_common_def(pool: Array[RoomTypeDef]) -> RoomTypeDef:
+	if pool.is_empty():
+		return null
+	if theme == null:
+		return pool[0]
+	var keys: Array = []
+	var ws: Array = []
+	for d in pool:
+		var w := int(theme.room_weights.get(d.id, 0))
+		if w <= 0:
+			w = d.weight
+		if w > 0:
+			keys.append(d.id)
+			ws.append(w)
+	if keys.is_empty():
+		return pool[0]
+	var idx := rng.weighted_index(ws)
+	if idx < 0 or idx >= keys.size():
+		return pool[0]
+	var picked: RoomTypeDef = _room_defs.get(str(keys[idx]))
+	return picked if picked != null else pool[0]
+
+
+## 按地图主题的密度，把敌人总数缩放到「房间数 × enemy_density」。
+## ⚠️ 这就是用户说的"具体人数参考地图大小"：地图越大 -> 房间越多 -> 敌人越多，
+##    而密度本身由主题决定（森林稀疏、军事基地密集）。
+## theme == null 时不动（旧行为）。
+func _apply_enemy_density() -> void:
+	if theme == null:
+		return
+	var target := theme.target_enemy_count(graph.rooms.size())
+	var total := total_enemy_budget()
+	if target <= 0:
+		for r in graph.rooms:
+			r.enemy_budget = 0
+		return
+	if total <= 0:
+		return
+	var k := float(target) / float(total)
+	for r in graph.rooms:
+		if r.room_type == "spawn":
+			continue
+		r.enemy_budget = maxi(0, int(round(float(r.enemy_budget) * k)))
+
+
+## 按房间类型挂靠生成【容器布点】。
+## `room_type.containers[]` 里每条 ContainerRef 展开成 count_min~count_max 个具体位置。
+## ⚠️ 只布点、不抽物品：MapGenerator 拿不到 loot_tables（分层），
+##    物品抽取由 raid_scene 用掉落表执行。
+## theme == null 时不生成（保持旧行为不变）。
+func _place_containers() -> void:
+	container_total = 0
+	if theme == null:
+		return
+	for r in graph.rooms:
+		r.container_spawns.clear()
+		var rd: RoomTypeDef = _room_defs.get(r.room_type_id)
+		if rd == null:
+			continue
+		for cr in rd.containers:
+			var n := cr.roll_count(rng)
+			for _i in n:
+				var p := _random_floor_in(r)
+				if p.x >= 0:
+					r.container_spawns.append({"container_id": cr.container_id, "pos": p})
+					container_total += 1
+
+
+## 在房间矩形内随机找一个可走格（布容器用）。找不到返回 (-1, -1)。
+func _random_floor_in(r: Room) -> Vector2i:
+	var w := maxi(1, r.rect.size.x)
+	var h := maxi(1, r.rect.size.y)
+	for _t in 16:
+		var c := Vector2i(
+			rng.randi_range(r.rect.position.x, r.rect.position.x + w - 1),
+			rng.randi_range(r.rect.position.y, r.rect.position.y + h - 1))
+		if grid.get_cell(c) == LogicalGrid.Cell.FLOOR:
+			return c
+	return Vector2i(-1, -1)
+
+
+## 本局刷出的可搜索容器总数
+func total_container_count() -> int:
+	return container_total
 
 
 func _shuffle(a: Array[int]) -> void:
@@ -368,7 +501,11 @@ func to_ascii() -> String:
 
 
 func summary() -> String:
-	return "seed=%d 尝试%d次 房间=%d 边=%d(MST %d/环 %d) 可走格=%d 敌人预算=%d" % [
+	var extra := ""
+	if theme != null:
+		extra = " 主题=%s %dx%d 密度%.1f 容器=%d" % [
+			theme.name, grid_w, grid_h, theme.enemy_density, container_total]
+	return "seed=%d 尝试%d次 房间=%d 边=%d(MST %d/环 %d) 可走格=%d 敌人预算=%d%s" % [
 		used_seed, attempts_used, graph.rooms.size(), graph.edges.size(),
 		graph.mst_edges.size(), graph.cycle_edges.size(),
-		grid.walkable_count(), total_enemy_budget()]
+		grid.walkable_count(), total_enemy_budget(), extra]

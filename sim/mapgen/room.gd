@@ -12,6 +12,11 @@ var room_type: String = "common"   ## spawn / common / extract
 var depth: int = 0                 ## 距出生点的图距离（跳数）
 var enemy_budget: int = 0
 var loot_table_id: String = ""
+## 该房间要生成的可搜索容器：`[{container_id: String, pos: Vector2i}, ...]`
+## 由 `RoomTypeDef.containers[]` 展开而来（2026-10-13）。
+## MapGenerator 只负责**布点**；具体抽什么物品由 raid_scene 用掉落表执行
+## （sim/mapgen 拿不到 loot_tables —— 保持分层干净）。
+var container_spawns: Array = []
 
 
 func _init(rid: int = -1, r: Rect2i = Rect2i()) -> void:
