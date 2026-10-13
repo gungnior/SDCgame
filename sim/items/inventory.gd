@@ -167,6 +167,38 @@ func can_add(item_id: String, count: int) -> bool:
 	return capacity >= count
 
 
+## 本背包**还能再装下多少个**该物品（不实际修改）。
+## 用于「自定义拾取数量」的上限提示（真机反馈 #5）：
+## 让玩家知道"最多能拿几个"，而不是输入一个数然后被告知放不下。
+func fit_count(item_id: String, want: int) -> int:
+	var d: ItemDef = _items.get(item_id)
+	if d == null or want <= 0:
+		return 0
+	var capacity := 0
+	var per_slot := d.stack_max if d.is_stackable() else 1
+	for s in slots:
+		if s == null:
+			capacity += per_slot
+		elif d.is_stackable() and s["item_id"] == item_id:
+			capacity += maxi(0, d.stack_max - int(s["count"]))
+	return mini(want, capacity)
+
+
+## 把"想拿的数量"夹到合法区间（真机反馈 #5：自定义拾取数量）。
+##
+## `want <= 0` 语义 = **全部**（与 Hideout.stash_to_pack / pack_to_stash 一致）；
+## `avail` 是源里实际有的数量。返回 0 表示"一个都拿不了"。
+##
+## 纯静态 -> 可 headless 单测（UI 层的 -/+ 步进、一半、全部都调它，
+## 保证"界面算出来的数"和"真正搬走的数"用的是同一套规则）。
+static func clamp_amount(want: int, avail: int) -> int:
+	if avail <= 0:
+		return 0
+	if want <= 0:
+		return avail
+	return mini(want, avail)
+
+
 ## 移到另一个背包（拾取/转移）。返回未转移的数量。
 func transfer_to(dst: Inventory, item_id: String, count: int) -> int:
 	var avail := mini(count, count_of(item_id))

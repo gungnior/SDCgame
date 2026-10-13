@@ -46,12 +46,31 @@ func reset(h: int = 100, a: int = 0) -> void:
 
 ## 受伤。护甲先吸收一部分，剩余进 HP。返回实际掉的血。
 func take_damage(amount: int) -> int:
+	return _apply_damage(amount, ARMOR_ABSORB)
+
+
+## 按【弹型穿透比例】结算一次受击 —— 弹型系统（穿甲/标准/肉伤）的落点。
+##
+## through_ratio 由 `DamageModel.armor_multiplier(pen, armor)` 得出（0~1）：
+##   穿甲弹 pen 高 -> 接近 1 -> 护甲基本吃不到伤害；
+##   肉伤弹 pen 低 -> 偏低  -> 护甲吃掉更多。
+##
+## ⚠️ 为什么另开一个方法而不改 take_damage：
+##    旧方法写死 ARMOR_ABSORB=0.55，`s05`/`s10` 等既有测试直接按这个值断言。
+##    保留旧签名 = 那批测试**逐字节不变**，新语义只在新路径上生效。
+func take_hit(amount: int, through_ratio: float) -> int:
+	var absorb := clampf(1.0 - through_ratio, 0.0, 1.0)
+	return _apply_damage(amount, absorb)
+
+
+## 受击结算的共同实现。absorb_ratio = 护甲吸收比例（0~1）。
+func _apply_damage(amount: int, absorb_ratio: float) -> int:
 	if dead or amount <= 0:
 		return 0
 	var dmg := amount
 
 	if armor > 0:
-		var absorbed := int(round(float(dmg) * ARMOR_ABSORB))
+		var absorbed := int(round(float(dmg) * absorb_ratio))
 		absorbed = mini(absorbed, armor)
 		armor -= absorbed
 		armor_absorbed += absorbed
