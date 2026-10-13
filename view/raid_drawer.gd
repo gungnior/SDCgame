@@ -285,12 +285,22 @@ func _draw() -> void:
 			var half: float = s.half_width * scene.CELL_PX
 			var side := Vector2(-d.y, d.x) * half
 			var tip: Vector2 = (s.origin + d * s.length) * scene.CELL_PX
-			draw_colored_polygon(PackedVector2Array([o + side, tip + side, tip - side, o - side]),
-				Color(1.0, 0.36, 0.30, 0.10))
-			var head: Vector2 = (s.origin + d * s.traveled) * scene.CELL_PX
-			var tail: Vector2 = (s.origin + d * maxf(s.traveled - 3.0, 0.0)) * scene.CELL_PX
-			draw_line(tail, head, Color(1.0, 0.78, 0.36, 0.9), maxf(2.0, half * 0.35))
-			draw_circle(head, 3.5, Color(1.0, 0.96, 0.78))
+			if s.is_warning():
+				# ── 预警阶段：只亮「瞄准线」，子弹还没出来 ──
+				# 闪烁越急 = 越快打出来。这是玩家反应时间的来源（见 LaneShot 文件头）。
+				var k: float = 1.0 - clampf(s.warn_left / maxf(s.warn_sec, 0.01), 0.0, 1.0)
+				var pulse: float = 0.35 + 0.45 * absf(sin(k * 12.0))
+				draw_colored_polygon(PackedVector2Array([o + side, tip + side, tip - side, o - side]),
+					Color(1.0, 0.30, 0.26, 0.06 + 0.05 * pulse))
+				draw_line(o, tip, Color(1.0, 0.42, 0.34, pulse), 1.5)
+				draw_circle(o, 4.0 + 2.0 * pulse, Color(1.0, 0.55, 0.40, pulse))
+			else:
+				draw_colored_polygon(PackedVector2Array([o + side, tip + side, tip - side, o - side]),
+					Color(1.0, 0.36, 0.30, 0.10))
+				var head: Vector2 = (s.origin + d * s.traveled) * scene.CELL_PX
+				var tail: Vector2 = (s.origin + d * maxf(s.traveled - 3.0, 0.0)) * scene.CELL_PX
+				draw_line(tail, head, Color(1.0, 0.78, 0.36, 0.9), maxf(2.0, half * 0.35))
+				draw_circle(head, 3.5, Color(1.0, 0.96, 0.78))
 
 	# ── 曳光 ──
 	# ⚠️ 早先 ttl 只有 0.06s（约 3.6 帧）且线很细，真机上"只听到枪声看不到子弹"。

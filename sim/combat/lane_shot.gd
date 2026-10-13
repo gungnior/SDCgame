@@ -21,12 +21,32 @@ extends RefCounted
 ##    11 格/秒时，6 格外的敌人给你约 0.55 秒 —— 足够做一次 0.18 秒的闪避。
 const DEFAULT_SPEED := 11.0
 
+## ── 开火前预警（telegraph，2026-10-13 追加）──
+#
+# 用户需求：A「开火前预警（0.12~0.18s 瞄准线）」，解决"贴脸必中"。
+#
+# 原来的问题：弹速固定 11 格/秒，3 格外的飞行时间只有 0.27 秒，
+# 扣掉一次 0.18 秒的闪避后只剩 **0.09 秒** —— 人类视觉反应约 0.25 秒，等于必中。
+#
+# 现在：开火后**先亮一段瞄准线**（不动、不判定），再飞出去。
+# 预警时长由距离反推，保证「预警 + 飞行」不低于 MIN_REACTION_SEC：
+#   warn = clamp(MIN_REACTION_SEC - 飞行时间, WARN_MIN, WARN_MAX)
+# 于是**贴脸自动获得更长的预警**，远处几乎不额外加 —— 公平性由公式保证，不靠手调。
+const WARN_MIN := 0.12
+const WARN_MAX := 0.20
+## 从「看到瞄准线」到「弹道抵达」的最低总时长（秒）
+const MIN_REACTION_SEC := 0.45
+
 var origin: Vector2 = Vector2.ZERO
 ## 开火瞬间锁定的方向（单位向量）。固定弹道 = 这个值之后**永不改变**。
 var dir: Vector2 = Vector2.RIGHT
 ## 半宽（逻辑格）。两侧各 1 身位 -> 总宽 2 身位。
 var half_width: float = BodyMetrics.LANE_HALF_WIDTH
 var speed: float = DEFAULT_SPEED
+## 本条弹道的预警时长（开火时按距离算好，见文件头公式）
+var warn_sec: float = 0.0
+## 预警剩余；> 0 表示「正在亮瞄准线」，此时弹道**不动也不做命中判定**
+var warn_left: float = 0.0
 var damage: int = 0
 ## 这条弹道能飞多远（开火时按射程与墙提前算好，含撞墙截断）
 var length: float = 0.0
@@ -74,6 +94,19 @@ func advance(delta: float, player_pos: Vector2) -> Dictionary:
 	if done:
 		out["finished"] = true
 		return out
+
+	# ── 预警阶段：只倒计时，前沿不动、不做命中判定 ──
+	# 这就是玩家的"反应时间"来源（见文件头的说明）。
+	# ⚠️ 预警**在本帧走完**时，余下的 delta 要继续用于飞行 ——
+	#    否则弹道会凭空"呆滞一帧"（60fps 下 16ms，肉眼可辨的顿感）。
+	if warn_left > 0.0:
+		var consumed := minf(delta, warn_left)
+		warn_left -= consumed
+		delta -= consumed
+		if delta <= 0.0:
+			out["head"] = head_pos()
+			return out
+
 	var prev := traveled
 	var next := minf(traveled + speed * maxf(delta, 0.0), length)
 	traveled = next
@@ -91,7 +124,29 @@ func advance(delta: float, player_pos: Vector2) -> Dictionary:
 	return out
 
 
+## 是否处于预警阶段（表现层据此画"瞄准线"而不是"飞行弹头"）
+func is_warning() -> bool:
+	return warn_left > 0.0
+
+
+## 距离「弹道抵达玩家」还有多久（秒）—— 预警 + 飞行。
+## 自动闪避靠它判断"来不来得及"，所以必须把预警算进去。
+func total_eta(player_pos: Vector2) -> float:
+	var t := projection_distance(player_pos)
+	if t < traveled:
+		return INF                      # 前沿已经越过玩家 -> 这一发早已判定
+	if speed <= 0.0:
+		return INF
+	return warn_left + (t - traveled) / speed
+
+
+## 按距离反推应有的预警时长（见文件头公式）。敌人开火时调用。
+static func warn_for(distance_cells: float, shot_speed: float = DEFAULT_SPEED) -> float:
+	var flight := distance_cells / maxf(shot_speed, 0.1)
+	return clampf(MIN_REACTION_SEC - flight, WARN_MIN, WARN_MAX)
+
+
 func _to_string() -> String:
-	return "LaneShot(owner=%d, dir=%s, traveled=%.2f/%.2f, half=%.2f, dmg=%d%s)" % [
+	return "LaneShot(owner=%d, dir=%s, traveled=%.2f/%.2f, 预警剩 %.2f, half=%.2f, dmg=%d%s)" % [
 		owner_id, str(dir.snapped(Vector2(0.01, 0.01))), traveled, length,
-		half_width, damage, " [done]" if done else ""]
+		warn_left, half_width, damage, " [done]" if done else ""]

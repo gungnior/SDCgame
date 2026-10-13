@@ -448,7 +448,11 @@ func _fire_at(targets: Array, dist: float, rng: SimRng, ctx: Dictionary,
 	var length := float(weapon.def.range_m)
 	if grid != null:
 		length = minf(length, Ballistics.los_distance(grid, pos, dir, length))
-	mgr.spawn(pos, dir, LaneShot.DEFAULT_SPEED, damage, length, id, weapon.def.id)
+	# ── 开火前预警（A 方案，2026-10-13）──
+	# 预警按「弹道真正要飞多远」反推：贴脸自动获得更长预警，远处几乎不加。
+	var reach := minf(length, to_t.length())
+	var warn := LaneShot.warn_for(reach, LaneShot.DEFAULT_SPEED)
+	mgr.spawn(pos, dir, LaneShot.DEFAULT_SPEED, damage, length, id, weapon.def.id, warn)
 
 
 func _nearest_target(targets: Array) -> Dictionary:

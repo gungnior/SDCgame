@@ -349,3 +349,16 @@ enemies 4→7（新增 C 普通敌人 + 1 Boss，ranged 反应时间均 ≥ 0.25
    等于把对方的回归当成自己的新基线。重设后**必须在提交信息里说明为什么**。
 3. **`test/suites/*.gd` 虽然可并行，但别改同一个已有文件** ——
    新增文件是安全的，改别人正在改的文件不是。
+
+### ✅ 开火前预警 + 移动端 UI 重做（2026-10-13 · 拥有者需求）
+
+**负责人**：@DSH-Lead · **`verify_all.ps1 -Fast` 退出码 0**（单元 **1639/0** + 集成 **105/105** + 数据 0 错 0 警）
+
+**一句话**：A 方案预警（`warn = clamp(0.45 - 飞行时间, 0.12, 0.20)`）解决贴脸必中；
+移动端去开火键/视角摇杆、删静步、闪避移到右半屏十字中心。
+
+**写入范围**：`sim/combat/lane_shot.gd`、`sim/combat/lane_shot_manager.gd`、`sim/ai/enemy_agent.gd`、
+`view/raid_drawer.gd`、`view/raid_hud.gd`、`view/raid_scene.gd`、`view/raid_sim_runner.gd`、`view/raid_input.gd`、
+`ui/touch_controls.gd`、`ui/tokens.gd`、`game/game_state.gd`、`test/suites/s25_auto_combat.gd`、`test/suites/s07_ui_mobile.gd`
+
+**未处理**：B 方案「同时开火节流」（多敌入射量）仍未做。

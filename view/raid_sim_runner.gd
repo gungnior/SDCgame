@@ -63,37 +63,26 @@ func tick_player(delta: float) -> void:
 		if autopilot_on and scene.autopilot != null:
 			_tick_autopilot(delta)
 		if scene._move_input != Vector2.ZERO:
-			# 静步（原「蹲伏」改为静步）：移速打折，代价换「脚步完全不发声」
-			var silent_mul: float = scene.SILENT_SPEED_FACTOR if scene.silent_walk else 1.0
-			var step = scene._move_input.normalized() * scene.PLAYER_SPEED * silent_mul * scene.vitals.speed_multiplier(scene.raid.carry.weight_ratio()) * delta
+			var step = scene._move_input.normalized() * scene.PLAYER_SPEED * scene.vitals.speed_multiplier(scene.raid.carry.weight_ratio()) * delta
 			# 分轴碰撞：哪个轴撞墙就只撤销那个轴（闪避走的是同一个函数）
 			_apply_player_step(step)
 			scene.player_facing = scene._move_input.normalized()
 			# 脚步：按节奏播放 + 发出声响给 AI 听觉
-			# ⭐ 静步时**完全不发声**：既不往 noises 里追加（AI 听不到），也不播脚步音效。
-			#   这是"静步"这个名字的本义；代价是移速已经打了折（见上方 silent_mul）。
+			# ⚠️ 2026-10-13：静步已删除 —— 脚步声**恒定**发出（不再有"无声慢走"）。
 			scene._step_accum += delta * scene._move_input.length()
 			var interval = 0.46 * lerpf(1.35, 1.0, clampf(scene.vitals.speed_multiplier(scene.raid.carry.weight_ratio()), 0.0, 1.0))
 			if scene._step_accum >= interval:
 				scene._step_accum = 0.0
-				if not scene.silent_walk:
-					scene.noises.append({"pos": scene.player_pos, "loudness_m": scene.NOISE_QUIET})
-					if Sfx != null:
-						Sfx.play("step_%s" % scene._floor_material())
+				scene.noises.append({"pos": scene.player_pos, "loudness_m": scene.NOISE_QUIET})
+				if Sfx != null:
+					Sfx.play("step_%s" % scene._floor_material())
 	else:
 		scene._move_input = Vector2.ZERO
 
 	# ── 瞄准方向 ──
-	# ⚠️ 这里【绝不】把准心吸附到最近敌人。
-	#    T-56 明确：角度吸附容易让玩家觉得"被抢枪"；辅助只在开火时以
-	#    「子弹磁性」的形式生效（见 _try_fire 里的 AimAssist.pick）。
-	var av = Vector2.ZERO
-	if scene.touch != null:
-		av = scene.touch.aim_vector()
-	if av.length() > 0.14:
-		scene.player_aim = av.normalized()
-		scene.player_facing = scene.player_aim
-	elif scene._mouse_aiming():
+	# ⚠️ 2026-10-13：**视角摇杆已按用户要求删除** —— 触屏端不再有瞄准输入，
+	#    瞄准只来自「自动锁定」（AutoAim，全向）与桌面鼠标。
+	if scene._mouse_aiming():
 		var world = scene.get_global_mouse_position() / scene.CELL_PX
 		var d = world - scene.player_pos
 		if d.length() > 0.15:
@@ -121,7 +110,8 @@ func tick_player(delta: float) -> void:
 	# 开火：键盘或触屏开火按钮（两者并联）
 	# ⚠️ 早先只读 _firing（键盘），触屏开火按钮的 is_down 根本没人读 ——
 	#    表现为"必须按屏幕任意处才能开火"（真机反馈）。
-	var want_fire = scene._firing or (scene.touch != null and scene.touch.is_firing())
+	# ⚠️ 2026-10-13：触屏开火键已删除 —— 手机端完全依赖「自动开火」（AutoAim 锁定即可开火）。
+	var want_fire = scene._firing
 	if want_fire and not scene.medical.is_treating():
 		try_fire()
 

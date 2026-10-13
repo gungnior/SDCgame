@@ -21,10 +21,6 @@ const CELL_PX := 48.0          ## 1 逻辑格 = 48 px（T-31）
 const PLAYER_SPEED := 3.2      ## 逻辑格 / 秒
 const NOISE_LOUD := 22.0       ## 开枪的响度（米）
 const NOISE_QUIET := 7.0       ## 走路的响度
-## ── 静步（原「蹲伏」改为此功能）──
-## 语义：主动放慢脚步以**不发出脚步声**（AI 听觉听不到），代价是移速明显下降。
-## 注意：静步**不影响**开枪声（NOISE_LOUD 照常）、也不影响敌人视觉（该看见还是看见）。
-const SILENT_SPEED_FACTOR := 0.55    ## 静步时的移速倍率
 ## 曳光存活时间。
 ## ⚠️ 早先只有 0.06s（约 3.6 帧），安卓真机反馈"开火只听到声音看不到子弹"。
 const TRACER_TTL := 0.13
@@ -91,7 +87,6 @@ var raid_hud: RaidHud
 
 
 var debug_mode := 0              ## 0 普通 1 流向场 2 房间图 3 声音范围
-var silent_walk := false         ## 静步（C 键切换）：慢走且脚步不发声
 
 # ─── 手感 / 音频 / 触屏（specs/tech-stack.md §2 与 §7.3）───
 var fx: FxPool = null            ## CPUParticles2D 池（T-03）
@@ -715,7 +710,6 @@ func _setup_feel_and_touch() -> void:
 	inv_layer.add_child(inventory_panel)
 	add_child(inv_layer)
 	touch.bag_pressed.connect(_open_bag)
-	touch.silent_pressed.connect(_toggle_silent_walk)   # 静步（移动端按钮，PC 用 C 键）
 	# 闪避（用户需求：位移 1.5 倍人物身位）。PC 用 Shift。
 	touch.dodge_pressed.connect(_try_dodge)
 	touch.menu_pressed.connect(_open_settings)
@@ -911,11 +905,9 @@ func _mouse_aiming() -> bool:
 ##    于是 PC 上"子弹磁性"几乎从不生效 -> 有效判定只剩那条 4.2° 的窄锥
 ##    -> 表现就是"子弹从敌人身上穿过去"。**这是穿模的第二个原因。**
 func _aim_push() -> float:
-	if touch != null:
-		var p := touch.aim_push()
-		if p > 0.01:
-			return clampf(p, 0.0, 1.0)
-	# 桌面：鼠标瞄准 / 键盘瞄准时给一个稳定值
+	# ⚠️ 2026-10-13：视角摇杆已删除，触屏端不再有「推力」这个概念。
+	# 恒返回桌面用的稳定值 —— AimAssist 要求 push >= MIN_PUSH 才生效，
+	# 返回 0 会让子弹磁性彻底失效（PC 上踩过这个坑，见函数上方的说明）。
 	return 0.55
 
 
@@ -1102,16 +1094,6 @@ func _open_settings() -> void:
 
 
 ## 打开面板。附近有尸体就进入搜索模式，否则就是纯背包。
-## 切换「静步」（原「蹲伏」功能改为静步）。
-## 开：移速 ×SILENT_SPEED_FACTOR、步频变稀、**脚步不发声**（AI 听觉听不到）。
-## 关：恢复正常速度与脚步声。
-func _toggle_silent_walk() -> void:
-	silent_walk = not silent_walk
-	if Sfx != null:
-		Sfx.play("ui_click")
-	_toast("静步：%s（移速 %d%%、脚步无声）" % [
-		"开" if silent_walk else "关",
-		int(SILENT_SPEED_FACTOR * 100.0)])
 
 
 ## 闪避（用户需求：位移 1.5 倍人物身位）。
@@ -1124,9 +1106,15 @@ func _try_dodge() -> void:
 		return
 	if game_paused or (Game != null and Game.paused) or frozen_by_overlay():
 		return
-	var dir := _move_input
-	if dir.length() < 0.15 and touch != null:
-		dir = touch.aim_vector()
+	# ── 任意方向闪避（2026-10-13 用户需求）──
+	# 优先取**方向摇杆的原始向量**（只有触屏有）：它可以是任意角度，
+	# 所以「推着摇杆 + 点闪避」= 朝那个方向闪。
+	# 放在 _move_input 之前，是为了让玩家在"自动作战接管移动"时仍能自己决定闪避方向。
+	var dir := Vector2.ZERO
+	if touch != null:
+		dir = touch.move_vector()
+	if dir.length() < 0.15:
+		dir = _move_input
 	if dir.length() < 0.15:
 		dir = player_aim
 	if not dodge.start(dir):

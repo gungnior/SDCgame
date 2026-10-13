@@ -21,6 +21,7 @@ func register() -> void:
 	_suite("自动作战 PlayerAutopilot", _test_autopilot)
 	_suite("闪避 DodgeState", _test_dodge)
 	_suite("接线（防回流）", _test_wiring)
+	_suite("开火前预警 Telegraph", _test_telegraph)
 
 
 ## 造一条弹道：起点 / 方向 / 弹速 / 伤害。半宽与长度用默认值（长度给足）。
@@ -274,5 +275,56 @@ func _test_wiring() -> void:
 		"身位换算集中在 BodyMetrics（不许各处写死 0.9）")
 	var tc := FileAccess.get_file_as_string("res://ui/touch_controls.gd")
 	_check(tc.contains("dodge_pressed"), "触屏有闪避按钮（移动端要能按到）")
+	_check(tc.contains("CROSS_ARM_RATIO") and tc.contains("CROSS_MARGIN_RATIO"),
+		"右半屏是十字键位（2026-10-13 UI 重做）")
 	var ri := FileAccess.get_file_as_string("res://view/raid_input.gd")
 	_check(ri.contains("KEY_SHIFT"), "键盘有闪避键位（Shift）")
+
+
+# ─────────────────── ⑧ 开火前预警（A 方案，2026-10-13）───────────────────
+
+func _test_telegraph() -> void:
+	# 用户需求：A「开火前预警（0.12~0.18s 瞄准线）」，解决贴脸必中。
+	# 规则：warn = clamp(MIN_REACTION_SEC - 飞行时间, WARN_MIN, WARN_MAX)。
+	var w_close := LaneShot.warn_for(3.0)
+	var w_mid := LaneShot.warn_for(6.0)
+	var w_far := LaneShot.warn_for(20.0)
+	_check(w_close >= LaneShot.WARN_MIN and w_close <= LaneShot.WARN_MAX,
+		"近距离预警落在 [%.2f, %.2f] 内（3 格）" % [LaneShot.WARN_MIN, LaneShot.WARN_MAX])
+	_check(w_close > w_far, "越近预警越长 —— 公平性由公式保证，不靠手调")
+	_check(absf(w_far - LaneShot.WARN_MIN) < 0.0001, "远处贴到下限")
+	_check(w_mid > 0.0, "中距离也有预警")
+	var flight3 := 3.0 / LaneShot.DEFAULT_SPEED
+	_check(w_close + flight3 >= LaneShot.MIN_REACTION_SEC - 0.0001,
+		"3 格：预警 + 飞行 >= 最低总反应时间 %.2f" % LaneShot.MIN_REACTION_SEC)
+
+	# 预警期间：弹道不动、不做命中判定
+	var s := _lane(Vector2(2.5, 2.5), Vector2.RIGHT, 10.0, 9)
+	s.warn_sec = 0.15
+	s.warn_left = 0.15
+	_check(s.is_warning(), "开火瞬间处于预警状态")
+	var during := s.advance(0.10, Vector2(3.5, 2.5))
+	_check(not bool(during["hit"]), "预警期间站在弹道上也不判定")
+	_check_eq(s.traveled, 0.0, "预警期间弹道不动")
+	_check(s.is_warning(), "0.10 秒后仍在预警")
+	# 预警余 0.05 在本帧耗尽，余下 0.25 秒继续飞行 = 2.5 格（不浪费一帧）
+	var after := s.advance(0.30, Vector2(6.5, 2.5))
+	_check(not s.is_warning(), "预警结束 -> 进入飞行")
+	_check(s.traveled > 0.0, "预警走完的那一帧就开始飞（余量不浪费）")
+	_check(not bool(after["hit"]), "还没扫到玩家 -> 未命中")
+	var hit := s.advance(0.20, Vector2(6.5, 2.5))
+	_check(bool(hit["hit"]), "前沿扫过玩家 -> 命中")
+
+	# 自动闪避必须把预警算进 eta，否则会晚按一步
+	var m := LaneShotManager.new()
+	m.spawn(Vector2(1.5, 1.5), Vector2.RIGHT, 10.0, 5, 20.0, 0, "w", 0.15)
+	var shot: LaneShot = m.shots[0]
+	_check(shot.is_warning(), "管理器登记时带上了预警")
+	var eta := shot.total_eta(Vector2(5.5, 1.5))
+	_check(eta > 0.15, "eta 含预警")
+	_check(m.incoming(Vector2(5.5, 1.5), 0.60) != null, "预警中的弹道同样算即将命中")
+
+	# 接线守卫
+	var ea := FileAccess.get_file_as_string("res://sim/ai/enemy_agent.gd")
+	_check(ea.contains("warn_for"), "敌人开火时按距离算预警")
+	_check(_view_src().contains("is_warning"), "绘制区分预警与飞行两态")

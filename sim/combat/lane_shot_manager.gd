@@ -39,7 +39,7 @@ func count() -> int:
 
 ## 放一条弹道出去。dir 会被归一化；length <= 0 时仍然登记（表现层看得见），但不结算。
 func spawn(origin: Vector2, dir: Vector2, speed: float, damage: int, length: float,
-		owner_id: int = -1, weapon_id: String = "") -> LaneShot:
+		owner_id: int = -1, weapon_id: String = "", warn_sec: float = 0.0) -> LaneShot:
 	if shots.size() >= MAX_SHOTS:
 		shots.pop_front()
 	var s := LaneShot.new()
@@ -50,6 +50,9 @@ func spawn(origin: Vector2, dir: Vector2, speed: float, damage: int, length: flo
 	s.length = maxf(length, 0.0)
 	s.owner_id = owner_id
 	s.weapon_id = weapon_id
+	# 开火前预警：这段时间里弹道不动、不判定，只亮瞄准线（见 LaneShot 文件头）
+	s.warn_sec = maxf(warn_sec, 0.0)
+	s.warn_left = s.warn_sec
 	shots.append(s)
 	return s
 
@@ -89,12 +92,13 @@ func incoming(player_pos: Vector2, lookahead_sec: float, margin: float = 0.0) ->
 	for s in shots:
 		if s.done or s.speed <= 0.0:
 			continue
-		var t := s.projection_distance(player_pos)
-		if t < s.traveled:
-			continue                                  # 前沿已经越过玩家 -> 这一发早已判定
+		# ⚠️ 必须用 total_eta（预警 + 飞行）：只算飞行的话，
+		#    预警期间会被判成"已经在路上"，自动闪避会晚按一步。
+		var eta := s.total_eta(player_pos)
+		if eta == INF:
+			continue                                  # 前沿已越过 / 静止弹道
 		if s.perpendicular_distance(player_pos) > s.half_width + margin:
 			continue                                  # 已经站在弹道外 -> 不用躲
-		var eta := (t - s.traveled) / s.speed
 		if eta <= lookahead_sec and eta < best_eta:
 			best_eta = eta
 			best = s

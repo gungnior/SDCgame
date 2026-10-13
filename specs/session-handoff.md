@@ -8,6 +8,45 @@
 
 ---
 
+## 🔴 最新一轮（2026-10-13 · DSH Lead）：开火前预警 + 移动端 UI 重做
+
+> 交接时间：2026-10-13 · 工作区 `E:\AAAASDC` · **验收 `verify_all.ps1 -Fast` 退出码 0**
+
+**① 一句话**：按拥有者要求做 A 方案（开火前预警，解决贴脸必中）+ 移动端 UI 重做
+（去开火键/视角摇杆、删静步、闪避移到右半屏十字中心、方向摇杆可任意方向闪避）。
+
+**② 改了哪些（别人别碰）**
+
+- 预警：`sim/combat/lane_shot.gd`（新增 warn 阶段与 `warn_for()`）、`sim/combat/lane_shot_manager.gd`、
+  `sim/ai/enemy_agent.gd`、`view/raid_drawer.gd`（预警/飞行两态绘制）
+- UI：`ui/touch_controls.gd`（十字键位）、`ui/tokens.gd`、`view/raid_hud.gd`（提示行 + 删静步指示）、
+  `view/raid_scene.gd`（删静步、闪避取原始摇杆、修 `_aim_push`）、`view/raid_sim_runner.gd`、
+  `view/raid_input.gd`（删 `C`）、`game/game_state.gd`（`auto_fire` 默认 true）
+- 测试：`test/suites/s25_auto_combat.gd`（新增「开火前预警」套件 + 十字布局断言）、
+  `test/suites/s07_ui_mobile.gd`（触屏接口断言反转为"不许回来"）
+
+**③ 复跑命令**：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1`
+
+**③b 本轮验收原始结果**
+
+```
+① 单元测试    ✅ 通过：1639 项，0 失败（退出码 0）
+② 集成验证    ✅ PC 端验证全部通过（105 项）（退出码 0）
+③ 数据契约    ✅ 通过：0 错误，0 警告
+总退出码 0 —— 「可以交付」（④ 本次用 -Fast 跳过）
+```
+
+**④ 没验证的**
+
+- 预警时长（0.12~0.20 秒）是否"够躲又不拖沓"—— 需真机手感，本环境只能证明几何与计时正确。
+- 多敌同时开火的量级问题**未处理**（只做了 A 方案；B 节流 / C 数据节奏仍在手册里待定夺）。
+- 真机上的十字键位拇指舒适度（本环境只能截图确认在位）。
+
+**⑤ 下一步**：真机试预警手感 → 决定要不要 B（同时开火节流）；
+再看十字键位的按键间距是否需要按机型微调（`CROSS_ARM_RATIO` / `CROSS_MARGIN_RATIO`）。
+
+---
+
 ## 🔴 最新一轮（2026-10-13 · DSH Lead）：自动作战 / 固定弹道 / 闪避
 
 > 交接时间：2026-10-13 · 执行：DSH Lead · 工作区 `E:\AAAASDC` · HEAD `b3641e7`
