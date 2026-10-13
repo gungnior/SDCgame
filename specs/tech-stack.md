@@ -266,7 +266,7 @@ CraftPix 等付费素材的条款**明确禁止再分发源文件**。而本项�
 
 ```
 仓库内（公开）                     仓库外（本地）
-├── code/          ← GPL-3.0        └── assets_paid/   ← 各自购买后放入
+├── code/          ← MIT（原 GPL-3.0，2026-10-13 改）  └── assets_paid/   ← 各自购买后放入
 ├── assets/        ← 仅 CC0 / CC-BY      （.gitignore 排除）
 ├── fetch_assets.sh  ← 获取脚本
 └── README.md      ← 说明需自备付费素材

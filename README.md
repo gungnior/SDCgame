@@ -1,5 +1,8 @@
 # 搜打撤 · 2D 像素俯视射击（安卓）
 
+> just want make a little game with my firend
+> —— 库主原话，建库时的自我介绍，保留于此
+
 单机 PvE 搜打撤游戏。Godot 4.7 · GDScript · 目标平台 TapTap / 好游快爆。
 
 **完全离线 · 零变现 · 不收集任何个人信息。**
@@ -52,4 +55,5 @@ godot/          Godot 工程（待建）
 
 ## 许可证
 
-GPL-3.0（见 `LICENSE`）。第三方素材授权见 [specs/third-party.md](specs/third-party.md) 与 `CREDITS.md`。
+MIT（见 `LICENSE`；2026-10-13 由拥有者拍板，取代早期的 GPL-3.0 方案）。
+第三方素材授权见 [specs/third-party.md](specs/third-party.md) 与 `CREDITS.md`。

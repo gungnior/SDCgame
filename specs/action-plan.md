@@ -11,7 +11,7 @@
 |---|---|
 | **D-01** | 单机 PvE，不做联机 |
 | **D-02 / T-01** | **Godot 4.7.x**（当前 4.7.2），GDScript |
-| **D-09** | 开源（GPL-3.0）+ Gitee/GitHub 仓库 |
+| **D-09** | 开源（**MIT**，2026-10-13 拍板，原 GPL-3.0）+ Gitee/GitHub 仓库 |
 | **D-14 / D-15 / D-16** | ⭐ **国内发行：TapTap 主力 · 不联网 · 零变现** → 只需防沉迷 + 隐私合规 |
 | **D-17** | ⭐ **递进路线 B → A → C**，B 按 A/C 架构只填核心内容 |
 | **D-18** | 编码走 **DeepSeek**；美术用 **ComfyUI 本地 / LiblibAI**（$0） |
@@ -70,7 +70,7 @@
 ## 2. 第 0 阶段（本周，3–5 天）
 
 - [ ] 装 **Godot 4.7 + JDK 17 + Android SDK**，跑通"空项目导出到手机"
-- [ ] 建仓库：`LICENSE` = GPL-3.0 · `.gitignore` · `README` · spec 目录
+- [ ] 建仓库：`LICENSE` = MIT · `.gitignore` · `README` · spec 目录
 - [ ] 下载 Kenney + OGA 素材，**登记 `third-party.md`**，LICENSE 存档 `art/_licenses/`
 - [ ] 引入 **Noto Sans CJK**，验证**中文显示与断行**
 - [ ] 引入 PixelPerfectSmoother，验证**像素完美与相机无抖动**

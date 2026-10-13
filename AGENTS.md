@@ -11,7 +11,7 @@
 ## 0. 一句话
 
 **搜打撤**（2D 像素俯视角撤离射击）· Godot 4.7.2 · GDScript · 安卓 + PC。
-非商业、免费发布、GPL-3.0、代码开源。
+非商业、免费发布、**MIT**、代码开源。
 
 ### 工作区位置与**可移植性约定**
 
@@ -248,7 +248,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1
 
 - ❌ **不申请 `INTERNET` 权限、零网络调用**（已用 `aapt2 dump permissions` 验证）
 - ❌ **零变现**
-- ✅ **GPL-3.0**，代码开源
+- ✅ **MIT**，代码开源（2026-10-13 拥有者拍板，取代原 GPL-3.0 红线；远端仓库
+  `github.com/gungnior/SDCgame` 建库时选的 MIT。连带影响：MIT 兼容 GPL 代码但
+  GPL-2.0-only 仍禁用，见 [specs/third-party.md](specs/third-party.md) R-06）
 - ❌ **不使用商业游戏素材**
 - ❌ **不使用 `Jhon-Crow/godot-topdown-MVP` 的代码**
 - ❌ **不使用 `CC-BY-NC-ND` 素材**

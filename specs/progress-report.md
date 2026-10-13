@@ -23,7 +23,7 @@
 | **平台** | Android 为主 + PC（开发与快速验证） |
 | **引擎** | Godot **4.7.2** stable · GDScript · Compatibility 渲染器 |
 | **路线** | ⭐ **B → A → C 递进**，两道验收门 |
-| **代码许可** | GPL-3.0（开源） |
+| **代码许可** | MIT（开源；2026-10-13 拍板，原 GPL-3.0） |
 | **发行** | 国内 · TapTap 主力 · **不联网** · **零变现** |
 | **AI 工具链** | 编码 DeepSeek · 美术 ComfyUI 本地 / LiblibAI（$0） |
 
@@ -33,7 +33,7 @@
 |---|---|---|
 | D-01 | 单机 PvE，不做联机 | ✅ |
 | D-02 / T-01 | Godot 4.7.x + GDScript | ✅ 4.7.2 |
-| D-09 | GPL-3.0 开源 | ✅ |
+| D-09 | MIT 开源（2026-10-13 改自 GPL-3.0） | ✅ |
 | **D-14 / D-15 / D-16** | 国内发行 · **不联网** · **零变现** | ✅ **APK 实测零权限**（`aapt2 dump permissions` 只有 `package:`） |
 | D-17 | 递进路线 B→A→C | ✅ 严格执行 |
 | D-18 | DeepSeek 编码 / ComfyUI 美术 | ✅ |

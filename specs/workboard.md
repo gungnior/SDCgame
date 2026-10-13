@@ -95,7 +95,7 @@ hitstop 的墙钟问题**是真的**（单位级实测：同一个 120ms 请求�
 但仓库**至今没有 remote**，第二个人无法 clone。`.gitignore` 已挡掉 `_install/`（2.2G 工具链）、
 `build/`（534M APK）、`.godot/`，入库仅 362 个文本/小文件。
 
-**要做**：① 拥有者在 GitHub/Gitee 建空仓库（项目 GPL-3.0 免费开源，公开推符合红线；
+**要做**：① 拥有者在 GitHub/Gitee 建空仓库（项目 MIT 免费开源，公开推符合红线；
 国内访问优先 Gitee）；② `git remote add origin <url>` + `git push -u origin master`；
 ③ 两人各自 clone，`_install/` 工具链每人本地自备（AGENTS.md 已要求全脚本相对定位，
 clone 到任何盘符都能跑验收）；④ 各跑一次 `verify_all.ps1` 确认退出码 0 再开工。

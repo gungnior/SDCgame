@@ -27,7 +27,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\pre_push_check.ps1
 ## 首次建 remote（W-07，需要拥有者账号）
 
 ```powershell
-# 1. 拥有者在 GitHub / Gitee 建空仓库（国内访问优先 Gitee；项目 GPL-3.0 免费开源，公开推符合红线）
+# 1. 拥有者在 GitHub / Gitee 建空仓库（国内访问优先 Gitee；项目 MIT 免费开源，公开推符合红线）
 # 2. 回到本地：
 git remote add origin <你的仓库地址>
 git push -u origin master
