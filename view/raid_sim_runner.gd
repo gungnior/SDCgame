@@ -34,20 +34,40 @@ func tick_player(delta: float) -> void:
 		return
 	var prev = scene.player_pos
 
+	# ── 每帧重置【玩家侧】流场预算 ──
+	# 玩家的自动寻路用**自己的** FlowFieldManager：与敌人共用一本预算会互相挤占
+	# （敌人那边每帧最多建 1 个场，玩家再抢一个就会让敌人退化成「朝目标直走」）。
+	if scene.player_flows != null:
+		scene.player_flows.begin_frame()
+
+	# ── 闪避计时（位移在下面的移动分支里生效）──
+	if scene.dodge != null:
+		scene.dodge.tick(delta)
+
+	# ── 自动作战：弹道来袭就闪避 ──
+	var autopilot_on: bool = Game != null and Game.autopilot
+	if autopilot_on:
+		_try_auto_dodge()
+
 	# 移动（治疗中不能动 —— reference-teardown §9 的取舍）
-	if not scene.medical.is_treating():
+	# ⚠️ 闪避期间位移由闪避决定，**不与常规移动叠加** —— 否则「1.5 身位」就不准了。
+	if scene.dodge != null and scene.dodge.is_active():
+		_apply_player_step(scene.dodge.step(delta))
+		scene.player_facing = scene.dodge.dir
+		scene._move_input = Vector2.ZERO
+	elif not scene.medical.is_treating():
 		scene._move_input = scene._read_move_input()
+		# ── 自动作战（2026-10-13 用户需求）──
+		# 开着时由 PlayerAutopilot 决定往哪走，并**覆盖**摇杆/键盘输入 ——
+		# 手动输入一律让位，避免人机抢方向盘。
+		if autopilot_on and scene.autopilot != null:
+			_tick_autopilot(delta)
 		if scene._move_input != Vector2.ZERO:
 			# 静步（原「蹲伏」改为静步）：移速打折，代价换「脚步完全不发声」
 			var silent_mul: float = scene.SILENT_SPEED_FACTOR if scene.silent_walk else 1.0
 			var step = scene._move_input.normalized() * scene.PLAYER_SPEED * silent_mul * scene.vitals.speed_multiplier(scene.raid.carry.weight_ratio()) * delta
-			# 分轴碰撞：哪个轴撞墙就只撤销那个轴
-			var try_x = Vector2(scene.player_pos.x + step.x, scene.player_pos.y)
-			if scene._walkable(try_x):
-				scene.player_pos.x = try_x.x
-			var try_y = Vector2(scene.player_pos.x, scene.player_pos.y + step.y)
-			if scene._walkable(try_y):
-				scene.player_pos.y = try_y.y
+			# 分轴碰撞：哪个轴撞墙就只撤销那个轴（闪避走的是同一个函数）
+			_apply_player_step(step)
 			scene.player_facing = scene._move_input.normalized()
 			# 脚步：按节奏播放 + 发出声响给 AI 听觉
 			# ⭐ 静步时**完全不发声**：既不往 noises 里追加（AI 听不到），也不播脚步音效。
@@ -256,6 +276,8 @@ func tick_enemies(delta: float) -> void:
 		"scene.noises": scene.noises if not grace else [],
 		"grace": grace,
 		"hearing_cache": scene._hearing_cache,
+		# 固定弹道：敌人把弹道交给它，伤害延后到「前沿扫过玩家」那一帧（见 LaneShotManager）
+		"lane_shots": scene.lane_shots,
 		# 性能探针（鸭子类型）—— 让 AI 内部也能打阶段标记，
 		# 而 sim/ 不必依赖 Tel autoload
 		"prof": Tel,
@@ -285,36 +307,33 @@ func tick_enemies(delta: float) -> void:
 				Sfx.play_at("gun_%s_enemy" % kind, a.pos, scene.player_pos, 7.0, 30.0)
 			Tel.mark("enemy_fx")
 			# 敌人枪口火光同样只靠 _draw 的多边形，不喷粒子（见上）
-			# 敌人开火也要看得见曳光（真机反馈：只听到声音看不到子弹）
-			var e_to: Vector2 = a.pos + a.facing * 6.0
-			var e_wall: Variant = Ballistics.first_blocking_cell(scene.gen.grid, a.pos, e_to)
-			if e_wall != null:
-				e_to = Vector2(e_wall.x + 0.5, e_wall.y + 0.5)
-			scene.bullets.append({"from": a.pos, "to": e_to, "ttl": scene.TRACER_TTL, "own": false})
+			# ⚠️ 2026-10-13：敌人不再画「瞬时曳光」—— 改由 LaneShotManager 的
+			#    **固定弹道**绘制（一条看得见、躲得开的走廊 + 飞行弹头）。
+			#    只保留枪口火光：它是「敌人开火了」的第一眼信号。
 			scene.muzzle_flash.append({"pos": a.pos, "dir": a.facing, "ttl": 0.06})
 	Tel.mark("enemy_done")
 
 	# 敌人造成的伤害回写到 vitals
 	var target_hp = int((ctx["targets"][0] as Dictionary)["hp"])
 	if target_hp < scene.vitals.hp:
-		var dealt = scene.vitals.hp - target_hp
-		# ── 护甲结算（2026-10-13，**唯一入口**）──
-		# _resolve_player_hit 内部走 vitals.take_hit：护甲池来自身上装备，
-		# 弹型决定穿透比例，吸收量按比例磨损护甲/头盔。
-		# ⚠️ 早先这里是 `_apply_armor_reduction` + `vitals.take_damage` 两次吸收，
-		#    而且 _setup_sim 白送 40 点护甲 —— 见 _resolve_player_hit 的说明。
-		var applied = scene._resolve_player_hit(dealt)
-		if scene.medical.should_interrupt(applied):
-			scene.medical.cancel()
-		if applied > 0:
-			var heavy = applied >= 20
-			scene.vitals.apply_bleed(Vitals.Bleed.HEAVY if heavy else Vitals.Bleed.LIGHT)
-			# ── 自己受伤：大闪白 + 大震动，但【零 hitstop】（不打断操作）──
-			Feel.hit("player_hurt", scene.player_pos, scene.player_pos)
-			Feel.flash_damage(0.45 if heavy else 0.28)
-			if heavy:
-				if applied >= 35 and Sfx != null:
-					Sfx.play("hurt_heavy")
+		_apply_player_damage(scene.vitals.hp - target_hp)
+
+	# ── 固定弹道结算（2026-10-13 用户需求）──
+	# 敌人不再「开火即扣血」：弹道要飞，扣血发生在前沿扫过玩家的那一帧。
+	if scene.lane_shots != null:
+		scene.lane_shots.tick(delta, scene.player_pos)
+		for hit_pos in scene.lane_shots.impacts:
+			if scene.fx != null:
+				scene.fx.burst("impact", hit_pos, Vector2.UP)
+		var lane_damage = scene.lane_shots.consume_damage()
+		if lane_damage > 0:
+			if scene.dodge != null and scene.dodge.is_invulnerable():
+				# 无敌帧：这一发被闪开了（走廊里唯一可行的躲法，见 DodgeState 的说明）
+				scene.dodge.note_blocked(lane_damage)
+				if Sfx != null:
+					Sfx.play("ui_confirm")
+			else:
+				_apply_player_damage(lane_damage)
 
 	scene.noises.clear()
 	scene.squad.tick(delta, scene._time)
@@ -344,6 +363,10 @@ func tick_enemies(delta: float) -> void:
 ##   auto_aim           未开自动射击时，准心自动对准锁定目标
 ##   vision_follows_lock 视野锥跟随锁定目标（而不是只跟摇杆）
 func update_auto_aim(delta: float) -> void:
+	# 自动作战：锁定改为**全向**（用户需求「自动锁定敌人进行攻击」）。
+	# 手动模式下仍受视野锥硬门限约束 —— 那条约束是给「人瞄」的公平性保障，
+	# 自动作战没有「瞄准方向」这个概念，所以只保留视线与阵营两条硬原则。
+	var autopilot_on: bool = Game != null and Game.autopilot
 	var w = scene.player_weapon.def
 	# ⚠️ 用场景的**有效**视野锥（= 枪械锥 ∩ 玩家视野锥门限），不要直接用
 	#    w.aim_cone_deg —— 否则逻辑能锁的范围会和画出来的锥不一致
@@ -359,14 +382,18 @@ func update_auto_aim(delta: float) -> void:
 			cone_dir = to_lock.normalized()
 
 	scene._lock_info = scene.auto_aim.update(delta, scene.player_pos, cone_dir, cone,
-		rng_max, scene._aim_targets(), scene.gen.grid)
+		rng_max, scene._aim_targets(), scene.gen.grid, "player",
+		AutoAim.DEFAULT_RADIUS, autopilot_on)
 
 	# ① 自动瞄准：把准心平滑转到锁定目标
-	if Game != null and Game.auto_aim and scene.auto_aim.has_lock():
+	#    自动作战时无条件开启（否则「自动锁定」只是锁上、枪口不跟过去）
+	if Game != null and (Game.auto_aim or autopilot_on) and scene.auto_aim.has_lock():
 		var to_t: Vector2 = scene.auto_aim.locked_pos - scene.player_pos
 		if to_t.length() > 0.01:
 			# 每秒最多转 AUTO_AIM_TURN_DEG 度 —— 避免"瞬移式"甩枪（手感很假）
 			scene.player_aim = AutoAim.turn_toward(scene.player_aim, to_t, scene.AUTO_AIM_TURN_DEG * delta)
+			if autopilot_on:
+				scene.player_facing = scene.player_aim
 
 	# ② 自动射击：**必须当前可见**（不能用锁定粘性）
 	#
@@ -374,6 +401,139 @@ func update_auto_aim(delta: float) -> void:
 	#    粘性（1.2 秒）是为了让【瞄准】不抖，但敌人躲到墙后时
 	#    has_lock 仍为 true -> 自动射击会朝墙打满 1.2 秒。
 	#    所以这里判定用 `visible`（这一帧真有视线），不是 has_lock。
-	if Game != null and Game.auto_fire and bool(scene._lock_info.get("visible", false)):
+	if Game != null and (Game.auto_fire or autopilot_on) and bool(scene._lock_info.get("visible", false)):
 		if not scene.medical.is_treating():
 			try_fire()
+
+
+
+# ═══════════════ 自动作战 / 闪避 / 固定弹道的落地（2026-10-13）═══════════════
+#
+# 决策都在 sim/ 里（PlayerAutopilot / DodgeState / LaneShotManager，可 headless 单测），
+# 这里只负责把决策**接到场景上**：读场景状态、写玩家位置、结算护甲、播表现。
+# 这是本项目既有的分工（「AI / 战斗手感调参在 raid_sim_runner.gd」）。
+
+## 玩家位移：分轴碰撞（哪个轴撞墙就只撤销那个轴）。
+## 常规移动与闪避共用它 —— 这样「闪避穿墙」在结构上不可能发生。
+func _apply_player_step(step: Vector2) -> void:
+	if step == Vector2.ZERO:
+		return
+	var try_x = Vector2(scene.player_pos.x + step.x, scene.player_pos.y)
+	if scene._walkable(try_x):
+		scene.player_pos.x = try_x.x
+	var try_y = Vector2(scene.player_pos.x, scene.player_pos.y + step.y)
+	if scene._walkable(try_y):
+		scene.player_pos.y = try_y.y
+
+
+## 自动作战：问一次决策（寻路 / 搜刮 / 交战），把结果落到玩家身上。
+func _tick_autopilot(delta: float) -> void:
+	var ap: PlayerAutopilot = scene.autopilot
+	var ctx := {
+		"grid": scene.gen.grid,
+		"flows": scene.player_flows,
+		"player_pos": scene.player_pos,
+		"enemies": _autopilot_enemies(),
+		"containers": _autopilot_containers(),
+		"corpses": _autopilot_corpses(),
+		"now": scene._time,
+	}
+	var decision := ap.update(delta, ctx)
+	scene._move_input = decision.get("move", Vector2.ZERO)
+	var loot: Dictionary = decision.get("loot", {})
+	if not loot.is_empty():
+		_autopilot_loot(loot)
+
+
+func _autopilot_enemies() -> Array:
+	var out: Array = []
+	for a in scene.agents:
+		if not a.is_alive():
+			continue
+		out.append({"pos": a.pos, "alive": true})
+	return out
+
+
+func _autopilot_containers() -> Array:
+	var out: Array = []
+	for c in scene.raid.containers:
+		out.append({"pos": c.pos, "done": c.is_done()})
+	return out
+
+
+func _autopilot_corpses() -> Array:
+	var out: Array = []
+	for c in scene.raid.corpses:
+		out.append({
+			"pos": c.get("pos", Vector2.ZERO),
+			"done": (c.get("drops", []) as Array).is_empty(),
+		})
+	return out
+
+
+## 走到搜索目标旁边 -> 自动把里面的东西全部拿走。
+## ⚠️ 不打开背包面板：面板会冻结模拟与输入，而自动作战要一路走到底。
+##    背包塞不下就拉黑这个目标一会儿，免得在同一个箱子前面反复尝试。
+func _autopilot_loot(req: Dictionary) -> void:
+	var kind := str(req.get("kind", ""))
+	var idx := int(req.get("index", -1))
+	if idx < 0:
+		return
+	var rest: Array = []
+	if kind == "container":
+		rest = scene.raid.take_all_from_container(idx)
+	else:
+		rest = scene.raid.take_all_from_corpse(idx)
+	scene.autopilot.note_done(kind, idx)
+	var leftover := 0
+	for d in rest:
+		leftover += int(d.get("count", 0))
+	if leftover > 0:
+		scene.autopilot.blacklist(kind, idx)
+		scene._toast("背包已满，先跳过这个搜索目标")
+	elif Sfx != null:
+		Sfx.play("pickup")
+
+
+## 自动闪避的提前量（秒）：弹道还要多久到达，决定了「来不来得及躲」。
+const AUTO_DODGE_LOOKAHEAD := 0.30
+
+
+## 自动闪避：弹道即将命中时，朝**垂直弹道方向**闪开。
+## 走廊里两侧都是墙（_walkable 两边都 false）—— 位移会被碰撞吃掉，
+## 真正救命的是 DodgeState 的无敌帧（原因见那个文件的说明）。
+func _try_auto_dodge() -> void:
+	if scene.dodge == null or scene.lane_shots == null:
+		return
+	if not scene.dodge.can_start():
+		return
+	var shot: LaneShot = scene.lane_shots.incoming(scene.player_pos,
+		AUTO_DODGE_LOOKAHEAD, BodyMetrics.BODY_WIDTH * 0.5)
+	if shot == null:
+		return
+	var side := Vector2(-shot.dir.y, shot.dir.x)
+	if not scene._walkable(scene.player_pos + side * 0.6):
+		side = -side
+	if scene.dodge.start(side):
+		if Sfx != null:
+			Sfx.play("ui_click")
+
+
+## 玩家受伤的**唯一**入口（近战回写与固定弹道两条通道都走这里）。
+## 护甲结算仍然只有一处：RaidScene._resolve_player_hit。
+func _apply_player_damage(dealt: int) -> void:
+	if dealt <= 0:
+		return
+	var applied = scene._resolve_player_hit(dealt)
+	if scene.medical.should_interrupt(applied):
+		scene.medical.cancel()
+	if applied <= 0:
+		return
+	var heavy = applied >= 20
+	scene.vitals.apply_bleed(Vitals.Bleed.HEAVY if heavy else Vitals.Bleed.LIGHT)
+	# ── 自己受伤：大闪白 + 大震动，但【零 hitstop】（不打断操作）──
+	Feel.hit("player_hurt", scene.player_pos, scene.player_pos)
+	Feel.flash_damage(0.45 if heavy else 0.28)
+	if heavy:
+		if applied >= 35 and Sfx != null:
+			Sfx.play("hurt_heavy")

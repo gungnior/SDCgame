@@ -54,6 +54,14 @@ var gen: MapGenerator
 ## 本局地图主题（森林/城区/军事基地）。null = 旧行为（无主题）。
 var theme: MapThemeDef = null
 var flows: FlowFieldManager
+## 玩家侧流场（自动寻路用）—— 与敌人那本预算**分开**，互不挤占
+var player_flows: FlowFieldManager
+## 敌人固定弹道（2026-10-13 用户需求：宽度 2 倍身位、锁定人物中心）
+var lane_shots: LaneShotManager
+## 玩家闪避（位移 1.5 倍身位 + 无敌帧）
+var dodge: DodgeState
+## 自动作战决策（寻路 / 搜刮 / 交战）
+var autopilot: PlayerAutopilot
 var raid: RaidSession
 var agents: Array = []
 var squad: Squad
@@ -364,6 +372,15 @@ func _setup_sim() -> void:
 
 	flows = FlowFieldManager.new()
 	flows.setup(gen.grid)
+
+	# ── 玩家自动作战相关（2026-10-13 用户需求）──
+	# 玩家侧流场单独一本：与敌人共用会让两边互相挤占每帧构建预算
+	# （敌人那边被降级成「朝目标直走」就会顶墙）。
+	player_flows = FlowFieldManager.new()
+	player_flows.setup(gen.grid)
+	lane_shots = LaneShotManager.new()
+	dodge = DodgeState.new()
+	autopilot = PlayerAutopilot.new()
 
 	# 藏身处：用 Game（autoload）里的**跨场景持久**实例
 	# 真机反馈 #7：死亡后要能真正回藏身处，所以它必须活在场景之外
@@ -699,6 +716,8 @@ func _setup_feel_and_touch() -> void:
 	add_child(inv_layer)
 	touch.bag_pressed.connect(_open_bag)
 	touch.silent_pressed.connect(_toggle_silent_walk)   # 静步（移动端按钮，PC 用 C 键）
+	# 闪避（用户需求：位移 1.5 倍人物身位）。PC 用 Shift。
+	touch.dodge_pressed.connect(_try_dodge)
 	touch.menu_pressed.connect(_open_settings)
 	touch.map_pressed.connect(_toggle_map)              # 地图（真机反馈 #2）
 
@@ -1093,6 +1112,47 @@ func _toggle_silent_walk() -> void:
 	_toast("静步：%s（移速 %d%%、脚步无声）" % [
 		"开" if silent_walk else "关",
 		int(SILENT_SPEED_FACTOR * 100.0)])
+
+
+## 闪避（用户需求：位移 1.5 倍人物身位）。
+##
+## 方向取「正在推的方向」—— 与移动同一套输入，符合"操作方式沿用既有手感"；
+## 没推方向时用瞄准方向（桌面用鼠标瞄准时就是这个）。
+## 触发条件（冷却 / 时长 / 无敌帧）全在 DodgeState 里，这里只负责给方向。
+func _try_dodge() -> void:
+	if dodge == null or raid == null or raid.is_over():
+		return
+	if game_paused or (Game != null and Game.paused) or frozen_by_overlay():
+		return
+	var dir := _move_input
+	if dir.length() < 0.15 and touch != null:
+		dir = touch.aim_vector()
+	if dir.length() < 0.15:
+		dir = player_aim
+	if not dodge.start(dir):
+		return
+	if Sfx != null:
+		Sfx.play("ui_click")
+
+
+## 覆盖层（背包 / 地图）打开时不接受战场操作 —— 与 _process 的冻结口径一致。
+func frozen_by_overlay() -> bool:
+	if inventory_panel != null and inventory_panel.is_open():
+		return true
+	return map_panel != null and map_panel.is_open()
+
+
+## 自动作战开关（用户需求：自动寻路 / 自动搜刮 / 自动攻击）。
+## 设置持久在 Game（跨场景），这里只做切换与提示。
+func _toggle_autopilot() -> void:
+	if Game == null:
+		return
+	Game.autopilot = not Game.autopilot
+	if not Game.autopilot:
+		_move_input = Vector2.ZERO
+	if Sfx != null:
+		Sfx.play("ui_click" if Game.autopilot else "ui_deny")
+	_toast("自动作战：%s" % ("开 —— 自动寻路 / 自动搜刮 / 自动交火" if Game.autopilot else "关"))
 
 
 ## 开关战术地图（真机反馈 #2）。地图打开时冻结模拟（见 _process）。

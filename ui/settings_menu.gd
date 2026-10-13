@@ -145,6 +145,8 @@ func _build() -> void:
 	assist.add_child(_toggle("自动射击", "auto_fire"))
 	assist.add_child(_toggle("自动瞄准", "auto_aim"))
 	assist.add_child(_toggle("视野跟随", "vision_follows_lock"))
+	# 自动作战（2026-10-13 用户需求）：寻路 / 搜刮 / 交火全自动
+	assist.add_child(_toggle("自动作战", "autopilot"))
 
 	# ── 无障碍（spec §7.3 第 4 条）──
 	_root.add_child(_label("画面与手感", 15, UITokens.TEXT))

@@ -21,7 +21,27 @@
 
 ## 进行中
 
-_（空）_
+### ✅ 自动作战 / 固定弹道 / 闪避（2026-10-13 · 拥有者需求）
+
+**负责人**：@DSH-Lead · **`verify_all.ps1` 退出码 0**（单元 **1619/0** + 集成 **105/105** + 数据 0 错 0 警；
+④ 像素基线本环境无法成像，未作结论）
+
+**一句话**：把「自动寻路 / 自动锁定攻击 / 遇容器自动搜刮」与
+「敌人固定弹道（2 倍身位宽、锁开火瞬间人物中心）+ 闪避（1.5 身位）」落进代码。
+
+**写入范围**：新增 `sim/combat/body_metrics.gd`、`sim/combat/lane_shot.gd`、`sim/combat/lane_shot_manager.gd`、
+`sim/combat/dodge.gd`、`sim/ai/player_autopilot.gd`、`test/suites/s25_auto_combat.gd`；
+修改 `sim/ai/enemy_agent.gd`、`sim/combat/auto_aim.gd`、`view/raid_sim_runner.gd`、`view/raid_scene.gd`、
+`view/raid_drawer.gd`、`view/raid_input.gd`、`ui/touch_controls.gd`、`ui/settings_menu.gd`、`game/game_state.gd`。
+
+**身位约定**：`BodyMetrics.BODY_WIDTH = 0.9 逻辑格`（判定半径 0.45 × 2）；
+弹道半宽 = 1 身位、总宽 = 2 身位、闪避位移 = 1.5 身位 —— 三处全部由它推导。
+
+**验收当场抓出并修掉 2 处**：`raid_input.gd` 的 `KEY_G/KEY_SHIFT` 缩进错位、
+`raid_sim_runner.gd` 三处 `:=` 在 duck-typed 链上类型推断失败。
+
+**未验证**：④ 像素基线（本环境无绘图会话）；真机手感。
+
 
 ### ✅ 装备系统「打通」（2026-10-13）—— 藏身处配装 / 战局穿脱 / 改枪 / 敌人装备掉落
 

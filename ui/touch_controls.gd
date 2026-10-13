@@ -30,6 +30,8 @@ signal menu_pressed()
 signal map_pressed()
 ## 静步开关（原「蹲伏」改为静步）：慢走 + 脚步不发声
 signal silent_pressed()
+## 闪避（2026-10-13 用户需求：位移 1.5 倍人物身位）
+signal dodge_pressed()
 
 ## 输入动作名（同时在 project.godot 的 InputMap 里声明）
 const A_MOVE := ["move_left", "move_right", "move_up", "move_down"]
@@ -48,6 +50,8 @@ var heal_btn: TouchButton
 var bag_btn: TouchButton
 var menu_btn: TouchButton
 var silent_btn: TouchButton
+## 闪避按钮（与其他动作键同一列 —— 刻意避开瞄准摇杆的矩形）
+var dodge_btn: TouchButton
 ## 地图（真机反馈 #2：需要能看撤离点位置）
 var map_btn: TouchButton
 
@@ -146,6 +150,9 @@ func _build() -> void:
 	# 静步（原「蹲伏」改为静步）：慢走 + 脚步不发声。放在治疗与背包之间（该处有空档）
 	silent_btn = _make_button("Silent", "◌", "静步", br * 0.82, UITokens.STEALTH, false)
 	silent_btn.pressed_down.connect(func(): silent_pressed.emit())
+	# 闪避：位移 1.5 倍人物身位（BodyMetrics.DODGE_DISTANCE）
+	dodge_btn = _make_button("Dodge", "⟫", "闪避", br * 0.82, UITokens.INFO, false)
+	dodge_btn.pressed_down.connect(func(): dodge_pressed.emit())
 	# 齿轮放【左上角】—— 用户明确要求。
 	# 注意：它压在移动摇杆的 DYNAMIC 区域内，但它是后加入的 GUI 子节点，
 	# 触摸优先给它，所以不会互相打架（摇杆只在齿轮之外的区域响应）。
@@ -230,6 +237,9 @@ func _layout() -> void:
 	# 减去按钮直径后仍有约 50px 空档（640x360 下实测），不会互相压住。
 	_place(silent_btn, Vector2(cx, b.y - br * 2.6 - short * 0.315), br * 0.78)
 	_place(bag_btn, Vector2(cx, b.y - br * 3.2 - short * 0.40), br * 0.78)
+	# 闪避：接在背包上方，继续沿右边缘竖排 —— 不侵入瞄准摇杆的矩形，
+	# 也就不存在「想瞄准却点了闪避」的抢触点问题。
+	_place(dodge_btn, Vector2(cx, b.y - br * 3.8 - short * 0.49), br * 0.78)
 
 	# 地图按钮：右上角（`menu_btn` 在 (0,0) 即左上角，两者对角线，不会互压）
 	var mr := br * 0.72

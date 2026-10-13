@@ -8,6 +8,47 @@
 
 ---
 
+## 🔴 最新一轮（2026-10-13 · DSH Lead）：自动作战 / 固定弹道 / 闪避
+
+> 交接时间：2026-10-13 · 执行：DSH Lead · 工作区 `E:\AAAASDC` · HEAD `b3641e7`
+> **验收已跑：`tools\verify_all.ps1` 退出码 0（可以交付）**
+
+**① 一句话**：按拥有者需求落地五条 —— 玩家自动寻路、自动锁定攻击、遇容器自动搜刮、
+敌人攻击改固定弹道（2 倍身位宽、锁开火瞬间人物中心）、闪避（1.5 倍身位）。
+6 个新文件 + 9 个改动文件，全部通过工程验收。
+
+**② 改了哪些（别人别碰）**
+
+- 新增：`sim/combat/body_metrics.gd`、`sim/combat/lane_shot.gd`、`sim/combat/lane_shot_manager.gd`、
+  `sim/combat/dodge.gd`、`sim/ai/player_autopilot.gd`、`test/suites/s25_auto_combat.gd`
+- 修改：`sim/ai/enemy_agent.gd`、`sim/combat/auto_aim.gd`、`view/raid_sim_runner.gd`、
+  `view/raid_scene.gd`、`view/raid_drawer.gd`、`view/raid_input.gd`、
+  `ui/touch_controls.gd`、`ui/settings_menu.gd`、`game/game_state.gd`
+
+**③ 复跑命令**：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1`
+
+**③b 本轮验收原始结果**
+
+```
+① 单元测试    ✅ 通过：1619 项，0 失败（退出码 0）
+② 集成验证    ✅ PC 端验证全部通过（105 项）（退出码 0）
+③ 数据契约    ✅ 通过：0 错误，0 警告
+④ 像素基线    ⚠️ 本环境无法成像（无交互式绘图会话），未给出有效结论 —— 该脚本开头已标明它非门槛
+总退出码 0 —— 「可以交付」   耗时 16.7 秒
+```
+
+**④ 没验证的**
+
+- ④ 像素基线：截图脚本在本环境未产出 `art/_raw/_verify_now.png`，该项**无结论**（非门槛）。
+- **真机手感未验证**：弹速 11 格/秒、闪避冷却 0.85 秒、自动作战交战距离 3~8 格都是首版数值，
+  需安卓真机复核（用户此前明确要求「手感由真机定」）。
+- 自动作战的「目标优先级 / 卡住拉黑」策略只在本机 headless 单测与集成验证下通过，未真机跑过。
+
+**⑤ 下一步**：真机试自动作战与闪避手感 → 按需调 `LaneShot.DEFAULT_SPEED`（闪避窗口）与
+`PlayerAutopilot.STANDOFF_MIN/MAX`（走位）。
+
+---
+
 ## 🔴 最新一轮（2026-10-13 · WorkBuddy）：git 历史落地（为两人协作清地基）
 
 > 交接时间：2026-10-13 · 执行：WorkBuddy · 分支 `main`，76 个提交，**工作树干净、未推远端**

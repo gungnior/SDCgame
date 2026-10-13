@@ -275,6 +275,23 @@ func _draw() -> void:
 		draw_rect(Rect2(ctr + Vector2(-10, -15), Vector2(20, 3)), Color(0.2, 0.2, 0.22), true)
 		draw_rect(Rect2(ctr + Vector2(-10, -15), Vector2(20 * hpr, 3)), Color(0.9, 0.3, 0.3), true)
 
+	# ── 敌人的固定弹道（2026-10-13 用户需求）──
+	# 画法刻意做成「看得见的走廊」：玩家必须先看见弹道、再决定闪避。
+	# 半宽取自 BodyMetrics（= 1 倍人物身位），所以「看到多宽」就是「判定多宽」。
+	if scene.lane_shots != null:
+		for s in scene.lane_shots.shots:
+			var o: Vector2 = s.origin * scene.CELL_PX
+			var d: Vector2 = s.dir
+			var half: float = s.half_width * scene.CELL_PX
+			var side := Vector2(-d.y, d.x) * half
+			var tip: Vector2 = (s.origin + d * s.length) * scene.CELL_PX
+			draw_colored_polygon(PackedVector2Array([o + side, tip + side, tip - side, o - side]),
+				Color(1.0, 0.36, 0.30, 0.10))
+			var head: Vector2 = (s.origin + d * s.traveled) * scene.CELL_PX
+			var tail: Vector2 = (s.origin + d * maxf(s.traveled - 3.0, 0.0)) * scene.CELL_PX
+			draw_line(tail, head, Color(1.0, 0.78, 0.36, 0.9), maxf(2.0, half * 0.35))
+			draw_circle(head, 3.5, Color(1.0, 0.96, 0.78))
+
 	# ── 曳光 ──
 	# ⚠️ 早先 ttl 只有 0.06s（约 3.6 帧）且线很细，真机上"只听到枪声看不到子弹"。
 	#    现在加长到 0.13s，加粗，并在头部画一个亮点。
