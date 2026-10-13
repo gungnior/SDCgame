@@ -89,7 +89,23 @@ hitstop 的墙钟问题**是真的**（单位级实测：同一个 120ms 请求�
 
 ## 待办
 
+### W-07 · 建共享 remote（两人协作的前提）—— 待拥有者操作
+
+**背景**：本地历史已清零并拆成 16 个逻辑提交（见 [git-history-bootstrap.md](git-history-bootstrap.md)），
+但仓库**至今没有 remote**，第二个人无法 clone。`.gitignore` 已挡掉 `_install/`（2.2G 工具链）、
+`build/`（534M APK）、`.godot/`，入库仅 362 个文本/小文件。
+
+**要做**：① 拥有者在 GitHub/Gitee 建空仓库（项目 GPL-3.0 免费开源，公开推符合红线；
+国内访问优先 Gitee）；② `git remote add origin <url>` + `git push -u origin master`；
+③ 两人各自 clone，`_install/` 工具链每人本地自备（AGENTS.md 已要求全脚本相对定位，
+clone 到任何盘符都能跑验收）；④ 各跑一次 `verify_all.ps1` 确认退出码 0 再开工。
+
+**写入范围**：无仓库写入（remote 是账号侧操作）。
+
+---
+
 ### W-00 · ⭐ **让模拟可复现：hitstop 改用帧计数**（✅ 已完成，见上）
+
 > ✅ **已完成** @DSH-Lead —— 报告 [w00-determinism.md](w00-determinism.md)。
 > ⚠️ 下面这段"根因"是**当时的判断，已被实测更正**（真正的主因是验收工具两个 bug）；
 > 保留原文是为了留下"判断→证伪"的记录，**不要照它继续推断**。
@@ -281,6 +297,7 @@ enemies 4→7（新增 C 普通敌人 + 1 Boss，ranged 反应时间均 ≥ 0.25
 | **⭐ 装备系统「打通」（UI + 战局接线）** | **WorkBuddy** | **0** | _（本会话，未提交）_ · 见上方「进行中」的完整条目 |
 | 修 `Equipment.get()` 与 `Object.get()` 冲突 | **WorkBuddy** | **0** | 方法改名 `id_in`。⚠️ **踩坑记录**：RefCounted 上的方法**不能叫 `get`/`set`**（与 `Object.get/set` 冲突）→ Parse Error → Godot `--script` 加载失败**空转不退出** → `verify_all` 假死 12 分钟 |
 | 修「地图生成坏种子 → 刷出 0 敌人」 | **WorkBuddy** | **0** | `sim/mapgen/map_generator.gd` 的 `MAX_ATTEMPTS` 24→64（诊断 16 种子：坏种子要到第 36 次才成功） |
+| **git 历史落地：未提交的全部改动拆成 16 个逻辑提交，工作树清零** | **WorkBuddy** | **0**（1555 单测 + 105 集成 + 数据 0 错 0 警） | `fe63a0e..c38f9c9`（本地，**未推 remote**）· 提交地图与拆分理由见 [git-history-bootstrap.md](git-history-bootstrap.md) |
 
 ---
 
