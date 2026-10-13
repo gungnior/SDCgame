@@ -8,6 +8,29 @@
 
 ---
 
+## 🔴 最新一轮（2026-10-13 · WorkBuddy）：git 历史落地（为两人协作清地基）
+
+> 交接时间：2026-10-13 · 执行：WorkBuddy · 提交 `fb98ee5`（17 个新提交，`fe63a0e..fb98ee5`）
+> 任务板：[workboard.md](workboard.md) · 提交地图：[git-history-bootstrap.md](git-history-bootstrap.md)
+
+**① 一句话**：动手前 73 改 + 86 新文件全部未提交（横跨十几轮），已拆成 17 个逻辑提交，
+工作树清零，`verify_all.ps1 -Fast` 退出码 0（1555 单测 + 105 集成 + 数据 0 错 0 警）。
+
+**② 改了哪些**：只动了 git 历史 + `.gitignore`（补 `.workbuddy/`）+ 两份 docs。
+**代码零改动**（提交前后树与 HEAD 零差异，验收数字不变即是证明）。
+两个一次性补丁脚本移进 `_install/tmp/` 本地留底。
+
+**③ 复跑命令**：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1 -Fast`
+
+**④ 没验证的**：remote 未建（W-07，需拥有者账号操作）；像素基线 ④ 本轮仍跳过；
+拆成 17 个提交后**没有逐个提交单独跑验收**（内容与已验证树逐字节相同，逐个跑是浪费，
+但若未来要挑中间提交 bisect，记得那一版的验收状态未知）。
+
+**⑤ 下一步**：W-07 建 remote → 两人各自 clone + 自备 `_install/` 工具链 → 各跑一次验收再开工。
+然后按门 1 的两个缺口（死亡痛感/难度平衡）分工，见 [progress-report.md](progress-report.md) §4。
+
+---
+
 # 🔴 最新一轮（2026-10-13 · WorkBuddy）：装备系统「打通」
 
 > 交接时间：2026-10-13 · 执行：WorkBuddy · **全部改动未提交**（工作树里直接可见）
