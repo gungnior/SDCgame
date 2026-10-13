@@ -298,6 +298,7 @@ enemies 4→7（新增 C 普通敌人 + 1 Boss，ranged 反应时间均 ≥ 0.25
 | 修 `Equipment.get()` 与 `Object.get()` 冲突 | **WorkBuddy** | **0** | 方法改名 `id_in`。⚠️ **踩坑记录**：RefCounted 上的方法**不能叫 `get`/`set`**（与 `Object.get/set` 冲突）→ Parse Error → Godot `--script` 加载失败**空转不退出** → `verify_all` 假死 12 分钟 |
 | 修「地图生成坏种子 → 刷出 0 敌人」 | **WorkBuddy** | **0** | `sim/mapgen/map_generator.gd` 的 `MAX_ATTEMPTS` 24→64（诊断 16 种子：坏种子要到第 36 次才成功） |
 | **git 历史落地：未提交的全部改动拆成 16 个逻辑提交，工作树清零** | **WorkBuddy** | **0**（1555 单测 + 105 集成 + 数据 0 错 0 警） | `fe63a0e..c38f9c9`（本地，**未推 remote**）· 提交地图与拆分理由见 [git-history-bootstrap.md](git-history-bootstrap.md) |
+| **push 前门禁：`tools/pre_push_check.ps1`（7 项检查）+ 清单文档** | **WorkBuddy** | 脚本已实跑两轮（含一次全量验收 exit 0） | `b50edc6`、`ef6b361` · [collab-push-checklist.md](collab-push-checklist.md) |
 
 ---
 

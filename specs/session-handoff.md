@@ -16,9 +16,12 @@
 **① 一句话**：动手前 73 改 + 86 新文件全部未提交（横跨十几轮），已拆成 17 个逻辑提交，
 工作树清零，`verify_all.ps1 -Fast` 退出码 0（1555 单测 + 105 集成 + 数据 0 错 0 警）。
 
-**② 改了哪些**：只动了 git 历史 + `.gitignore`（补 `.workbuddy/`）+ 两份 docs。
+**② 改了哪些**：只动了 git 历史 + `.gitignore`（补 `.workbuddy/`）+ 三份 docs
+（`git-history-bootstrap.md` / `collab-push-checklist.md` + 任务板交接）。
 **代码零改动**（提交前后树与 HEAD 零差异，验收数字不变即是证明）。
 两个一次性补丁脚本移进 `_install/tmp/` 本地留底。
+另交付 `tools/pre_push_check.ps1`：push 前 7 项门禁（脏树/超大文件/产物入库/密钥/
+含中文 ps1 的 BOM/验收退出码/remote），已实跑两轮，BOM 检查为首轮实跑后精修成内容感知。
 
 **③ 复跑命令**：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1 -Fast`
 
