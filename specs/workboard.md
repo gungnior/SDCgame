@@ -89,29 +89,29 @@ hitstop 的墙钟问题**是真的**（单位级实测：同一个 120ms 请求�
 
 ## 待办
 
-### W-07 · 建共享 remote（两人协作的前提）—— 🔶 库已建、内容就绪，**差最后一条 push（拥有者终端执行）**
+### W-07 · 建共享 remote（两人协作的前提）—— ✅ **已完成（2026-10-13 晚，拥有者本机执行）**
 
-**背景**：本地历史已拆成逻辑提交（见 [git-history-bootstrap.md](git-history-bootstrap.md)），
-remote 已配置：`https://github.com/gungnior/SDCgame.git`。
+**背景**：本地历史已拆成逻辑提交（见 [git-history-bootstrap.md](git-history-bootstrap.md)）。
 
-**已查明**：远端**不是空库**——GitHub 建库时自动生成了 initial commit（MIT LICENSE + 两行 README，
-`d1a56fe5`）。该提交内容已全部保留进本地历史（MIT 原文原样在 `LICENSE`，库主原话留在 README 标题下），
-因此首次推送用 `--force` 不会丢任何东西。
+**结果**：`https://github.com/gungnior/SDCgame.git` 已推送成功。拥有者本机执行
+`git push -u origin main --force`，浏览器认证通过（`+ d1a56fe...b3641e7 main -> main (forced update)`，
+1156 objects / 12.26 MiB）。远端原本不是空库（GitHub 自动 init 的 MIT LICENSE + 两行 README），
+内容已保留进本地历史，强推未丢任何东西。
 
-**要做**：拥有者在**自己的终端**（沙箱代理不影响本机直连）执行：
-
-```powershell
-cd <仓库路径>
-git push -u origin main --force
-```
-
-然后两人各自 `git clone`，`_install/` 工具链每人本地自备，各跑一次 `verify_all.ps1` 确认退出码 0 再开工。
-⚠️ 本会话沙箱走 MITM 代理，git 的 schannel 吊销检查过不去（只有 `GIT_SSL_NO_VERIFY=true` 才通）——
-这是沙箱网络的事，拥有者本机不受影响。
+**推送后验证（全过）**：`origin/main` 与本地 `main` 哈希一致（`b3641e7`）；449 个文件树结构一致；
+远端 `LICENSE` = MIT（Copyright (c) 2026 gungnior）；README 保留库主原话；
+`_install/`、`build/`、`.godot/`、`.workbuddy/` 均未入库；唯一大文件 `art/fonts/NotoSansSC-VF.ttf`（17MB，已知）。
 
 **⚠️ 连带变更（2026-10-13 拥有者拍板）**：项目许可证由 **GPL-3.0 改为 MIT**（以建库选择为准）。
 `AGENTS.md` §5 红线、README、action-plan/progress-report/art-pipeline/tech-stack 等现行声明已全线同步；
 `feasibility.md` D-09 等**决策记录保留原文、加推翻注记**（不改写历史）。
+
+**下一步（两人开工流程）**：
+① 队友 `git clone https://github.com/gungnior/SDCgame.git`；
+② `_install/` 工具链每人本地自备（AGENTS.md 已要求全脚本相对定位，clone 到任何盘符都能跑验收）；
+③ 各跑一次 `verify_all.ps1` 确认退出码 0 再动手；
+④ 动工前在本文档声明"进行中 + 写入范围"（防撞车唯一机制）；
+⑤ 以后 `git push` 即可，**别再加 `--force`**（会覆盖队友提交）。
 
 **写入范围**：本轮只改 git 配置/历史与文档，未动游戏代码。
 
@@ -312,7 +312,7 @@ enemies 4→7（新增 C 普通敌人 + 1 Boss，ranged 反应时间均 ≥ 0.25
 | 修「地图生成坏种子 → 刷出 0 敌人」 | **WorkBuddy** | **0** | `sim/mapgen/map_generator.gd` 的 `MAX_ATTEMPTS` 24→64（诊断 16 种子：坏种子要到第 36 次才成功） |
 | **git 历史落地：未提交的全部改动拆成 16 个逻辑提交，工作树清零** | **WorkBuddy** | **0**（1555 单测 + 105 集成 + 数据 0 错 0 警） | `fe63a0e..c38f9c9`（本地，**未推 remote**）· 提交地图与拆分理由见 [git-history-bootstrap.md](git-history-bootstrap.md) |
 | **push 前门禁：`tools/pre_push_check.ps1`（7 项检查）+ 清单文档** | **WorkBuddy** | 脚本已实跑两轮（含一次全量验收 exit 0） | `b50edc6`、`ef6b361` · [collab-push-checklist.md](collab-push-checklist.md) |
-| **remote 配置 + 许可证拍板 MIT + 文档全线同步（分支改名 main）** | **WorkBuddy** | 0（验收未重跑：本轮零代码改动；推前请拥有者本机复跑门禁） | `9105114`、`b0af01b`、`3bac6e6` · **push 待拥有者执行，见 W-07** |
+| **remote 配置 + 许可证拍板 MIT + 文档全线同步（分支改名 main）+ ⭐ 推送成功（W-07 完成）** | **WorkBuddy**（push 由拥有者本机执行） | 0（验收未重跑：全程零代码改动） | `9105114`、`b0af01b`、`3bac6e6` · 远端 `origin/main` = `b3641e7`，与本地哈希一致，449 文件树 IDENTICAL |
 
 ---
 
