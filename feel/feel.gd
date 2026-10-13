@@ -16,6 +16,21 @@ extends Node
 ##      3. **像素游戏专属坑：亚像素随机偏移会撕裂像素网格**
 ##         → 本模块的 shake_offset() **量化到整像素**
 ##      4. 必须提供关闭 / 降低震动的无障碍选项 → 见 set_accessibility()
+##
+## ─────────────── ⭐ W-00：本模块**不再读墙钟**（帧计数） ───────────────
+## 旧实现用 `Time.get_ticks_msec()` 记 hitstop 的结束时刻，于是：
+##   **"冻结了几帧"取决于机器多快 / 当时那一帧多慢** ——
+##   同一个种子、同一份输入，在不同机器上模拟推进量不同，
+##   而且 `--fixed-fps` 也救不了（帧数 ≠ 墙钟）。
+## 这直接毁掉两件事：**bug 无法从种子复现**、**像素基线不能当回归门**。
+##
+## 现在全部改成**帧计数**（按 60fps 把 ms 换算成帧）：
+##   · 冻结时长 = 固定帧数（60ms -> 4 帧，硬上限 120ms -> 8 帧）
+##   · 频率配额（原来 110ms）-> 固定帧数（7 帧）
+##   · 受伤闪白冷却（原来 180ms）-> 固定帧数（11 帧）
+## `Engine.time_scale = 0` 仍然照压 —— **"冻结期间世界不动"的观感没变**，
+## 变的只是"冻多久"由常数决定，不再由机器速度决定。
+## 验收：`tools\check_determinism.ps1`（同参数 4 次 × 第 300 帧，两两逐像素一致）。
 
 # ─────────────────── 分级表 ───────────────────
 #
@@ -66,18 +81,28 @@ const LEVELS := {
 }
 
 ## 受伤闪白的最小间隔 —— 否则被连续射击时闪白会一直挂着（实测踩过）
-const DAMAGE_FLASH_COOLDOWN_MS := 180
+## ⚠️ W-00：单位从"毫秒墙钟"改成**帧**（180ms ≈ 11 帧 @60fps）。
+const DAMAGE_FLASH_COOLDOWN_FRAMES := 11
 ## hitstop 最小间隔。
 ## ⚠️ spec 只给了【单次时长】上限（60~120ms），但**没限制频率**。
 ##    全自动武器下"每次命中都冻"会退化成持续卡顿 —— 安卓真机实测到了。
 ##    这里用配额把频率也管住（与震动配额同样的思路）。
-const HITSTOP_MIN_INTERVAL_MS := 110
+## ⚠️ W-00：原来的 110ms 墙钟改成 **7 帧**（110ms ÷ 16.67ms ≈ 6.6）。
+const HITSTOP_MIN_INTERVAL_FRAMES := 7
 
 # ─────────────────── 参数 ───────────────────
 const MAX_OFFSET_PX := 7.0        ## trauma=1 时的最大位移（像素）
 const TRAUMA_DECAY := 1.7         ## 每秒衰减
 ## 震动配额：防止"连续随机震动"（spec 明令禁止）
 const SHAKE_BUDGET_PER_SEC := 2.2
+
+# ─────────────────── W-00：帧计数基准 ───────────────────
+## ms -> 帧 的换算基准。用 60fps（本项目的目标帧率 / `--fixed-fps`）。
+const FRAME_MS := 1000.0 / 60.0
+## 硬上限 120ms 对应的帧数 = ceil(120 / 16.667) = 8
+const MAX_HITSTOP_FRAMES := 8
+## 计数上限：防止长时间运行把帧计数加到溢出（够大即可）
+const FRAME_COUNT_CAP := 1 << 20
 
 # ─────────────────── 无障碍 ───────────────────
 var shake_enabled := true
@@ -87,11 +112,13 @@ var intensity := 1.0              ## 0.0 ~ 1.0 全局强度
 
 # ─────────────────── 状态 ───────────────────
 var trauma := 0.0
-var _hitstop_until_ms := 0
+## 冻结还剩几帧（0 = 没冻结）。⭐ W-00：这是**帧计数**，不是"墙钟时刻"。
+var _hitstop_frames := 0
 var _flash := 0.0                 ## 当前闪白强度（0~1）
 var _flash_color := Color(1, 1, 1)
-var _last_damage_flash_ms := -99999
-var _last_hitstop_ms := -99999
+## W-00：两个冷却都用**帧**计（原来是墙钟 ms）
+var _frames_since_damage_flash := FRAME_COUNT_CAP
+var _frames_since_hitstop := FRAME_COUNT_CAP
 var _hitstop_suppressed := 0
 var _shake_budget := SHAKE_BUDGET_PER_SEC
 var _shake_suppressed := 0        ## 被配额压掉的次数（调试用）
@@ -121,12 +148,22 @@ func _ensure_noise() -> void:
 
 
 func _process(delta: float) -> void:
-	# ⚠️ hitstop 期间 Engine.time_scale = 0，delta 会是 0 ——
-	#    所以恢复必须走【墙钟时间】，不能用 delta 累加。
-	if _hitstop_until_ms > 0 and Time.get_ticks_msec() >= _hitstop_until_ms:
-		_hitstop_until_ms = 0
-		Engine.time_scale = 1.0
-	if _hitstop_until_ms > 0:
+	# ⭐ W-00：**帧**照走，冷却就照涨 —— 与 `Engine.time_scale` 无关。
+	#    旧实现这里读墙钟，于是"过了多少帧"和"过了多少毫秒"被混为一谈。
+	_frames_since_hitstop = mini(_frames_since_hitstop + 1, FRAME_COUNT_CAP)
+	_frames_since_damage_flash = mini(_frames_since_damage_flash + 1, FRAME_COUNT_CAP)
+
+	# hitstop 期间 Engine.time_scale = 0，delta 会是 0 ——
+	# 所以冻结必须靠**帧计数**推进，不能靠 delta 累加，也不能靠墙钟。
+	if _hitstop_frames > 0:
+		if not hitstop_enabled:
+			# 玩家在冻结中途按了"关闭命中顿帧" -> 立刻解冻，
+			# 否则会留下一个永远等不到归零的计数
+			_end_hitstop()
+			return
+		_hitstop_frames -= 1
+		if _hitstop_frames == 0:
+			Engine.time_scale = 1.0
 		return                       # 冻结中不推进其它手感状态
 
 	_time += delta
@@ -185,14 +222,22 @@ func hitstop(ms: float) -> void:
 	if ms <= 0.0:
 		return                       # 0 = 本档不冻结（如轻击）
 	# ⚠️ 频率上限：全自动武器每发都冻会变成持续卡顿（安卓真机实测）
-	var now := Time.get_ticks_msec()
-	if now - _last_hitstop_ms < HITSTOP_MIN_INTERVAL_MS:
+	# ⭐ W-00：改成**帧**配额（原来是墙钟 ms）
+	if _frames_since_hitstop < HITSTOP_MIN_INTERVAL_FRAMES:
 		_hitstop_suppressed += 1
 		return
-	_last_hitstop_ms = now
-	_hitstop_until_ms = now + int(ms)
+	# ⭐ W-00：ms -> 帧。用 ceil 是为了对齐旧实现的实测观感：
+	#    120ms 在 60fps 下实测冻 8 帧（不是 round(7.2)=7），60ms 冻 4 帧。
+	_hitstop_frames = clampi(int(ceilf(ms / FRAME_MS)), 1, MAX_HITSTOP_FRAMES)
+	_frames_since_hitstop = 0
 	Engine.time_scale = 0.0
 	hitstop_count += 1
+
+
+## 立刻结束冻结并复原时间缩放（reset / 无障碍开关 / 冻结中途关闭都用它）
+func _end_hitstop() -> void:
+	_hitstop_frames = 0
+	Engine.time_scale = 1.0
 
 
 func add_trauma(amount: float) -> void:
@@ -215,10 +260,11 @@ func flash(amount: float, color: Color = Color(1, 1, 1)) -> void:
 
 func flash_damage(amount: float) -> void:
 	# ⚠️ 限流：被连续射击时每帧都触发会让整屏一直泛红（实测踩过）
-	var now := Time.get_ticks_msec()
-	if now - _last_damage_flash_ms < DAMAGE_FLASH_COOLDOWN_MS:
+	# ⭐ W-00：同样改成**帧**冷却（原来 180ms 墙钟）——闪白会改变像素，
+	#    墙钟冷却会让"哪几帧在闪"随机器速度变，像素就不可复现。
+	if _frames_since_damage_flash < DAMAGE_FLASH_COOLDOWN_FRAMES:
 		return
-	_last_damage_flash_ms = now
+	_frames_since_damage_flash = 0
 	flash(amount, Color(0.78, 0.07, 0.09))
 
 
@@ -246,7 +292,7 @@ func flash_color() -> Color:
 
 
 func is_frozen() -> bool:
-	return _hitstop_until_ms > 0
+	return _hitstop_frames > 0
 
 
 ## 无障碍：一次性配置，UI 里挂三个勾选框即可
@@ -256,9 +302,8 @@ func set_accessibility(p_shake: bool, p_hitstop: bool, p_flash: bool,
 	hitstop_enabled = p_hitstop
 	flash_enabled = p_flash
 	intensity = clampf(p_intensity, 0.0, 1.0)
-	if not hitstop_enabled and _hitstop_until_ms > 0:
-		_hitstop_until_ms = 0
-		Engine.time_scale = 1.0
+	if not hitstop_enabled and _hitstop_frames > 0:
+		_end_hitstop()
 	if not shake_enabled:
 		trauma = 0.0
 
@@ -266,16 +311,16 @@ func set_accessibility(p_shake: bool, p_hitstop: bool, p_flash: bool,
 func reset() -> void:
 	trauma = 0.0
 	_flash = 0.0
-	_hitstop_until_ms = 0
-	Engine.time_scale = 1.0
+	_end_hitstop()
 	_shake_budget = SHAKE_BUDGET_PER_SEC
 	# 计数也要清 —— "reset" 就该是彻底复位（测试与重开局都依赖这个语义）
 	hitstop_count = 0
 	_shake_suppressed = 0
 	_hitstop_suppressed = 0
-	_last_damage_flash_ms = -99999
-	# ⚠️ 连"上次触发时间"也要清 —— 否则重开局后的第一个 hitstop 会被频率配额误吞
-	_last_hitstop_ms = -99999
+	# ⚠️ 两个冷却计数也要顶到上限 —— 否则重开局后的第一个 hitstop
+	#    / 第一次受伤闪白会被频率配额误吞（旧实现里是 -99999 的等价语义）
+	_frames_since_damage_flash = FRAME_COUNT_CAP
+	_frames_since_hitstop = FRAME_COUNT_CAP
 
 
 func stats() -> String:

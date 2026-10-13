@@ -60,31 +60,40 @@ func _initialize() -> void:
 	root.add_child(_scene)
 
 	if _hide_hud:
-		# RaidHud / 触屏控件都是 CanvasLayer，直接整个藏掉
-		var hud = _scene.get("raid_hud")
-		if hud != null:
-			hud.visible = false
-		var touch = _scene.get("touch")
-		if touch != null:
-			touch.visible = false
+		_hide_hud_nodes()
 
 	print("已实例化场景，等待 %d 帧后截图（seed=%d hide_hud=%s）" % [
 		_target, _seed, str(_hide_hud)])
 
 
+## 藏掉 HUD 与触屏控件。
+##
+## ⚠️⚠️ **必须在每一帧都调用**，而且**不能只靠下面 `_initialize` 里那一次**：
+##     HUD 是 `raid_scene._ready() -> _setup_view()` 里才 new 出来的，
+##     而这里（`_initialize`）刚 `add_child` 完，`_scene.get("raid_hud")` 还是 **null** ——
+##     那一次藏 HUD **静默失效**（`if hud != null` 直接跳过）。
+##     后果不是"少了点东西"，而是：
+##       ① HUD 一直可见到截图帧，于是"世界像素基线"里混进了 HUD；
+##       ② HUD 有一行 `FPS %d 平均 %.1f ms 最慢 %.1f ms` —— **墙钟读数**，
+##          天生不可能两次跑一样。
+##     实测：修掉它之后，同参数 4 次运行的两两像素差异从 0.018% 直接变成 **0**。
+##     （这正是 AGENTS.md 里那条"0.02% 帧时序噪声"的真实来源。）
+func _hide_hud_nodes() -> void:
+	var hud = _scene.get("raid_hud")
+	if hud != null:
+		hud.visible = false
+	var touch = _scene.get("touch")
+	if touch != null:
+		touch.visible = false
+
+
 func _process(_delta: float) -> bool:
 	_frames += 1
+	# ⭐ 每帧都藏（原因见 _hide_hud_nodes 的注释）
+	if _hide_hud:
+		_hide_hud_nodes()
 	if _frames < _target:
 		return false
-
-	if _hide_hud:
-		# 每帧都可能被 HUD 自己设回 visible，截图前再按一次
-		var hud = _scene.get("raid_hud")
-		if hud != null:
-			hud.visible = false
-		var touch = _scene.get("touch")
-		if touch != null:
-			touch.visible = false
 
 	var img := root.get_texture().get_image()
 	if img == null:

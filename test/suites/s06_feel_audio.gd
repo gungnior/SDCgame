@@ -19,14 +19,17 @@ func _test_feel() -> void:
 	root.add_child(f)          # 需要进树才能 _process
 
 	# ── ⭐ hitstop 硬上限 120ms（spec：超了就"卡"而不是"猛"）──
+	# ⭐ W-00：冻结时长是**帧计数**（不再读墙钟）——
+	#    所以这里用"喂 N 帧 _process"来推进，而不是 `while 墙钟 < 200` 干等。
+	#    旧断言的写法（等 200ms 墙钟 + 调一次 _process）在帧计数下毫无意义，
+	#    而且它本身就是"测试依赖真实时钟"的坏例子。
 	f.reset()
 	f.hitstop(5000.0)
 	_check(f.is_frozen(), "触发 hitstop 后处于冻结")
-	# 内部应被夹到 120ms；等 200ms 后必须已经恢复
-	var t0 := Time.get_ticks_msec()
-	while Time.get_ticks_msec() - t0 < 200:
-		pass
-	f._process(0.016)
+	var frozen_frames := _run_until_unfrozen(f, 600)
+	# 120ms 上限 ÷ 16.667ms = 7.2 -> ceil = 8 帧（与旧实现实测的 8 帧一致）
+	_check_eq(frozen_frames, f.MAX_HITSTOP_FRAMES,
+		"5000ms 请求被夹到 120ms = %d 帧冻结（实际 %d）" % [f.MAX_HITSTOP_FRAMES, frozen_frames])
 	_check(not f.is_frozen(), "hitstop 被夹到 <=120ms 并已恢复")
 	_check(absf(Engine.time_scale - 1.0) < 0.001, "time_scale 已复原")
 
@@ -279,22 +282,51 @@ func _test_hitstop_frequency_limit() -> void:
 	_check(f._hitstop_suppressed >= 29, "其余被配额压掉（%d 次）" % f._hitstop_suppressed)
 
 	# ④ 但隔开足够时间后应当能再次生效
+	# ⭐ W-00：配额也改成**帧**了，所以这里直接顶帧计数，不再去改墙钟时间戳。
 	f.reset()
 	f.hitstop(60.0)
 	_check_eq(f.hitstop_count, 1, "第一次生效")
-	f._last_hitstop_ms = Time.get_ticks_msec() - int(f.HITSTOP_MIN_INTERVAL_MS) - 5
+	f._frames_since_hitstop = f.HITSTOP_MIN_INTERVAL_FRAMES
 	f.hitstop(60.0)
 	_check_eq(f.hitstop_count, 2, "超过最小间隔后可再次生效")
 
 	# ⑤ 单次时长仍受 60~120ms 硬上限约束
 	f.reset()
 	f.hitstop(5000.0)
-	var t0 := Time.get_ticks_msec()
-	while Time.get_ticks_msec() - t0 < 180:
-		pass
-	f._process(0.016)
-	_check(not f.is_frozen(), "超长请求被夹到 <=120ms 并已恢复")
+	var frames5 := _run_until_unfrozen(f, 600)
+	_check_eq(frames5, f.MAX_HITSTOP_FRAMES,
+		"超长请求被夹到 120ms = %d 帧并已恢复" % f.MAX_HITSTOP_FRAMES)
+
+	# ⑥ ⭐⭐ W-00 的核心回归断言：**冻结帧数必须是常数，不随机器快慢变**。
+	#
+	#    旧实现用 `Time.get_ticks_msec()` 决定何时解冻 ——
+	#    同一段代码在"快机器"上冻 N 帧、在"慢机器/那一帧卡了"上冻 M 帧，
+	#    于是同一个种子跑出来的模拟推进量不同（> bug 无法复现 / 像素基线不可用）。
+	#    这里用两种"帧耗时"各跑一遍：帧计数实现下必须完全一样。
+	f.reset()
+	f.hitstop(5000.0)
+	var fast := _run_until_unfrozen(f, 600)          # 紧凑循环：帧耗时极小
+	f.reset()
+	f.hitstop(5000.0)
+	var slow := _run_until_unfrozen(f, 600, 0.002)   # 每帧额外睡 2ms：模拟慢机器
+	_check(fast > 0 and slow > 0, "⑥ 两次都真的触发过冻结（%d / %d 帧），断言没有空跑" % [fast, slow])
+	_check_eq(fast, slow,
+		"冻结帧数与机器快慢无关（紧凑 %d 帧 vs 每帧+2ms %d 帧）" % [fast, slow])
 
 	f.reset()
 	Engine.time_scale = 1.0
 	f.queue_free()
+
+
+## 喂 `_process` 直到解冻，返回用掉的帧数。
+## ⭐ W-00：帧计数实现下，"冻结时长"就是这个返回值 ——
+## 可以直接断言它等于常数，而不用去等墙钟（旧断言 `while 墙钟 < 200` 就是在赌机器速度）。
+## `sleep_ms` 用来人为拉长"每帧耗时"，模拟慢机器 / 卡顿帧。
+func _run_until_unfrozen(f: Node, limit: int, sleep_ms: float = 0.0) -> int:
+	var n := 0
+	while f.is_frozen() and n < limit:
+		f._process(0.016)
+		n += 1
+		if sleep_ms > 0.0:
+			OS.delay_msec(int(sleep_ms * 1000.0))
+	return n
