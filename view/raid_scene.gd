@@ -21,17 +21,24 @@ const CELL_PX := 48.0          ## 1 逻辑格 = 48 px（T-31）
 const PLAYER_SPEED := 3.2      ## 逻辑格 / 秒
 const NOISE_LOUD := 22.0       ## 开枪的响度（米）
 const NOISE_QUIET := 7.0       ## 走路的响度
+## ── 静步（原「蹲伏」改为此功能）──
+## 语义：主动放慢脚步以**不发出脚步声**（AI 听觉听不到），代价是移速明显下降。
+## 注意：静步**不影响**开枪声（NOISE_LOUD 照常）、也不影响敌人视觉（该看见还是看见）。
+const SILENT_SPEED_FACTOR := 0.55    ## 静步时的移速倍率
 ## 曳光存活时间。
 ## ⚠️ 早先只有 0.06s（约 3.6 帧），安卓真机反馈"开火只听到声音看不到子弹"。
 const TRACER_TTL := 0.13
-## 技术验证阶段：敌人数量上限（真机反馈 #2）
-## 现阶段要的是验证技术，不是打怪。每种敌人各 1 个、总数不超过 4 个足够暴露问题。
-## 调成 0 表示不限制（恢复正式刷怪）。
-const MAX_TEST_ENEMIES := 4
+## 技术验证阶段：敌人数量上限。
+## ⚠️ 2026-10-13 改为 **0（不再钳制）**：用户要求"敌人数量按地图大小来"。
+##    现在总数由**地图主题的 enemy_density** 决定
+##    （见 MapThemeDef.target_enemy_count / MapGenerator._apply_enemy_density）。
+##    保留这个开关只为调试时能临时把敌人压到极少。
+const MAX_TEST_ENEMIES := 0
 ## 技术验证阶段：简化枪械。
-## 真机反馈 #2："不测试具体枪械系统，玩家开火不需要挂载后坐力之类的"。
-## 打开时：散布 = 0、后坐力 = 0、备弹给足（装弹/弹匣保留，那是核心循环的一部分）。
-const SIMPLE_WEAPON := true
+## 换枪备弹（3b）：备弹 = 背包里该弹种的携带量，夹在 [下限, 上限]。
+## ⚠️ 数值属【平衡范畴】，交给平衡专家调；想"严格只给携带量"就把 BASE_RESERVE 设为 0。
+const BASE_RESERVE := 60
+const MAX_RESERVE := 300
 ## 自动瞄准每秒最多转多少度。太快会像甩枪（手感很假）。
 const AUTO_AIM_TURN_DEG := 540.0
 ## 开局宽限期（秒）：这段时间内敌人不索敌。
@@ -44,6 +51,8 @@ const GRACE_SECONDS := 6.0
 # ─── 模拟层 ───
 var reg: DataRegistry
 var gen: MapGenerator
+## 本局地图主题（森林/城区/军事基地）。null = 旧行为（无主题）。
+var theme: MapThemeDef = null
 var flows: FlowFieldManager
 var raid: RaidSession
 var agents: Array = []
@@ -74,6 +83,7 @@ var raid_hud: RaidHud
 
 
 var debug_mode := 0              ## 0 普通 1 流向场 2 房间图 3 声音范围
+var silent_walk := false         ## 静步（C 键切换）：慢走且脚步不发声
 
 # ─── 手感 / 音频 / 触屏（specs/tech-stack.md §2 与 §7.3）───
 var fx: FxPool = null            ## CPUParticles2D 池（T-03）
@@ -87,6 +97,7 @@ var sim_runner: RaidSimRunner = null
 var touch: TouchControls = null  ## 双摇杆 + 动作按钮
 var flash_rect: ColorRect = null ## 受击闪白覆盖层
 var inventory_panel: InventoryPanel = null   ## 背包/搜索面板（#3 / #6）
+var map_panel: MapPanel = null               ## 战术地图（真机反馈 #2：看撤离点）
 ## 设置 / 暂停菜单（第三轮 #3：ESC / 齿轮 / 安卓返回键都开它）
 var settings_menu: SettingsMenu = null
 var result_overlay: ResultOverlay = null   ## 结算界面（含触屏重开按钮）
@@ -150,9 +161,177 @@ func _rng_dir() -> Vector2:
 	return Vector2(_rng.randf_range(-1.0, 1.0), _rng.randf_range(-1.0, 1.0)).normalized()
 
 
+# ─────────────── 地图主题 / 敌人池 / 容器（2026-10-13）───────────────
+
+## 抽一个地图主题。Game.map_id 指定了就用它（藏身处选图），否则按种子随机。
+func _pick_map_theme() -> MapThemeDef:
+	if reg == null or reg.maps.is_empty():
+		return null
+	if Game != null:
+		var want := str(Game.map_id)
+		if want != "" and reg.maps.has(want):
+			return reg.get_map(want)
+	var ids: Array = reg.maps.keys()
+	ids.sort()
+	return reg.get_map(str(ids[_rng.randi_range(0, ids.size() - 1)]))
+
+
+## 本局可用的敌人类型池。有地图主题时**只取该主题敌池里的**；
+## 否则退回全部敌人（旧行为）。
+func _enemy_pool() -> Array[EnemyDef]:
+	var out: Array[EnemyDef] = []
+	if theme != null and not theme.enemy_weights.is_empty():
+		for k in theme.enemy_weights:
+			var d: EnemyDef = reg.get_enemy(str(k))
+			if d != null:
+				out.append(d)
+		out.sort_custom(func(a, b): return a.id < b.id)
+		if not out.is_empty():
+			return out
+	for id in reg.enemies:
+		out.append(reg.enemies[id])
+	out.sort_custom(func(a, b): return a.id < b.id)
+	return out
+
+
+## 抽一个敌人类型：有主题时按 theme.enemy_weights 权重抽，
+## 否则按 seq 轮转（旧行为，保证种类覆盖均匀）。
+func _pick_enemy(kinds: Array[EnemyDef], seq: int) -> EnemyDef:
+	if kinds.is_empty():
+		return null
+	if theme == null or theme.enemy_weights.is_empty():
+		return kinds[seq % kinds.size()]
+	var keys: Array = theme.enemy_weights.keys()
+	keys.sort()
+	var ws: Array = []
+	var usable: Array = []
+	for k in keys:
+		var d: EnemyDef = reg.get_enemy(str(k))
+		var w := int(theme.enemy_weights[k])
+		if d != null and w > 0:
+			usable.append(str(k))
+			ws.append(w)
+	if usable.is_empty():
+		return kinds[seq % kinds.size()]
+	var idx := _rng.weighted_index(ws)
+	if idx < 0 or idx >= usable.size():
+		return kinds[seq % kinds.size()]
+	var picked: EnemyDef = reg.get_enemy(str(usable[idx]))
+	return picked if picked != null else kinds[seq % kinds.size()]
+
+
+## 敌人在房间内的刷点。
+##
+## ⚠️ 不能都刷在 `r.center` —— 同一个房间有多个敌人时它们会**完全重叠**：
+##   渲染上是同一个圆、移动/朝向逐帧一致，玩家看到的就是"只有一个敌人"。
+##   这里用注入的 _rng 在房间矩形里挑一个**可走格**（确定性，满足 T-32）。
+func _enemy_spawn_point(r: Room) -> Vector2:
+	var w := maxi(1, r.rect.size.x)
+	var h := maxi(1, r.rect.size.y)
+	for _i in 12:
+		var c := Vector2i(
+			r.rect.position.x + _rng.randi_range(0, w - 1),
+			r.rect.position.y + _rng.randi_range(0, h - 1))
+		if gen.grid.is_walkable(c):
+			return Ballistics.cell_center(c)
+	return Ballistics.cell_center(r.center)   # 兜底（房间全被占满的极端情况）
+
+
+## 按房间的容器布点生成**可搜索容器**。
+## ⚠️ 物品抽取在这里做 —— MapGenerator 只负责布点（sim/mapgen 拿不到 loot_tables，
+##    保持分层干净）。抽取次数由容器容量决定：大箱子装得更多、更值钱。
+func _spawn_containers() -> void:
+	if raid == null or gen == null or reg == null:
+		return
+	for r in gen.graph.rooms:
+		for cs in r.container_spawns:
+			var def: ContainerDef = reg.get_container(str(cs.get("container_id", "")))
+			if def == null:
+				continue
+			var table: LootTableDef = reg.get_loot_table(def.loot_table_id)
+			if table == null:
+				continue
+			var rolls := clampi(def.capacity / 4, 1, 5)
+			var drops := LootRoller.roll_for_room(table, _rng, r.depth, rolls)
+			if drops.is_empty():
+				continue
+			raid.add_container(def, Ballistics.cell_center(cs.get("pos", r.center)), drops)
+
+
+# ─────────────── 弹药 / 护甲 / 损耗（2026-10-13）───────────────
+
+## 玩家当前装的弹种（由武器的 ammo_id 决定）。
+## 弹种分标准 / 穿甲 / 肉伤，对"有甲 / 无甲"目标差别很大。
+func _player_ammo() -> ItemDef:
+	if reg == null or player_weapon == null or player_weapon.def == null:
+		return null
+	return reg.get_item(player_weapon.def.ammo_id)
+
+
+## 武器磨损对伤害的折损（全新 1.0 -> 完全损坏 0.6）
+func _weapon_wear_factor() -> float:
+	if raid == null or raid.equipment == null:
+		return 1.0
+	return raid.equipment.weapon_damage_factor()
+
+
+## 身上装备提供的护甲值（没穿 = 0）。**这是玩家护甲的唯一来源。**
+##
+## ⚠️ 真机反馈 #3："下图后自动有了护甲值，哪怕身上没有护甲"。
+##    根因是 `_setup_sim` 里写死了 `vitals.reset(100, 40)` ——
+##    40 点护甲跟装备毫无关系，白送。现在改成从配装里取。
+func _player_armor() -> int:
+	if raid == null or raid.equipment == null:
+		return 0
+	return raid.equipment.worn_armor()
+
+
+## 玩家受击结算（**唯一的一处护甲逻辑**）。返回【实际进血量的伤害】。
+##
+## ⚠️ 这里曾经有两套护甲**同时**生效：
+##   ① `Vitals.armor` 池按 55% 吸收
+##   ② 本函数（装备护甲 + 弹型）
+##   叠起来等于"护甲吸了两遍"，而且 `_setup_sim` 白送 40 点护甲。
+##   现在只有一条路径：
+##     · 护甲池 = 身上装备的护甲值（`_player_armor()`，没穿就是 0）
+##     · 弹型决定"这套甲能挡下多少"：`DamageModel.armor_multiplier(pen, armor)`
+##       穿甲弹 -> 穿透比例接近 1 -> 甲基本挡不住；肉伤弹 -> 甲挡得多
+##     · 吸收到的伤害按比例磨损护甲/头盔；打坏 -> 护甲池清零 + 提示维修
+func _resolve_player_hit(raw: int) -> int:
+	if vitals == null:
+		return 0
+	if raw <= 0:
+		return 0
+	var eq: Equipment = raid.equipment if raid != null else null
+	if eq == null:
+		return vitals.take_damage(raw)
+
+	# 敌人目前统一按"标准弹"结算（pen=3）—— 与敌人的数值体系对称
+	var std: ItemDef = reg.get_item("ammo_rifle") if reg != null else null
+	var pen := float(std.pen) if std != null else 3.0
+	var through := DamageModel.armor_multiplier(pen, float(vitals.armor))
+	var before := vitals.armor
+	var applied := vitals.take_hit(raw, through)
+	var absorbed := before - vitals.armor
+	if absorbed > 0:
+		# 每吸收 6 点伤害 = 磨损 1 点耐久（护甲、头盔各摊一半）
+		var wear := maxi(1, int(round(float(absorbed) / 6.0)))
+		var broke := false
+		if not eq.is_empty("armor"):
+			broke = eq.wear_slot("armor", wear) or broke
+		if not eq.is_empty("helmet"):
+			broke = eq.wear_slot("helmet", maxi(1, wear / 2)) or broke
+		if broke:
+			if Sfx != null:
+				Sfx.play("ui_deny")
+			_toast("护甲已损坏 —— 回藏身处维修")
+			vitals.armor = 0        # 打坏的甲不再提供任何减伤
+	return applied
+
+
 func _setup_sim() -> void:
 	reg = DataRegistry.new()
-	if not reg.load_all("A"):
+	if not reg.load_all("C"):
 		push_error("数据加载失败：%s" % str(reg.errors))
 		return
 
@@ -162,12 +341,24 @@ func _setup_sim() -> void:
 	#    正式游玩必须每局不同（T-32 的种子纪律：可复现 ≠ 写死）。
 	if Game != null:
 		Game.apply_accessibility()
+		# ⚠️⚠️ 先把 Game 的**跨场景注册表（C 档）**接过来，**再生成地图**。
+		#    早先顺序是反的：先用本地 A 档的 room_types 生成地图，
+		#    之后才 `reg = Game.reg` 换成 C 档 ——
+		#    结果 C 档的房间类型 / 容器 / 地图主题**永远进不来**。
+		Game.ensure_loaded()
+		if Game.reg != null:
+			reg = Game.reg
 	if _raid_seed <= 0:
 		_raid_seed = Game.raid_seed if (Game != null and Game.raid_seed > 0) else (randi() & 0x7FFFFFFF)
 	_rng = SimRng.new(_raid_seed)
 
+	# ⭐ 地图主题（森林 / 城区 / 军事基地）：决定地图多大、房间配额、
+	#    敌人种类与密度。theme == null 时退化为旧的固定 27×27 单一主题。
+	theme = _pick_map_theme()
 	gen = MapGenerator.new()
-	if not gen.generate(_raid_seed, reg.room_types):
+	var mw: int = theme.map_w if theme != null else 27
+	var mh: int = theme.map_h if theme != null else 27
+	if not gen.generate(_raid_seed, reg.room_types, mw, mh, theme):
 		push_error("地图生成失败：%s" % str(gen.errors))
 		return
 
@@ -179,49 +370,78 @@ func _setup_sim() -> void:
 	if Game != null:
 		Game.ensure_loaded()
 		hideout = Game.hideout
-		reg = Game.reg if Game.reg != null else reg
 	if hideout == null:
-		hideout = Hideout.new(reg.items, 3000)
+		hideout = Hideout.new(reg.items, 3000, reg.weapons, reg.attachments)
 		hideout.wallet += 5000
 
 	# ⚠️ 把藏身处的升级效果传进本局 —— 否则升级花了钱但毫无作用。
 	#    （早先 raid_modifiers() 从未被调用。）
-	raid = RaidSession.new(reg.items, _rng, hideout.stash, hideout.raid_modifiers())
+	var mods := hideout.raid_modifiers()
+
+	# ── 3a：装备的背包决定本局容量/负重（真机缺口补全）──
+	#    raid_modifiers() 只给了升级带来的负重上限；背包 ItemDef 自己的
+	#    carry_slots / carry_weight 必须在这里接进来，否则"换个背包"毫无效果。
+	#    默认（没装备背包）回退到 raid_modifiers 的 12 格 / 升级上限，不回归。
+	var bp_id := hideout.loadout.id_in("backpack")
+	if bp_id != "":
+		var bp: ItemDef = reg.get_item(bp_id)
+		if bp != null:
+			if bp.carry_slots > 0:
+				mods["carry_slots"] = bp.carry_slots
+			if bp.carry_weight > 0.0:
+				mods["carry_weight_limit"] = maxf(float(mods.get("carry_weight_limit", 0.0)), bp.carry_weight)
+
+	raid = RaidSession.new(reg.items, _rng, hideout.stash, mods, reg.missions)
 	raid.load_map(gen)
 	raid.start(240.0)
 
+	# ⭐ 装备系统：把藏身处的**配装**接进本局。
+	#    这一步让"死亡掉装备"真正有承担物：
+	#      · 局内捡到的枪装上身 -> 撤离后就是你的新配装（同一个对象，无需搬运）
+	#      · 死了 -> RaidSession._on_death 连身上这套一起清掉
+	#    在此之前 Equipment 只有单测、没人调用（= 一个不可见的大号衣柜）。
+	raid.equipment = hideout.loadout
+
+	# ⭐ 可搜索容器（2026-10-13）：按房间类型挂靠生成。
+	#    军械库里有枪架、医疗室里有药柜 —— 全部由数据驱动，不是硬编码。
+	#    必须在 raid.setup 之后、面板/地图烘焙之前调用。
+	_spawn_containers()
+	print("[容器] %d 个可搜索容器（按房间类型挂靠生成）" % raid.containers.size())
+
 	vitals = Vitals.new()
-	vitals.reset(100, 40)
+	# 护甲来自【身上装备】：没穿护甲就是 0（真机反馈 #3）。
+	vitals.reset(100, _player_armor())
 	medical = MedicalSystem.new()
 	# 藏身处「战地急救」升级：治疗更快
 	medical.set_speed_multiplier(raid.heal_speed)
 
-	# 玩家武器：步枪 + 自动装配件（展示 A 阶段改装系统）
-	var loadout := WeaponModding.create_loadout(reg.get_weapon("weapon_rifle"), WeaponModding.SLOTS_A)
-	WeaponModding.auto_fit(loadout, reg.attachments)
-	var wdef := loadout.to_weapon_def()
-	# ── 技术验证阶段：不测枪械系统 ──
+	# ── 玩家武器：**优先用藏身处配装的枪** ──
+	# 技术验证阶段：不测枪械系统
 	# 真机反馈 #2："现阶段不测试具体枪械系统，玩家开火不需要挂载后坐力之类的"。
 	# 所以去掉散布与后坐力，备弹给足；装弹/弹匣仍然保留（那是搜打撤核心循环的一部分）。
-	if SIMPLE_WEAPON:
-		wdef.spread_deg = 0.0
-		wdef.recoil_v = 0.0
-		wdef.recoil_h = 0.0
-	player_weapon = WeaponState.new(wdef, 9999 if SIMPLE_WEAPON else 180)
-	print("[装填] %s  视野锥 %.0f°%s" % [loadout.summary(), wdef.aim_cone_deg,
-		"（简化模式：无后坐力/散布）" if SIMPLE_WEAPON else ""])
+	player_weapon = _make_player_weapon()
 
 	var spawn := gen.spawn_room()
 	player_pos = Ballistics.cell_center(spawn.center)
 	raid.hp = vitals.hp
 
 	# ── 起始配装 ──
-	# ⚠️ 真机反馈 #3："按治疗按钮没反应"。查明原因：按钮是好的，
-	#    但 `_setup_sim` 从来没给玩家发过任何物品，背包是空的（0/12 槽），
-	#    所以找不到任何药。这里补上最小可用的起始配装。
-	raid.carry.add("medical_bandage", 2)
-	raid.carry.add("medical_kit", 1)
-	raid.carry.add("ammo_rifle", 90)
+	# ⭐ 真机反馈 #2：优先搬【藏身处选的携带背包】——
+	#    这才是"自己决定带什么进局"的落点。
+	#    携带背包是空的才退回一份最小起始物资，保证"不复配也能开一局"。
+	#
+	# ⚠️ 真机反馈 #3（上一轮）："按治疗按钮没反应"，根因是 `_setup_sim`
+	#    从来没给玩家发过任何物品、背包是空的（0/12 槽），所以找不到任何药。
+	var carried := 0
+	if hideout != null and hideout.pack != null:
+		carried = hideout.drain_pack_into(raid.carry)
+	if carried > 0:
+		print("[配装] 从携带背包搬入 %d 种物资" % carried)
+	else:
+		raid.carry.add("medical_bandage", 2)
+		raid.carry.add("medical_kit", 1)
+		raid.carry.add("ammo_rifle", 90)
+		print("[配装] 携带背包是空的 -> 发一份最小起始物资（去藏身处「携带」自己配）")
 	print("[配装] %s" % raid.carry.summary())
 
 	# 敌人
@@ -232,10 +452,7 @@ func _setup_sim() -> void:
 	# ⚠️ **从数据里取全部敌人类型**，不要硬编码 ——
 	#    数据填充到 A 阶段后（2 -> 4 种），硬编码会让新敌人永远不出现。
 	#    `reg.enemies` 已经是按 stage 过滤过的（load_all("A") 只装 B+A）。
-	var kinds: Array[EnemyDef] = []
-	for id in reg.enemies:
-		kinds.append(reg.enemies[id])
-	kinds.sort_custom(func(a, b): return a.id < b.id)   # 稳定顺序，便于复现
+	var kinds: Array[EnemyDef] = _enemy_pool()
 	if kinds.is_empty():
 		printerr("[敌方] 数据里一个敌人都没有，检查 data/enemies.json")
 		return
@@ -248,7 +465,7 @@ func _setup_sim() -> void:
 			if r.room_type == "spawn":
 				continue
 			var d: EnemyDef = kinds[eid % kinds.size()]
-			var a := EnemyAgent.new(eid, d, Ballistics.cell_center(r.center))
+			var a := EnemyAgent.new(eid, d, _enemy_spawn_point(r))
 			if d.is_ranged():
 				a.equip(reg.get_weapon("weapon_pistol"), 60)
 			# ⚠️ 用 **_rng**（由 _raid_seed 播种）而**不是全局 randf_range**。
@@ -266,8 +483,8 @@ func _setup_sim() -> void:
 			if r.room_type == "spawn":
 				continue
 			for i in r.enemy_budget:
-				var d2: EnemyDef = kinds[eid % kinds.size()]
-				var a2 := EnemyAgent.new(eid, d2, Ballistics.cell_center(r.center))
+				var d2: EnemyDef = _pick_enemy(kinds, eid)
+				var a2 := EnemyAgent.new(eid, d2, _enemy_spawn_point(r))
 				if d2.is_ranged():
 					a2.equip(reg.get_weapon("weapon_pistol"), 60)
 				a2.facing = _rng_dir()
@@ -278,6 +495,106 @@ func _setup_sim() -> void:
 	print("[敌方] %d 名（类型池 %d：%s）%s" % [agents.size(), kinds.size(),
 		", ".join(kinds.map(func(k): return k.name)),
 		"（技术验证模式，上限 %d）" % MAX_TEST_ENEMIES if MAX_TEST_ENEMIES > 0 else ""])
+
+
+## 按藏身处**配装**造出玩家手里的枪。
+##
+## ⚠️⚠️ 这里是装备系统"真的生效"的唯一地方。
+##    只把枪放进装备槽而不影响战斗，那套系统就只是个大号衣柜 ——
+##    "配装"的全部意义在于进局后打的是你选的那把枪（含改的配件）。
+##
+## 装备槽是空的（或数据缺失）时**回退到默认步枪 + 自动装配件**：
+##   · 保证"不复配装也能直接开一局"（技术验证期的容错）
+##   · 迁移过来的老存档（v3 及以前没有 loadout）也走这条路，不会一进局就空手
+func _make_player_weapon() -> WeaponState:
+	var lo: WeaponModding.Loadout = null
+	var eq: Equipment = raid.equipment if raid != null else null
+	var from_loadout := false
+	if eq != null:
+		lo = eq.build_loadout(WeaponModding.SLOTS_C)
+		from_loadout = lo != null
+	if lo == null:
+		var fallback := reg.get_weapon("weapon_rifle")
+		if fallback == null:
+			push_error("[装填] 连回退步枪都取不到（weapon_rifle 缺失）")
+			return null
+		lo = WeaponModding.create_loadout(fallback, WeaponModding.SLOTS_A)
+		WeaponModding.auto_fit(lo, reg.attachments)
+		print("[装填] 装备槽是空的 -> 回退默认步枪（去藏身处「配装」换上自己的枪）")
+	var wdef := lo.to_weapon_def()
+	# ── 3b：备弹按【武器弹种】取（真机缺口补全）──
+	#    早先无论换什么枪都给固定 180/9999，于是"手枪在手、背包只有步枪弹"
+	#    也能随便打。现在：备弹 = 背包里该弹种(ammo_id)的携带量，
+	#    下限 BASE_RESERVE（保证起步有几匣）、上限 MAX_RESERVE（防刷爆）。
+	#    ⚠️ 数值属【平衡范畴】，常量交给平衡专家调；想要"严格只给携带量"把 BASE 设 0。
+	var carried := 0
+	if raid != null and raid.carry != null:
+		carried = raid.carry.count_of(wdef.ammo_id)
+	var reserve: int = clampi(carried, BASE_RESERVE, MAX_RESERVE)
+	var st := WeaponState.new(wdef, reserve)
+	print("[装填] %s%s  视野锥 %.0f°" % [
+		lo.summary(),
+		"（藏身处配装）" if from_loadout else "",
+		wdef.aim_cone_deg])
+	return st
+
+
+## 换枪后重建手里的枪。
+## ⚠️ 不重建的话，"捡到一把好枪装身上"只是背包里的名字变了，打起来还是旧枪 ——
+##    这正是"装备系统没打通"的典型症状。
+## 简化：新枪按满弹匣 + 备弹给足（不做"换枪要重新装弹"的中间态）。
+func _rebuild_player_weapon() -> void:
+	var before := player_weapon.def.id if player_weapon != null else ""
+	var st := _make_player_weapon()
+	if st == null:
+		return
+	player_weapon = st
+	if st.def.id != before:
+		_toast("切换到 %s" % st.def.name)
+
+
+# ═══════════════════ 装备：局内穿脱 ═══════════════════
+#
+# 面板只发信号（它不认识战斗），穿脱判定在 RaidSession / Equipment 里（有单测），
+# 这里只做三件事：调 API、报结果、换枪时重建手里的枪。
+
+func _on_equip_requested(item_id: String) -> void:
+	var err := raid.equip_from_carry(item_id)
+	if err != "":
+		if Sfx != null:
+			Sfx.play("ui_deny")
+		_toast(err)
+	else:
+		if Sfx != null:
+			Sfx.play("ui_confirm")
+		_toast("已装备 %s" % _item_name(item_id))
+		# 装上的正好是武器 -> 手里的枪必须换成它
+		if raid.equipment != null and raid.equipment.id_in("weapon") == item_id:
+			_rebuild_player_weapon()
+	if inventory_panel != null:
+		inventory_panel.refresh()
+
+
+func _on_unequip_requested(slot: String) -> void:
+	var err := raid.unequip_from_carry(slot)
+	if err != "":
+		if Sfx != null:
+			Sfx.play("ui_deny")
+		_toast(err)
+	else:
+		if Sfx != null:
+			Sfx.play("ui_confirm")
+		_toast("已脱下")
+		# 武器槽被清空 -> 退回默认步枪（不能手里没枪）
+		if slot == "weapon":
+			_rebuild_player_weapon()
+	if inventory_panel != null:
+		inventory_panel.refresh()
+
+
+func _item_name(id: String) -> String:
+	var d: ItemDef = reg.get_item(id)
+	return str(d.name) if d != null else id
 
 
 func _setup_view() -> void:
@@ -370,6 +687,9 @@ func _setup_feel_and_touch() -> void:
 	# ── 背包 / 搜索面板（#3 / #6）──
 	inventory_panel = InventoryPanel.new()
 	inventory_panel.action.connect(_on_panel_action)
+	# 装备系统：面板只发"我想穿/脱"，判定与重建武器都在场景这边
+	inventory_panel.equip_requested.connect(_on_equip_requested)
+	inventory_panel.unequip_requested.connect(_on_unequip_requested)
 	inventory_panel.closed.connect(func():
 		if touch != null:
 			touch.set_controls_visible(true))
@@ -378,7 +698,21 @@ func _setup_feel_and_touch() -> void:
 	inv_layer.add_child(inventory_panel)
 	add_child(inv_layer)
 	touch.bag_pressed.connect(_open_bag)
+	touch.silent_pressed.connect(_toggle_silent_walk)   # 静步（移动端按钮，PC 用 C 键）
 	touch.menu_pressed.connect(_open_settings)
+	touch.map_pressed.connect(_toggle_map)              # 地图（真机反馈 #2）
+
+	# ── 战术地图覆盖层（真机反馈 #2）──
+	# 层级放在背包(45)之上、设置菜单(60)之下：
+	# 地图是"看一眼就走"的轻覆盖层，设置菜单永远是最后一道。
+	map_panel = MapPanel.new()
+	map_panel.closed.connect(func():
+		if touch != null:
+			touch.set_controls_visible(true))
+	var map_layer := CanvasLayer.new()
+	map_layer.layer = 46
+	map_layer.add_child(map_panel)
+	add_child(map_layer)
 
 	# ── 设置 / 暂停菜单（第三轮 #3）──
 	# PC：ESC 开关；安卓：左上角齿轮 + 系统返回键（都走 ui_cancel）
@@ -407,10 +741,14 @@ func _process(delta: float) -> void:
 		return
 	_time += delta
 
-	# ── 逻辑冻结（设置菜单打开时）──
+	# ── 逻辑冻结（设置菜单 / 战术地图打开时）──
 	# 不用 get_tree().paused：它同时门控输入，导致菜单看得见点不动（PC 实测卡死）。
 	# 这里只跳过游戏逻辑；HUD / 绘制 / 输入 / 相机全部照常。
-	var frozen := game_paused or (Game != null and Game.paused)
+	#
+	# ⚠️ 地图也冻结逻辑：地图是铺满全屏的覆盖层，玩家此刻看不到战场 ——
+	#    不冻结就是"低头看地图被背后打死"，那不叫硬核，叫罚站。
+	var map_open: bool = map_panel != null and map_panel.is_open()
+	var frozen := game_paused or (Game != null and Game.paused) or map_open
 	if frozen:
 		_firing = false
 		_move_input = Vector2.ZERO
@@ -468,6 +806,10 @@ func _show_result_once() -> void:
 		return
 	var win := raid.phase_name() == "EXTRACTED"
 	var rep: Dictionary = raid.settle()
+	# 任务奖励的钱并入藏身处钱包（物品已在 RaidSession 里直接进了 stash）。
+	var mw := int(rep.get("mission_wallet", 0))
+	if mw > 0:
+		hideout.wallet += mw
 	var lines: Array = []
 	if win:
 		lines.append("用时 %.0f 秒   剩余 HP %d" % [raid.raid_seconds - raid.time_left, raid.hp])
@@ -521,8 +863,24 @@ func _weapon_kind(w: WeaponDef) -> String:
 
 
 ## 桌面鼠标瞄准：只有鼠标真的在动才算（避免静止鼠标误接管朝向）
+##
+## ⚠️⚠️ 这是**外部状态进模拟**的第二条通道**（第一条是 feel.gd 的墙钟）——
+##     `Input.get_last_mouse_velocity()` 读的是**操作系统**的鼠标状态：
+##     验收/回放跑在真窗口里，只要有人在动鼠标（或窗口出现时系统给了一次移动事件），
+##     瞄准方向就会变 -> 视野锥整块变 -> 像素差 5%~7%，
+##     而**模拟时间、RNG 游标、所有实体位置都不变**。
+##     W-00 实测：4 次运行里 1 次的 `player_aim` 变成 (-0.256,-0.967)，
+##     其余 3 次都是 (1,0)；`sim_time` 四次完全相同 —— 分叉来自这里，不是来自模拟。
+##
+## `allow_mouse_aim` 是给**验收/回放**用的开关：固定输入才能真正比较两次运行。
+## 正常游玩永远是 true（默认值），手感一点没变。
+var allow_mouse_aim := true
+
+
 func _mouse_aiming() -> bool:
 	if DisplayServer.is_touchscreen_available():
+		return false
+	if not allow_mouse_aim:
 		return false
 	return Input.get_last_mouse_velocity().length() > 1.0
 
@@ -581,6 +939,16 @@ func _spawn_corpse(a: EnemyAgent) -> void:
 	if table == null:
 		return
 	var drops := LootRoller.roll_container(table, _rng, 2)
+	# ⭐ 敌人装备系统：把敌人**身上穿戴的**枪 / 护甲 / 头盔也掉进尸体。
+	#   这是"打敌人换装备"这条循环的来源（数据见 enemies.json 的
+	#   weapon_id / armor_id / helmet_id，字段定义在 sim/defs/enemy_def.gd）。
+	#   武器已作为 item 存在（id 与 weapons.json 一致），所以能直接进尸体背包。
+	if a.def.weapon_id != "":
+		drops.append({"item_id": a.def.weapon_id, "count": 1})
+	if a.def.armor_id != "":
+		drops.append({"item_id": a.def.armor_id, "count": 1})
+	if a.def.helmet_id != "":
+		drops.append({"item_id": a.def.helmet_id, "count": 1})
 	var cid := raid.add_corpse(a.pos, a.def.id, drops)
 	if Tel != null:
 		var total := 0
@@ -683,9 +1051,18 @@ func _try_heal() -> void:
 var _lock_info: Dictionary = {}
 
 
-## 视野锥半角（度）—— 供绘制与调试视图使用
+## 有效视野锥半角（度）—— 供绘制与调试视图使用。
+##
+## ⚠️ 2026-10-13 真机反馈 #1：**必须与锁定逻辑同源**。
+##    以前这里直接返回枪械 aim_cone_deg（步枪 55°），而辅助锁定还会
+##    在近距离绕过锥角 —— 结果玩家看到的锥比实际能锁的范围还大，
+##    并且朝上瞄会锁到下方敌人。现在返回
+##    `AimAssist.effective_cone_deg()` = 枪械锥 ∩ 玩家视野锥门限，
+##    绘制与 scan_nearest 用的是同一个上限。
 func aim_cone_deg() -> float:
-	return player_weapon.def.aim_cone_deg if player_weapon != null else 45.0
+	if player_weapon == null:
+		return AimAssist.effective_cone_deg(45.0)
+	return AimAssist.effective_cone_deg(player_weapon.def.aim_cone_deg)
 
 
 func _toast(msg: String, seconds: float = 2.0) -> void:
@@ -706,21 +1083,77 @@ func _open_settings() -> void:
 
 
 ## 打开面板。附近有尸体就进入搜索模式，否则就是纯背包。
+## 切换「静步」（原「蹲伏」功能改为静步）。
+## 开：移速 ×SILENT_SPEED_FACTOR、步频变稀、**脚步不发声**（AI 听觉听不到）。
+## 关：恢复正常速度与脚步声。
+func _toggle_silent_walk() -> void:
+	silent_walk = not silent_walk
+	if Sfx != null:
+		Sfx.play("ui_click")
+	_toast("静步：%s（移速 %d%%、脚步无声）" % [
+		"开" if silent_walk else "关",
+		int(SILENT_SPEED_FACTOR * 100.0)])
+
+
+## 开关战术地图（真机反馈 #2）。地图打开时冻结模拟（见 _process）。
+func _toggle_map() -> void:
+	if map_panel == null or raid.is_over():
+		return
+	# 与背包面板互斥：两个都是全屏覆盖层，同时开着会打架
+	if inventory_panel != null and inventory_panel.is_open():
+		inventory_panel.close()
+	map_panel.toggle(self)
+	if touch != null:
+		touch.set_controls_visible(not map_panel.is_open())
+	if Sfx != null:
+		Sfx.play("ui_click" if map_panel.is_open() else "ui_confirm")
+
+
 func _open_bag() -> void:
 	if inventory_panel == null or raid.is_over():
 		return
-	var ci := raid.corpse_near(player_pos)
-	_corpse_open_idx = ci
+	# 地图开着时先关它（互斥，见 _toggle_map）
+	if map_panel != null and map_panel.is_open():
+		map_panel.close()
+	_corpse_open_idx = -1
+	_container_open_idx = -1
 	var ctitle := ""
 	var container: Inventory = null
+	# 尸体与容器都算"搜索目标"，取**更近的那个** —— 站在两者中间时开最近的那个。
+	var ci := raid.corpse_near(player_pos)
+	var xi := raid.container_near(player_pos)
+	var d_corpse := 999.0
+	var d_cont := 999.0
 	if ci >= 0:
+		d_corpse = (raid.corpses[ci]["pos"] as Vector2).distance_to(player_pos)
+	if xi >= 0:
+		d_cont = raid.containers[xi].pos.distance_to(player_pos)
+	if ci >= 0 and (xi < 0 or d_corpse <= d_cont):
+		_corpse_open_idx = ci
 		container = _build_corpse_inv(ci)
 		ctitle = "尸体"
-	inventory_panel.open(reg.items, raid.carry, container, ctitle)
+	elif xi >= 0:
+		_container_open_idx = xi
+		container = _build_container_inv(xi)
+		ctitle = raid.containers[xi].display_name()
+	_container_title = ctitle if ctitle != "" else "搜索目标"
+	inventory_panel.open(reg.items, raid.carry, container, ctitle, raid.equipment)
 	if touch != null:
 		touch.set_controls_visible(false)   # 面板打开时收起摇杆，避免抢触点
 	if Sfx != null:
 		Sfx.play("ui_click")
+
+
+## 把容器当前内容倒进一个临时 Inventory 供面板渲染。
+## ⚠️ 与 _build_corpse_inv 同理由：take 是从【容器】里扣的，
+##    临时 Inventory 只是视图 —— 不重建就会一直显示已拿走的东西。
+func _build_container_inv(idx: int) -> Inventory:
+	var inv := Inventory.new(24, reg.items, 999.0)
+	if idx < 0 or idx >= raid.containers.size():
+		return inv
+	for d in (raid.containers[idx].drops as Array):
+		inv.add(str(d["item_id"]), int(d["count"]))
+	return inv
 
 
 ## 把尸体当前的掉落物倒进一个临时 Inventory 供面板渲染。
@@ -758,21 +1191,41 @@ func _on_panel_action(item_id: String, count: int) -> void:
 			drops_on_ground.append({"pos": player_pos, "item_id": item_id, "count": n})
 			_toast("丢弃 %d 个" % n)
 		return
-	# count > 0：从搜到的容器里拿
+	# count > 0：从搜到的容器里拿（1 = 单个 / N = 自定义数量 / 全部 = 整堆）
 	if _corpse_open_idx >= 0:
 		var got := raid.take_from_corpse(_corpse_open_idx, item_id, count)
 		if got > 0:
 			if Sfx != null:
 				Sfx.play("pickup")
+			if got < count:
+				_toast("背包放不下，只拿了 %d/%d" % [got, count])
 			# 重建视图 —— 见 _build_corpse_inv 的说明
 			inventory_panel.open(reg.items, raid.carry,
-				_build_corpse_inv(_corpse_open_idx), "尸体")
+				_build_corpse_inv(_corpse_open_idx), _container_title, raid.equipment)
+		elif Sfx != null:
+			Sfx.play("ui_deny")
+			_toast("背包放不下")
+		return
+	if _container_open_idx >= 0:
+		var got2 := raid.take_from_container(_container_open_idx, item_id, count)
+		if got2 > 0:
+			if Sfx != null:
+				Sfx.play("pickup")
+			if got2 < count:
+				_toast("背包放不下，只拿了 %d/%d" % [got2, count])
+			inventory_panel.open(reg.items, raid.carry,
+				_build_container_inv(_container_open_idx), _container_title, raid.equipment)
 		elif Sfx != null:
 			Sfx.play("ui_deny")
 			_toast("背包放不下")
 
 
 var _corpse_open_idx := -1
+## 当前打开的容器索引（-1 = 没在搜容器）
+var _container_open_idx := -1
+## 当前搜索目标的名字（尸体 / 药柜 …）—— 搬运后重建面板时用它当标题，
+## 免得"从药柜拿东西后标题变成『容器』"（真机反馈 #5 拾取流程里很显眼）
+var _container_title := "搜索目标"
 
 
 func _go_hideout() -> void:
@@ -849,7 +1302,8 @@ func _build_map_texture() -> void:
 		map_baker = RaidMapBaker.new()
 	_map_tex_size = gen.grid.tile_extents()
 	_map_tex = map_baker.build(gen.grid, gen.graph.rooms,
-		render_mode == RENDER_WHITEBOX)
+		render_mode == RENDER_WHITEBOX,
+		theme.tile_theme if theme != null else "")
 
 
 func _nearest_enemy() -> EnemyAgent:

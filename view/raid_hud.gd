@@ -26,6 +26,7 @@ var hint_label: Label = null
 var view_label: Label = null
 var corpse_label: Label = null
 var toast_label: Label = null
+var silent_label: Label = null    ## 「静步」状态指示（原蹲伏改为静步）
 
 ## 短提示状态（手机上唯一的即时反馈渠道）
 var toast_text := ""
@@ -41,6 +42,7 @@ var _cache_view := ""
 var _cache_hint := ""
 var _cache_toast := ""
 var _cache_corpse := ""
+var _cache_silent := ""
 
 
 ## 建立全部 HUD 控件。由场景在 _setup_view() 里调用。
@@ -54,7 +56,11 @@ func setup(p_is_touch: bool) -> void:
 	#    实测截图里 "HP 100/100" 的 H 直接被齿轮盖掉。
 	hud_label.position = Vector2(64 if is_touch else 10, 6)
 	hud_label.add_theme_font_size_override("font_size", hud_fs)
-	hud_label.add_theme_color_override("font_color", Color(0.92, 0.94, 0.96))
+	hud_label.add_theme_color_override("font_color", UITokens.TEXT_HI)
+	# 深色描边：HUD 直接压在战斗画面上，没描边时浅色文字遇上亮地面就读不出来
+	# （加描边而不是加底板 —— 不占布局、不会改变任何已有位置基线）
+	hud_label.add_theme_constant_override("outline_size", 3)
+	hud_label.add_theme_color_override("font_outline_color", UITokens.BG_DEEP)
 	add_child(hud_label)
 
 	# ⚠️ 底部两行必须【锚定到左下】而不是写死 y 坐标。
@@ -64,14 +70,18 @@ func setup(p_is_touch: bool) -> void:
 	hint_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	hint_label.position = Vector2(10, -20)
 	hint_label.add_theme_font_size_override("font_size", hud_fs - 2)
-	hint_label.add_theme_color_override("font_color", Color(0.6, 0.65, 0.72))
+	hint_label.add_theme_color_override("font_color", UITokens.TEXT_MID)
+	hint_label.add_theme_constant_override("outline_size", 2)
+	hint_label.add_theme_color_override("font_outline_color", UITokens.BG_DEEP)
 	add_child(hint_label)
 
 	view_label = Label.new()
 	view_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	view_label.position = Vector2(10, -38)
 	view_label.add_theme_font_size_override("font_size", hud_fs - 2)
-	view_label.add_theme_color_override("font_color", Color(0.75, 0.80, 0.88))
+	view_label.add_theme_color_override("font_color", UITokens.TEXT_MID)
+	view_label.add_theme_constant_override("outline_size", 2)
+	view_label.add_theme_color_override("font_outline_color", UITokens.BG_DEEP)
 	add_child(view_label)
 
 	toast_label = Label.new()
@@ -80,7 +90,9 @@ func setup(p_is_touch: bool) -> void:
 	toast_label.size = Vector2(320, 24)
 	toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	toast_label.add_theme_font_size_override("font_size", hud_fs)
-	toast_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.45))
+	toast_label.add_theme_color_override("font_color", UITokens.ACCENT)
+	toast_label.add_theme_constant_override("outline_size", 3)
+	toast_label.add_theme_color_override("font_outline_color", UITokens.BG_DEEP)
 	toast_label.visible = false
 	add_child(toast_label)
 
@@ -118,9 +130,20 @@ func refresh() -> void:
 	lines.append("HP %d/%d   护甲 %d/%d   %s" % [
 		vitals.hp, vitals.max_hp, vitals.armor, vitals.max_armor,
 		Vitals.BLEED_NAME[vitals.bleed]])
+	# 当前地图主题（森林 / 城区 / 军事基地）。theme 为 null 时不加这一行，
+	# 保证旧的无主题场景 HUD 文本逐字不变（不破坏既有布局基线）。
+	if scene.theme != null:
+		lines.append("地图 %s  %d×%d  威胁 %.1f" % [
+			scene.theme.name, scene.theme.map_w, scene.theme.map_h,
+			scene.theme.enemy_density])
 	lines.append("弹药 %d / %d%s" % [
 		scene.player_weapon.ammo_in_mag, scene.player_weapon.reserve_ammo,
 		"  [换弹中]" if scene.player_weapon.is_reloading() else ""])
+	# 装备（装备系统）。**只在身上真有东西时才加这一行** ——
+	# 空配装（含回退默认枪的情况）HUD 与以前逐字一致，不动已有的布局基线。
+	var eqt := _equip_text(raid.equipment)
+	if eqt != "":
+		lines.append("装备 %s" % eqt)
 	lines.append("剩余 %ds    撤离 %.0f%%" % [
 		int(raid.time_left), raid.extract_progress_ratio() * 100.0])
 	lines.append("携带 %s" % raid.carry.summary())
@@ -154,6 +177,7 @@ func refresh() -> void:
 	# 用户："和敌人尸体没法交互。（战利品系统呢）"
 	# 尸体其实生成了、也能搜 —— 但**没有可见的入口**，玩家不知道按什么。
 	_refresh_corpse_prompt(raid)
+	_refresh_silent_indicator()
 
 	# 短提示
 	if toast_label != null:
@@ -166,10 +190,25 @@ func refresh() -> void:
 			_set_label(toast_label, toast_text, "_cache_toast")
 
 	# ⚠️ 提示必须按平台给（真机反馈：安卓上显示的是 WASD/J/K/L 键盘键位）
-	var hint := ("左摇杆移动 · 右摇杆瞄准 · ◉ 开火 · ⟳ 换弹 · ✚ 治疗"
+	var hint := ("左摇杆移动 · 右摇杆瞄准 · ◉ 开火 · ⟳ 换弹 · ✚ 治疗 · ▦ 地图（看撤离点）"
 		if is_touch
-		else "WASD 移动 · J/空格 开火 · R 换弹 · T 治疗 · B 背包 · Tab 视图 · K 重开 · ESC 设置 · F1~F4 无障碍 · M 静音")
+		else "WASD 移动 · J/空格 开火 · R 换弹 · T 治疗 · B 背包 · N 地图 · Tab 视图 · K 重开 · ESC 设置 · F1~F4 无障碍 · M 静音")
 	_set_label(hint_label, hint, "_cache_hint")
+
+
+## 身上装备的一行文本。空配装返回 ""（调用方据此不占用 HUD 行数）。
+## 这是"穿脱装备生效了"的**可见证据**：从尸体上换一把枪，这行立刻变。
+func _equip_text(eq: Equipment) -> String:
+	if eq == null or scene == null or scene.reg == null:
+		return ""
+	var parts: Array[String] = []
+	for slot in Equipment.SLOTS:
+		var id: String = eq.id_in(slot)
+		if id == "":
+			continue
+		var d: ItemDef = scene.reg.get_item(id)
+		parts.append(str(d.name) if d != null else id)
+	return "" if parts.is_empty() else " · ".join(parts)
 
 
 func _refresh_corpse_prompt(raid) -> void:
@@ -180,17 +219,57 @@ func _refresh_corpse_prompt(raid) -> void:
 		corpse_label.size = Vector2(400, 22)
 		corpse_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		corpse_label.add_theme_font_size_override("font_size", hud_fs + 2)
-		corpse_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.42))
+		corpse_label.add_theme_color_override("font_color", UITokens.ACCENT)
+		corpse_label.add_theme_constant_override("outline_size", 3)
+		corpse_label.add_theme_color_override("font_outline_color", UITokens.BG_DEEP)
 		corpse_label.visible = false
 		add_child(corpse_label)
 	var ci_near: int = raid.corpse_near(scene.player_pos)
-	if ci_near >= 0 and not raid.is_over():
+	var xi_near: int = raid.container_near(scene.player_pos)
+	if raid.is_over() or (ci_near < 0 and xi_near < 0):
+		if corpse_label.visible:
+			corpse_label.visible = false
+		return
+	# 尸体与容器都提示，取更近的那个（和 _open_bag 的选法一致，不然提示会跳）
+	var d_c := 999.0
+	var d_x := 999.0
+	if ci_near >= 0:
+		d_c = (raid.corpses[ci_near]["pos"] as Vector2).distance_to(scene.player_pos)
+	if xi_near >= 0:
+		d_x = raid.containers[xi_near].pos.distance_to(scene.player_pos)
+	if ci_near >= 0 and (xi_near < 0 or d_c <= d_x):
 		var n_stacks := (raid.corpses[ci_near]["drops"] as Array).size()
 		_set_label(corpse_label, "[%s] 搜索尸体 · %d 堆战利品"
 			% [bag_key_hint(), n_stacks], "_cache_corpse")
-		corpse_label.visible = true
-	elif corpse_label.visible:
-		corpse_label.visible = false
+	else:
+		var c = raid.containers[xi_near]
+		_set_label(corpse_label, "[%s] 搜索%s · %d 堆物资"
+			% [bag_key_hint(), c.display_name(), (c.drops as Array).size()], "_cache_corpse")
+	corpse_label.visible = true
+
+
+## 「静步」状态指示：开的时候在中下方常驻显示，避免玩家忘了自己处于慢速状态。
+## 只静步**开着**才显示；关闭时隐藏（不占屏幕）。
+func _refresh_silent_indicator() -> void:
+	if silent_label == null:
+		silent_label = Label.new()
+		silent_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		silent_label.position = Vector2(-200, -84)
+		silent_label.size = Vector2(400, 20)
+		silent_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		silent_label.add_theme_font_size_override("font_size", hud_fs + 1)
+		silent_label.add_theme_color_override("font_color", UITokens.INFO)
+		silent_label.add_theme_constant_override("outline_size", 2)
+		silent_label.add_theme_color_override("font_outline_color", UITokens.BG_DEEP)
+		silent_label.visible = false
+		add_child(silent_label)
+	if scene == null:
+		return
+	if bool(scene.silent_walk):
+		_set_label(silent_label, "◌ 静步中（慢速 · 脚步无声）", "_cache_silent")
+		silent_label.visible = true
+	elif silent_label.visible:
+		silent_label.visible = false
 
 
 ## 只在文本真的变了才写 Label.text（见 _cache_* 的说明）

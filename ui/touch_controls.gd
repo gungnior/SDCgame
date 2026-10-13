@@ -26,6 +26,10 @@ signal interact_pressed()
 signal bag_pressed()
 ## 左上角齿轮：打开设置/暂停（第三轮 #3，安卓必须能暂停）
 signal menu_pressed()
+## 打开战术地图（看撤离点位置）
+signal map_pressed()
+## 静步开关（原「蹲伏」改为静步）：慢走 + 脚步不发声
+signal silent_pressed()
 
 ## 输入动作名（同时在 project.godot 的 InputMap 里声明）
 const A_MOVE := ["move_left", "move_right", "move_up", "move_down"]
@@ -43,6 +47,9 @@ var reload_btn: TouchButton
 var heal_btn: TouchButton
 var bag_btn: TouchButton
 var menu_btn: TouchButton
+var silent_btn: TouchButton
+## 地图（真机反馈 #2：需要能看撤离点位置）
+var map_btn: TouchButton
 
 var _safe := Rect2()                   ## 安全区内的可用矩形（视口坐标）
 
@@ -129,18 +136,25 @@ func _build() -> void:
 	aim_stick.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(aim_stick)
 
-	# ── 动作按钮 ──
+	# ── 动作按钮（配色全部走 UITokens 语义色，不再各处硬编码）──
 	var br := short * BTN_RADIUS_RATIO
-	fire_btn = _make_button("Fire", "◉", "开火", br, Color(1.0, 0.42, 0.34), true)
-	reload_btn = _make_button("Reload", "⟳", "换弹", br * 0.82, Color(0.55, 0.78, 1.0), false)
-	heal_btn = _make_button("Heal", "✚", "治疗", br * 0.82, Color(0.45, 0.88, 0.58), false)
-	bag_btn = _make_button("Bag", "▤", "背包", br * 0.82, Color(0.82, 0.72, 0.42), false)
+	fire_btn = _make_button("Fire", "◉", "开火", br, UITokens.DANGER, true)
+	reload_btn = _make_button("Reload", "⟳", "换弹", br * 0.82, UITokens.INFO, false)
+	heal_btn = _make_button("Heal", "✚", "治疗", br * 0.82, UITokens.SUCCESS, false)
+	bag_btn = _make_button("Bag", "▤", "背包", br * 0.82, UITokens.ACCENT, false)
 	bag_btn.pressed_down.connect(func(): bag_pressed.emit())
+	# 静步（原「蹲伏」改为静步）：慢走 + 脚步不发声。放在治疗与背包之间（该处有空档）
+	silent_btn = _make_button("Silent", "◌", "静步", br * 0.82, UITokens.STEALTH, false)
+	silent_btn.pressed_down.connect(func(): silent_pressed.emit())
 	# 齿轮放【左上角】—— 用户明确要求。
 	# 注意：它压在移动摇杆的 DYNAMIC 区域内，但它是后加入的 GUI 子节点，
 	# 触摸优先给它，所以不会互相打架（摇杆只在齿轮之外的区域响应）。
-	menu_btn = _make_button("Menu", "⚙", "", br * 0.72, Color(0.72, 0.76, 0.84), false)
+	menu_btn = _make_button("Menu", "⚙", "", br * 0.72, UITokens.NEUTRAL, false)
 	menu_btn.pressed_down.connect(func(): menu_pressed.emit())
+	# 地图按钮（真机反馈 #2）：放在【右上角】—— 那是全屏唯一空着的地方
+	# （左上角是齿轮、顶部中间是 toast、右侧竖排是动作按钮、底部是摇杆）。
+	map_btn = _make_button("Map", "▦", "地图", br * 0.72, UITokens.SUCCESS, false)
+	map_btn.pressed_down.connect(func(): map_pressed.emit())
 	reload_btn.pressed_down.connect(func(): reload_pressed.emit())
 	heal_btn.pressed_down.connect(func(): heal_pressed.emit())
 
@@ -212,7 +226,14 @@ func _layout() -> void:
 	_place(fire_btn, Vector2(cx, b.y - br - short * 0.02), br)
 	_place(reload_btn, Vector2(cx, b.y - br * 2.0 - short * 0.075), br * 0.78)
 	_place(heal_btn, Vector2(cx, b.y - br * 2.0 - short * 0.23), br * 0.78)
+	# 静步插在"治疗"与"背包"之间：这两者中心相距约 br*1.2 + 短边*0.17，
+	# 减去按钮直径后仍有约 50px 空档（640x360 下实测），不会互相压住。
+	_place(silent_btn, Vector2(cx, b.y - br * 2.6 - short * 0.315), br * 0.78)
 	_place(bag_btn, Vector2(cx, b.y - br * 3.2 - short * 0.40), br * 0.78)
+
+	# 地图按钮：右上角（`menu_btn` 在 (0,0) 即左上角，两者对角线，不会互压）
+	var mr := br * 0.72
+	_place(map_btn, Vector2(b.x - mr - short * 0.012, _safe.position.y + mr + short * 0.012), mr)
 
 
 func _place(btn: TouchButton, center: Vector2, r: float) -> void:
@@ -255,7 +276,7 @@ func is_firing() -> bool:
 
 
 func release_all() -> void:
-	for b in [fire_btn, reload_btn, heal_btn, bag_btn, menu_btn]:
+	for b in [fire_btn, reload_btn, heal_btn, silent_btn, bag_btn, menu_btn, map_btn]:
 		if b != null:
 			b.force_release()
 

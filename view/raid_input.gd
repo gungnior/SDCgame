@@ -49,10 +49,17 @@ func handle_key(event: InputEvent) -> void:
 			scene._try_heal()
 		KEY_B:
 			scene._open_bag()
+		KEY_C:
+			# 静步（原「蹲伏」改为静步）：慢走 + 脚步不发声
+			scene._toggle_silent_walk()
 		KEY_K:
 			scene._restart()
 		KEY_TAB:
 			scene.debug_mode = (scene.debug_mode + 1) % 4
+		KEY_N:
+			# 战术地图（真机反馈 #2：看撤离点位置）。
+			# ⚠️ 不用 M —— M 已经给了静音；N 在 M 旁边，触屏上也能对应右上角地图按钮。
+			scene._toggle_map()
 		KEY_F5:
 			# 白模 <-> 美术 tile 切换（技术验证期间主要看白模）
 			scene.render_mode = (scene.RENDER_ART if scene.render_mode == scene.RENDER_WHITEBOX

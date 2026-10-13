@@ -292,17 +292,24 @@ func _test_fx_cell_coords() -> void:
 
 
 func _test_enemy_count_test_mode() -> void:
-	# 真机反馈 #2：技术验证阶段敌人太多（35 个），要求每类型各 1 个、总数 <= 4
+	# 真机反馈 #2：技术验证阶段敌人太多（35 个），曾要求每类型各 1 个、总数 <= 4。
+	# ⚠️ 2026-10-13 需求变更：用户要求"敌人数量参考地图大小" ——
+	#    默认改为 **不钳制（0）**，总数由地图主题的 enemy_density 决定
+	#    （MapThemeDef.target_enemy_count / MapGenerator._apply_enemy_density）。
+	#    钳制开关保留，仅供调试时临时把敌人压到极少。
 	# ⚠️ 用 load() 取常量而不是引用类型名 —— 后者会在编译期把整个场景脚本拉进来，
 	#    而场景脚本引用了 autoload（Sfx/Feel/Tel），会污染无关脚本的编译。
 	var src: GDScript = load("res://view/raid_scene.gd")
 	_check(src != null, "能载入 raid_scene.gd")
 	var cap: int = int(src.get("MAX_TEST_ENEMIES"))
-	_check(cap <= 4, "测试模式敌人上限 %d <= 4" % cap)
-	_check(cap >= 2, "至少能放 2 种敌人（实际 %d）" % cap)
+	_check_eq(cap, 0, "默认不钳制敌人（改由地图主题密度决定）")
 	var text := FileAccess.get_file_as_string("res://view/raid_scene.gd")
-	_check(text.contains("agents.size() >= MAX_TEST_ENEMIES"), "刷怪循环里确实做了钳制")
-	_check(text.contains("MAX_TEST_ENEMIES > 0"), "关掉测试模式能回到正式刷怪")
+	_check(text.contains("agents.size() >= MAX_TEST_ENEMIES"), "刷怪循环里仍保留钳制开关（调试用）")
+	_check(text.contains("MAX_TEST_ENEMIES > 0"), "开关打开时仍走钳制分支")
+	# 新契约：敌人总数按地图大小/主题密度缩放
+	var mg := FileAccess.get_file_as_string("res://sim/mapgen/map_generator.gd")
+	_check(mg.contains("_apply_enemy_density"), "敌人总数按地图密度缩放（MapGenerator）")
+	_check(mg.contains("target_enemy_count"), "密度目标由地图主题给出（MapThemeDef）")
 
 
 

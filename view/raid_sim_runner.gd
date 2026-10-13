@@ -38,7 +38,9 @@ func tick_player(delta: float) -> void:
 	if not scene.medical.is_treating():
 		scene._move_input = scene._read_move_input()
 		if scene._move_input != Vector2.ZERO:
-			var step = scene._move_input.normalized() * scene.PLAYER_SPEED * scene.vitals.speed_multiplier(scene.raid.carry.weight_ratio()) * delta
+			# 静步（原「蹲伏」改为静步）：移速打折，代价换「脚步完全不发声」
+			var silent_mul: float = scene.SILENT_SPEED_FACTOR if scene.silent_walk else 1.0
+			var step = scene._move_input.normalized() * scene.PLAYER_SPEED * silent_mul * scene.vitals.speed_multiplier(scene.raid.carry.weight_ratio()) * delta
 			# 分轴碰撞：哪个轴撞墙就只撤销那个轴
 			var try_x = Vector2(scene.player_pos.x + step.x, scene.player_pos.y)
 			if scene._walkable(try_x):
@@ -48,13 +50,16 @@ func tick_player(delta: float) -> void:
 				scene.player_pos.y = try_y.y
 			scene.player_facing = scene._move_input.normalized()
 			# 脚步：按节奏播放 + 发出声响给 AI 听觉
+			# ⭐ 静步时**完全不发声**：既不往 noises 里追加（AI 听不到），也不播脚步音效。
+			#   这是"静步"这个名字的本义；代价是移速已经打了折（见上方 silent_mul）。
 			scene._step_accum += delta * scene._move_input.length()
 			var interval = 0.46 * lerpf(1.35, 1.0, clampf(scene.vitals.speed_multiplier(scene.raid.carry.weight_ratio()), 0.0, 1.0))
 			if scene._step_accum >= interval:
 				scene._step_accum = 0.0
-				scene.noises.append({"pos": scene.player_pos, "loudness_m": scene.NOISE_QUIET})
-				if Sfx != null:
-					Sfx.play("step_%s" % scene._floor_material())
+				if not scene.silent_walk:
+					scene.noises.append({"pos": scene.player_pos, "loudness_m": scene.NOISE_QUIET})
+					if Sfx != null:
+						Sfx.play("step_%s" % scene._floor_material())
 	else:
 		scene._move_input = Vector2.ZERO
 
@@ -116,6 +121,11 @@ func try_fire() -> void:
 		return
 
 	scene.player_weapon.fire()
+	# ── 装备损耗（2026-10-13）：每次开火磨损武器 1 点 ──
+	# 磨损不改变能不能开火（那样会突然卡壳），只让伤害缓慢下降 —— 见
+	# Equipment.weapon_damage_factor()（最低 ×0.6）。
+	if scene.raid != null and scene.raid.equipment != null:
+		scene.raid.equipment.wear_slot("weapon", 1)
 	# 开枪声很大
 	scene.noises.append({"pos": scene.player_pos, "loudness_m": scene.NOISE_LOUD})
 	Tel.mark("fire")
@@ -140,13 +150,18 @@ func try_fire() -> void:
 	# ── 子弹磁性（T-56 首选：射线加粗，**不改准心**）──
 	Tel.mark("fire_aim")
 	var push = scene._aim_push()
-	var half_angle = AimAssist.half_angle_for_viewport(scene.get_viewport_rect().size.x)
+	# ── 辅助范围与【枪械属性】挂钩（真机反馈 #6）──
+	# 磁性锥 = 枪械视野锥 × 比例（狙击更窄、霰弹更宽）；
+	# 磁性距离 = 枪械有效射程 × 比例。换枪 -> 辅助跟着变，不再是一个写死的常数。
+	var half_angle = AimAssist.half_angle_for_weapon(w.aim_cone_deg,
+		scene.get_viewport_rect().size.x)
 	# ── 散布的作用：**收缩有效 hitbox**，而不是事后另掷一次随机数 ──
 	# 见下方命中判定处的说明（真机反馈："子弹从他身上穿过去了"）。
 	var extra_seed = scene.player_weapon.current_spread_deg() - w.spread_deg
 	var eff_radius = AimAssist.DEFAULT_HIT_RADIUS * scene._spread_radius_factor(extra_seed)
 	var assist = AimAssist.pick(scene.player_pos, scene.player_aim, push,
-		scene._aim_targets(), scene.gen.grid, half_angle, float(w.range_m), "player", eff_radius)
+		scene._aim_targets(), scene.gen.grid, half_angle,
+		AimAssist.assist_range(float(w.range_m)), "player", eff_radius)
 	var shot_dir = scene.player_aim
 	var tgt: EnemyAgent = null
 	if not assist.is_empty():
@@ -174,8 +189,14 @@ func try_fire() -> void:
 
 	if tgt != null:
 		scene.player_weapon.mark_hit()
-		var hit = DamageModel.resolve_hit(w, dist, extra, scene._rng)
-		var dmg = int(hit["damage"])
+		# ── 弹药弹型 + 目标护甲（2026-10-13）──
+		# 用【当前装的弹种】对【目标的护甲值】结算：
+		#   穿甲弹打有甲单位更疼、肉伤弹打无甲单位更疼（见 data/SCHEMA.md §1）。
+		var ammo: ItemDef = scene._player_ammo()
+		var hit = DamageModel.resolve_hit_with_ammo(
+			w, ammo, dist, extra, float(tgt.def.armor), scene._rng)
+		# 武器磨损折损（全新 1.0 -> 完全损坏 0.6）
+		var dmg = int(round(float(hit["damage"]) * scene._weapon_wear_factor()))
 		var part = str(hit.get("part", DamageModel.PART_TORSO))
 		var died = tgt.take_damage(dmg)
 		scene.raid.damage_dealt += dmg
@@ -277,7 +298,12 @@ func tick_enemies(delta: float) -> void:
 	var target_hp = int((ctx["targets"][0] as Dictionary)["hp"])
 	if target_hp < scene.vitals.hp:
 		var dealt = scene.vitals.hp - target_hp
-		var applied = scene.vitals.take_damage(dealt)
+		# ── 护甲结算（2026-10-13，**唯一入口**）──
+		# _resolve_player_hit 内部走 vitals.take_hit：护甲池来自身上装备，
+		# 弹型决定穿透比例，吸收量按比例磨损护甲/头盔。
+		# ⚠️ 早先这里是 `_apply_armor_reduction` + `vitals.take_damage` 两次吸收，
+		#    而且 _setup_sim 白送 40 点护甲 —— 见 _resolve_player_hit 的说明。
+		var applied = scene._resolve_player_hit(dealt)
 		if scene.medical.should_interrupt(applied):
 			scene.medical.cancel()
 		if applied > 0:
@@ -319,7 +345,10 @@ func tick_enemies(delta: float) -> void:
 ##   vision_follows_lock 视野锥跟随锁定目标（而不是只跟摇杆）
 func update_auto_aim(delta: float) -> void:
 	var w = scene.player_weapon.def
-	var cone = w.aim_cone_deg
+	# ⚠️ 用场景的**有效**视野锥（= 枪械锥 ∩ 玩家视野锥门限），不要直接用
+	#    w.aim_cone_deg —— 否则逻辑能锁的范围会和画出来的锥不一致
+	#    （真机反馈 #1："朝上瞄却锁到下方敌人"就是这么漏出来的）。
+	var cone = scene.aim_cone_deg()
 	var rng_max = float(w.range_m)
 
 	# 视野锥的朝向：跟随锁定时用锁定方向，否则用玩家瞄准方向

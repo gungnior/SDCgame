@@ -31,16 +31,149 @@ const C_ROOM_EDGE := Color(0.32, 0.35, 0.42)
 const C_SPAWN := Color(0.24, 0.62, 0.38)
 const C_EXTRACT := Color(0.85, 0.65, 0.22)
 const C_PLAYER := Color(0.36, 0.72, 1.0)
-const C_ENEMY_IDLE := Color(0.72, 0.74, 0.78)
+## ⚠️ 这三个是**警戒状态环**的颜色（不再是敌人本体填充色）——
+##    本体填充色现在来自敌人类型的 `EnemyDef.color`（真机反馈 #3）。
+const C_ENEMY_IDLE := Color(0.72, 0.74, 0.78, 0.55)
 const C_ENEMY_ALERT := Color(1.0, 0.78, 0.30)
 const C_ENEMY_COMBAT := Color(1.0, 0.28, 0.28)
 const C_DEAD := Color(0.35, 0.18, 0.18)
 const C_ARROW := Color(0.5, 0.78, 1.0, 0.35)
 
+## ── 可搜索容器 / 尸体的配色（真机反馈 #4：地图的容器看不到）──
+#
+# ⚠️ 本轮修复前，`raid.containers`（世界容器）与 `raid.corpses`（尸体）
+#    **从来没有被绘制过** —— 逻辑上它们存在、能搜、HUD 也会提示，
+#    但屏幕上什么都没有。玩家因此完全找不到可搜的东西。
+#    这里按容器类型给不同颜色 + 形状（药柜是白十字、枪架是竖长条…），
+#    并且**搜空的容器会变暗**，让"还有一个没搜"一眼可辨。
+const C_CONTAINER := Color(0.82, 0.72, 0.42)
+const C_CONTAINER_OPEN := Color(0.42, 0.40, 0.34)     ## 已搜过：暗下去
+const C_CORPSE := Color(0.66, 0.30, 0.30)
+const C_CORPSE_LOOTED := Color(0.34, 0.22, 0.22)
+const C_LOOT_DOT := Color(1.0, 0.88, 0.42)
+## 附近可交互目标的高亮环
+const C_FOCUS_RING := Color(1.0, 0.92, 0.60, 0.9)
+
+## 容器类型 -> 颜色（按 data/containers.json 的 id）
+const CONTAINER_COLORS := {
+	"container_crate": Color(0.72, 0.56, 0.34),
+	"container_supply_case": Color(0.52, 0.72, 0.46),
+	"container_weapon_rack": Color(0.62, 0.64, 0.72),
+	"container_ammo_box": Color(0.78, 0.66, 0.32),
+	"container_med_cabinet": Color(0.86, 0.90, 0.94),
+	"container_locker": Color(0.58, 0.62, 0.70),
+	"container_cargo_crate": Color(0.70, 0.52, 0.30),
+	"container_lab_case": Color(0.55, 0.82, 0.78),
+}
+
 
 ## 逻辑格矩形 -> 世界像素矩形
 func _cell_rect(c: Vector2i) -> Rect2:
 	return Rect2(Vector2(c.x, c.y) * scene.CELL_PX, Vector2(scene.CELL_PX, scene.CELL_PX))
+
+
+## 画可搜索容器 + 尸体，并在【最近可交互目标】上套一圈高亮环。
+##
+## 高亮环的选法与 `raid_scene._open_bag()` / `raid_hud._refresh_corpse_prompt()`
+## 完全一致（同为"尸体与容器取更近的那个"）—— 三处不一致的话，
+## 玩家会看到"A 被高亮、按 B 却开了 B"。
+func _draw_containers() -> void:
+	var raid = scene.raid
+	if raid == null:
+		return
+	var pc: Vector2 = scene.player_pos
+
+	# ① 世界容器
+	for c in raid.containers:
+		var ctr: Vector2 = c.pos * scene.CELL_PX
+		var open := bool(c.searched)
+		var col: Color = CONTAINER_COLORS.get(str(c.def.id), C_CONTAINER) if c.def != null \
+			else C_CONTAINER
+		if open:
+			col = col.lerp(C_CONTAINER_OPEN, 0.62)
+		_draw_container_shape(ctr, str(c.def.id) if c.def != null else "", col)
+		# 还有东西没拿 -> 右上角一个亮点，等于"没搜空"
+		if not c.is_done():
+			draw_circle(ctr + Vector2(9, -9), 2.6, C_LOOT_DOT)
+
+	# ② 尸体（敌人死亡后落下的可搜索容器）
+	for cp in raid.corpses:
+		var d: Dictionary = cp
+		var ctr2: Vector2 = (d["pos"] as Vector2) * scene.CELL_PX
+		var empty := bool(d["searched"]) and (d["drops"] as Array).is_empty()
+		var ccol := C_CORPSE_LOOTED if empty else C_CORPSE
+		# 躯干：一个横躺的小人（区别于敌人的圆）
+		draw_rect(Rect2(ctr2 - Vector2(10, 5), Vector2(20, 10)), ccol, true)
+		draw_circle(ctr2 + Vector2(-11, 0), 4.0, ccol)
+		if not empty:
+			draw_circle(ctr2 + Vector2(9, -9), 2.6, C_LOOT_DOT)
+
+	# ③ 最近可交互目标的高亮环（与交互选法一致）
+	var ci: int = raid.corpse_near(pc)
+	var xi: int = raid.container_near(pc)
+	if ci < 0 and xi < 0:
+		return
+	var d_c := 999.0
+	var d_x := 999.0
+	if ci >= 0:
+		d_c = ((raid.corpses[ci]["pos"]) as Vector2).distance_to(pc)
+	if xi >= 0:
+		d_x = raid.containers[xi].pos.distance_to(pc)
+	var focus: Vector2
+	if ci >= 0 and (xi < 0 or d_c <= d_x):
+		focus = (raid.corpses[ci]["pos"] as Vector2) * scene.CELL_PX
+	else:
+		focus = raid.containers[xi].pos * scene.CELL_PX
+	draw_arc(focus, 20.0, 0, TAU, 28, C_FOCUS_RING, 2.0)
+
+
+## 按容器类型画一个**形状**（不只是颜色不同）——
+## 色盲玩家与"白模/像素风"下，形状比颜色可靠得多。
+func _draw_container_shape(ctr: Vector2, id: String, col: Color) -> void:
+	var edge := col.darkened(0.45)
+	match id:
+		"container_weapon_rack":
+			# 枪架：竖长条 + 两斜线
+			draw_rect(Rect2(ctr - Vector2(7, 16), Vector2(14, 32)), col, true)
+			draw_line(ctr + Vector2(-7, -10), ctr + Vector2(7, 6), edge, 2.0)
+			draw_line(ctr + Vector2(7, -10), ctr + Vector2(-7, 6), edge, 2.0)
+		"container_locker":
+			# 储物柜：竖长条 + 中缝
+			draw_rect(Rect2(ctr - Vector2(9, 15), Vector2(18, 30)), col, true)
+			draw_line(ctr + Vector2(0, -15), ctr + Vector2(0, 15), edge, 2.0)
+		"container_med_cabinet":
+			# 药柜：白底红十字
+			draw_rect(Rect2(ctr - Vector2(11, 11), Vector2(22, 22)), col, true)
+			var rc := Color(0.85, 0.22, 0.24)
+			draw_rect(Rect2(ctr - Vector2(3, 9), Vector2(6, 18)), rc, true)
+			draw_rect(Rect2(ctr - Vector2(9, 3), Vector2(18, 6)), rc, true)
+		"container_ammo_box":
+			# 弹药箱：小方箱 + 两条弹带
+			draw_rect(Rect2(ctr - Vector2(9, 8), Vector2(18, 16)), col, true)
+			draw_line(ctr + Vector2(-6, -4), ctr + Vector2(6, -4), edge, 2.0)
+			draw_line(ctr + Vector2(-6, 3), ctr + Vector2(6, 3), edge, 2.0)
+		"container_lab_case":
+			# 实验柜：菱形
+			var pts := PackedVector2Array([
+				ctr + Vector2(0, -13), ctr + Vector2(11, 0),
+				ctr + Vector2(0, 13), ctr + Vector2(-11, 0)])
+			draw_colored_polygon(pts, col)
+			draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[3], pts[0]]), edge, 2.0)
+		"container_cargo_crate":
+			# 货运箱：大方箱 + 交叉带
+			draw_rect(Rect2(ctr - Vector2(13, 13), Vector2(26, 26)), col, true)
+			draw_line(ctr + Vector2(-13, -13), ctr + Vector2(13, 13), edge, 2.0)
+			draw_line(ctr + Vector2(13, -13), ctr + Vector2(-13, 13), edge, 2.0)
+		"container_supply_case":
+			# 补给箱：方箱 + 十字（与药柜区分：用深色边而不是红）
+			draw_rect(Rect2(ctr - Vector2(11, 11), Vector2(22, 22)), col, true)
+			draw_line(ctr + Vector2(0, -11), ctr + Vector2(0, 11), edge, 3.0)
+			draw_line(ctr + Vector2(-11, 0), ctr + Vector2(11, 0), edge, 3.0)
+		_:
+			# 默认（木箱等）：方箱 + 顶盖亮边
+			draw_rect(Rect2(ctr - Vector2(10, 10), Vector2(20, 20)), col, true)
+			draw_line(ctr + Vector2(-10, -10), ctr + Vector2(10, -10), col.lightened(0.35), 3.0)
+	draw_rect(Rect2(ctr - Vector2(1, 1), Vector2(2, 2)), edge, true)
 
 
 func _draw() -> void:
@@ -104,21 +237,39 @@ func _draw() -> void:
 		var ctr: Vector2 = (d["pos"] as Vector2) * scene.CELL_PX
 		draw_rect(Rect2(ctr - Vector2(5, 5), Vector2(10, 10)), Color(0.95, 0.85, 0.35), true)
 
+	# ── 可搜索容器 + 尸体（真机反馈 #4）──
+	_draw_containers()
+
 	# ── 敌人 ──
+	# 两条**独立**信息通道（2026-10-13 真机反馈 #3：不同敌人要有不同特征颜色）：
+	#   ① **填充色 = 类型身份**（a.def.color，来自 data/enemies.json）
+	#   ② **外圈环 = 警戒状态**（放松灰 / 警觉黄 / 交战红）
+	# 早先两者挤在同一条颜色通道上（敌人只会"警戒变色"），
+	# 于是感染体和重装暴徒长得一模一样，玩家分不清面前是谁。
+	var engaged: bool = scene.squad.is_engaged()
+	var alerted: bool = scene.squad.is_alerted()
+	var ring_col := C_ENEMY_IDLE
+	if engaged:
+		ring_col = C_ENEMY_COMBAT
+	elif alerted:
+		ring_col = C_ENEMY_ALERT
 	for a in scene.agents:
 		var ctr: Vector2 = a.pos * scene.CELL_PX
 		if not a.is_alive():
 			draw_rect(Rect2(ctr - Vector2(6, 6), Vector2(12, 12)), C_DEAD, true)
 			continue
-		var col = C_ENEMY_IDLE
-		if scene.squad.is_engaged():
-			col = C_ENEMY_COMBAT
-		elif scene.squad.is_alerted():
-			col = C_ENEMY_ALERT
+		var body: Color = a.def.color
 		var r = 9.0 if a.def.is_ranged() else 7.0
-		draw_circle(ctr, r, col)
+		# ① 类型身份：填充色
+		draw_circle(ctr, r, body)
+		# ② 警戒状态：外圈环（交战最粗，放松最细）
+		var rw := 3.0 if engaged else (2.2 if alerted else 1.4)
+		draw_arc(ctr, r + 2.5, 0, TAU, 24, ring_col, rw)
+		# 远程/近战再用**形状**区分一次（色盲玩家也能读）
+		if a.def.is_ranged():
+			draw_arc(ctr, r * 0.45, 0, TAU, 12, body.lightened(0.45), 1.5)
 		# 朝向
-		draw_line(ctr, ctr + a.facing * r * 1.9, col.lightened(0.35), 2.0)
+		draw_line(ctr, ctr + a.facing * r * 1.9, body.lightened(0.45), 2.0)
 		# 血条
 		var hpr = float(a.hp) / maxf(1.0, float(a.def.hp))
 		draw_rect(Rect2(ctr + Vector2(-10, -15), Vector2(20, 3)), Color(0.2, 0.2, 0.22), true)
