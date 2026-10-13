@@ -17,13 +17,14 @@ extends RefCounted
 ## 纯 RefCounted，可 headless 单测。
 
 ## 当前存档格式版本。**每次改档结构必须 +1，并补一条迁移规则。**
-const SAVE_VERSION := 3
+const SAVE_VERSION := 4
 const SAVE_FILE := "soudache_save.json"
 ## 迁移链：from_version -> 函数(把该版本的数据升到 from_version+1)
 ## 用字典而不是一串 if，这样"有哪些迁移"一眼看得全。
 const MIGRATIONS := {
 	1: "_migrate_1_to_2",
 	2: "_migrate_2_to_3",
+	3: "_migrate_3_to_4",
 }
 
 var path: String = ""               ## 实际使用的存档路径
@@ -184,6 +185,17 @@ static func _migrate_2_to_3(d: Dictionary) -> void:
 		d["settings"] = {}
 	if not d.has("stats"):
 		d["stats"] = {"raids": 0, "extracts": 0, "deaths": 0, "kills": 0}
+
+
+## v3 -> v4：藏身处加入**配装**（loadout）。
+## ⚠️ 老档没有 loadout，等于"身上什么都没穿" —— 这在语义上是**正确**的，
+##    所以只补一个空表，不做任何补偿（凭空发装备会破坏搜打撤的经济）。
+static func _migrate_3_to_4(d: Dictionary) -> void:
+	if not d.has("hideout") or not (d["hideout"] is Dictionary):
+		return
+	var h: Dictionary = d["hideout"]
+	if not h.has("loadout"):
+		h["loadout"] = {}
 
 
 # ─────────────────── 状态 ───────────────────

@@ -7,7 +7,8 @@ extends RefCounted
 ##   进入地图 → 搜刮（LootRoller 填充容器）→ 战斗 → 撤离 / 死亡 → 结算
 ##
 ## ⚠️ 搜打撤的灵魂是【死亡掉落全部装备】。本类把这个规则做成了不可绕过的判定：
-##   死亡 → carry 背包全部清空；只有 stash（藏身处仓库）里的东西能留下来。
+##   死亡 → carry 背包全部清空 + equipment（身上穿的）一并清空；
+##   只有 stash（藏身处仓库）里的东西能留下来。
 ##
 ## 纯 RefCounted，无 Node 依赖，可 headless 单测。
 
@@ -33,6 +34,23 @@ var max_hp: int = 100
 var carry: Inventory
 var stash: Inventory
 
+## 身上穿着的装备（由藏身处配装注入；null = 本局没有装备系统）
+##
+## ⚠️ 这里刻意**持引用而不是拷贝**：战局里捡到一把枪装到身上，
+##    撤离后它就该是你的新配装 —— 写完直接落到 hideout.loadout 上，
+##    不需要"结算时再搬一次"（多一次搬运就多一个漏搬的机会）。
+##    代价是**死亡时必须显式清空**（见 _on_death）—— 那正是搜打撤的灵魂。
+var equipment: Equipment = null
+## 死亡损失策略（3c）。默认全掉（与旧行为一致）；保留比例/保险槽位由平衡专家调。
+var death_policy: DeathPolicy = DeathPolicy.new()
+
+## 任务系统（C 阶段内容，GameDesigner 填 data/missions.json）。
+## 框架事件驱动：本会话在击杀/撤离/搜刮时 notify()，完成时发 mission_completed。
+## 纯 RefCounted，无 Node 依赖，可 headless 单测。
+var mission: MissionSystem = null
+## 本局任务完成累计发放的钱（撤离结算后由调用方并入藏身处钱包）
+var mission_wallet_earned: int = 0
+
 var phase: int = Phase.PREP
 var time_left: float = DEFAULT_RAID_SECONDS
 var raid_seconds: float = DEFAULT_RAID_SECONDS
@@ -55,10 +73,15 @@ var _map: MapGenerator = null
 
 ## shared_stash：藏身处仓库必须【跨局共享】——否则"死亡掉装备"就没有对照物了。
 ## 不传则本局自带一个空仓库（仅适合单局测试）。
+## mission_defs：任务定义字典（来自 DataRegistry.missions），空则本局无任务。
 func _init(items: Dictionary = {}, rng: SimRng = null, shared_stash: Inventory = null,
-		modifiers: Dictionary = {}) -> void:
+		modifiers: Dictionary = {}, mission_defs: Dictionary = {}) -> void:
 	_items = items
 	_rng = rng if rng != null else SimRng.new(1)
+	if not mission_defs.is_empty():
+		mission = MissionSystem.new(mission_defs)
+		if mission != null:
+			mission.mission_completed.connect(_on_mission_completed)
 	# ⚠️ 负重上限与背包格数必须来自藏身处升级，**不能硬编码**。
 	#    早先写死 `Inventory.new(12, _items, 20.0)` ——
 	#    于是 `Hideout.carry_weight_limit()` 从来没被用过，
@@ -66,6 +89,10 @@ func _init(items: Dictionary = {}, rng: SimRng = null, shared_stash: Inventory =
 	var slots := int(modifiers.get("carry_slots", DEFAULT_CARRY_SLOTS))
 	var wlimit := float(modifiers.get("carry_weight_limit", DEFAULT_CARRY_WEIGHT))
 	carry = Inventory.new(slots, _items, wlimit)
+	# 死亡损失策略（3c）：默认全掉；保留比例/保险槽位由 hideout 通过 modifiers 注入。
+	death_policy.keep_equipment_ratio = clampf(float(modifiers.get("death_keep_equipment", 0.0)), 0.0, 1.0)
+	death_policy.keep_carry_ratio = clampf(float(modifiers.get("death_keep_carry", 0.0)), 0.0, 1.0)
+	death_policy.insured_slots = maxi(0, int(modifiers.get("death_insured", 0)))
 	# 治疗速度同理（藏身处「战地急救」升级）
 	heal_speed = clampf(float(modifiers.get("heal_speed", 1.0)), 0.2, 5.0)
 	stash = shared_stash if shared_stash != null else Inventory.new(40, _items, 999.0)
@@ -98,6 +125,11 @@ func start(seconds: float = DEFAULT_RAID_SECONDS) -> void:
 	enemies_killed = 0
 	damage_taken = 0
 	damage_dealt = 0
+	# 任务：开局自动接取所有已加载任务（框架是"事件驱动 + 显式 start"，
+	# 这里统一在开局部署，避免"任务永远停在 LOCKED、notify 不生效"）。
+	if mission != null:
+		for id in mission.ids():
+			mission.start(id)
 
 
 func is_over() -> bool:
@@ -175,18 +207,142 @@ func heal(amount: int) -> int:
 ## 击杀一个敌人（计入统计）
 func register_kill() -> void:
 	enemies_killed += 1
+	if mission != null:
+		mission.notify("kill")
+
+
+## 任务完成时发奖：物品直接进（共享）仓库；钱累计到 mission_wallet_earned，
+## 由调用方在结算后并入藏身处钱包（wallet 在 Hideout，不在本会话）。
+func _on_mission_completed(id: String) -> void:
+	if mission == null:
+		return
+	var def: Dictionary = mission.def_of(id)
+	var r: Dictionary = def.get("reward", {})
+	var wallet := int(r.get("wallet", 0))
+	if wallet > 0:
+		mission_wallet_earned += wallet
+	for it in r.get("items", []):
+		var iid := str(it.get("item_id", ""))
+		var cnt := int(it.get("count", 0))
+		if iid != "" and cnt > 0:
+			stash.add(iid, cnt)
+
+
+## 当前任务进度快照（供 UI 显示）。无任务返回空数组。
+func mission_status() -> Array:
+	if mission == null:
+		return []
+	var out: Array = []
+	for id in mission.ids():
+		out.append({"id": id, "state": mission.state_of(id), "progress": mission.progress_of(id)})
+	return out
 
 
 func _on_death(reason: String) -> void:
 	phase = Phase.DEAD
-	# ⚠️ 搜打撤的灵魂：死亡掉落【全部】携带装备。
-	#    只有 stash 是安全的。
-	# 先记下丢了多少格，供结算界面显示（清空后就数不出来了）
-	lost_slots = carry.used_slots()
-	lost_value = LootRoller.total_value(_carry_as_drops(), _items)
-	carry.clear()
+	# ⚠️ 搜打撤的灵魂：死亡按「死亡损失策略」掉落携带装备。
+	#    默认策略 = 全掉（与旧行为一致）；具体保留比例/保险槽位由 DeathPolicy 调，
+	#    【平衡专家】在 hideout.raid_modifiers() 或 raid.death_policy 上设。
+	#    只有 stash（藏身处仓库）永远安全。
+	lost_slots = 0
+	lost_value = 0
+
+	# ── 携带背包：按策略保留最值钱的若干槽，其余丢失 ──
+	if death_policy.keep_carry_ratio > 0.0 or death_policy.insured_slots > 0:
+		var cidx: Array = []
+		var cvals: Array = []
+		for i in carry.slots.size():
+			var s = carry.slots[i]
+			if s != null:
+				cidx.append(i)
+				cvals.append(_item_value(str(s["item_id"])))
+		var keep := DeathPolicy.plan_keep(cvals, death_policy.keep_carry_ratio, death_policy.insured_slots)
+		var keepset := {}
+		for i in keep:
+			keepset[cidx[i]] = true
+		for i in cidx:
+			if not keepset.has(i):
+				var sid := str(carry.slots[i]["item_id"])
+				var cnt := int(carry.slots[i]["count"])
+				carry.remove(sid, cnt)
+				lost_slots += 1
+				lost_value += _item_value(sid) * cnt
+	else:
+		lost_slots += carry.used_slots()
+		lost_value += LootRoller.total_value(_carry_as_drops(), _items)
+		carry.clear()
+
+	# ── 身上装备：同理按策略保留，其余脱下（彻底丢失）──
+	#    ⭐ 只丢背包是"半个搜打撤"：玩家会"好装备留身上、垃圾塞背包"，
+	#       死亡惩罚就落不到真正值钱的东西上。所以身上装备也要过策略。
+	if equipment != null:
+		var eids: Array = []
+		var evals: Array = []
+		for s in Equipment.SLOTS:
+			var id := equipment.id_in(s)
+			if id != "":
+				eids.append(id)
+				evals.append(_item_value(id))
+		var keep_eq := DeathPolicy.plan_keep(evals, death_policy.keep_equipment_ratio, death_policy.insured_slots)
+		var keepmap := {}
+		for i in keep_eq:
+			keepmap[eids[i]] = true
+		for s in Equipment.SLOTS:
+			var id := equipment.id_in(s)
+			if id != "" and not keepmap.has(id):
+				equipment.slots[s] = ""
+				lost_slots += 1
+				lost_value += _item_value(id)
+
 	extract_progress = 0.0
 	death_reason = reason
+
+
+## 物品价值（死亡结算用）。_items 是 id -> ItemDef。
+func _item_value(id: String) -> int:
+	var d = _items.get(id)
+	if d == null:
+		return 0
+	return int(d.value)
+
+
+## 身上装备的总价值（只用于死亡结算的"丢了多少钱"）
+func _worn_value() -> int:
+	var v := 0
+	if equipment == null:
+		return 0
+	for slot in Equipment.SLOTS:
+		var id: String = equipment.id_in(slot)
+		if id == "":
+			continue
+		var d: ItemDef = _items.get(id)
+		if d != null:
+			v += d.value
+	return v
+
+
+# ─────────────────── 装备（局内穿脱）───────────────────
+#
+# 局内从随身背包里穿/脱。**走 carry 而不是 stash** —— 这是"死亡掉装备"的
+# 承载体：你从尸体上捡的枪先装进 carry，装上身后就归 equipment，
+# 死了两者一起没。
+
+## 局内穿装备（从随身背包里拿）。返回失败原因（空串 = 成功）。
+func equip_from_carry(id: String) -> String:
+	if equipment == null:
+		return "本局没有装备系统"
+	if phase != Phase.ACTIVE:
+		return "本局已经结束了"
+	return equipment.equip(carry, id)
+
+
+## 局内脱下装备（放回随身背包）。返回失败原因（空串 = 成功）。
+func unequip_from_carry(slot: String) -> String:
+	if equipment == null:
+		return "本局没有装备系统"
+	if phase != Phase.ACTIVE:
+		return "本局已经结束了"
+	return equipment.unequip(carry, slot)
 
 
 ## 把当前携带物转成掉落数组（用于统计价值）
@@ -269,6 +425,8 @@ func take_from_corpse(idx: int, item_id: String, count: int) -> int:
 		d["count"] = have - taken
 		if int(d["count"]) <= 0:
 			drops.remove_at(i)
+		if taken > 0 and mission != null:
+			mission.notify("loot", taken)
 		return taken
 	return 0
 
@@ -278,12 +436,96 @@ func take_all_from_corpse(idx: int) -> Array:
 	if idx < 0 or idx >= corpses.size():
 		return []
 	var drops: Array = corpses[idx]["drops"]
+	var before_count := 0
+	for d in drops:
+		before_count += int(d["count"])
 	var rest: Array = []
 	for d in drops:
 		var leftover := carry.add(str(d["item_id"]), int(d["count"]))
 		if leftover > 0:
 			rest.append({"item_id": str(d["item_id"]), "count": leftover})
 	corpses[idx]["drops"] = rest.duplicate()
+	var after_count := 0
+	for d in rest:
+		after_count += int(d["count"])
+	var taken := before_count - after_count
+	if taken > 0 and mission != null:
+		mission.notify("loot", taken)
+	return rest
+
+
+# ─────────────────── 可搜索容器（2026-10-13）───────────────────
+#
+# 与尸体容器是同一套交互模式，但容器由**房间类型挂靠**生成：
+#   房间 -> room_type.containers[] -> ContainerDef -> loot_table -> items
+# 于是"军械库里有枪架、医疗室里有药柜"是**数据驱动**出来的，不是硬编码。
+
+var containers: Array[ContainerInstance] = []
+var _next_container_id: int = 0
+
+
+## 登记一个容器实例。drops 是 LootRoller 按容器类型对应掉落表抽出来的。
+func add_container(def: ContainerDef, pos: Vector2, drops: Array) -> int:
+	var c := ContainerInstance.new()
+	c.id = _next_container_id
+	_next_container_id += 1
+	c.def = def
+	c.pos = pos
+	for d in drops:
+		c.drops.append({"item_id": str(d.get("item_id", "")), "count": int(d.get("count", 0))})
+	containers.append(c)
+	return c.id
+
+
+## 附近最近的【未搜空】容器索引（没有则 -1）
+func container_near(pos: Vector2, radius: float = 1.4) -> int:
+	var best := -1
+	var bd := radius
+	for i in containers.size():
+		var c: ContainerInstance = containers[i]
+		if c.is_done():
+			continue                      # 已搜空的容器不再提示
+		var d := c.pos.distance_to(pos)
+		if d <= bd:
+			bd = d
+			best = i
+	return best
+
+
+## 从容器拿走若干。返回实际拿走的数量（背包放不下会少于请求量）。
+func take_from_container(idx: int, item_id: String, count: int) -> int:
+	if idx < 0 or idx >= containers.size():
+		return 0
+	var c: ContainerInstance = containers[idx]
+	var first := not c.searched
+	var taken := c.take(item_id, count, carry)
+	c.searched = true
+	if taken > 0 and first:
+		containers_looted += 1
+	if taken > 0 and mission != null:
+		mission.notify("loot", taken)
+	return taken
+
+
+## 拿走一个容器的全部（能塞多少塞多少），返回没塞下的部分
+func take_all_from_container(idx: int) -> Array:
+	if idx < 0 or idx >= containers.size():
+		return []
+	var c: ContainerInstance = containers[idx]
+	var first := not c.searched
+	var before_count := 0
+	for d in c.drops:
+		before_count += int(d["count"])
+	var rest := c.take_all(carry)
+	c.searched = true
+	if first:
+		containers_looted += 1
+	var after_count := 0
+	for d in rest:
+		after_count += int(d["count"])
+	var taken := before_count - after_count
+	if taken > 0 and mission != null:
+		mission.notify("loot", taken)
 	return rest
 
 
@@ -293,6 +535,8 @@ func extract() -> bool:
 		return false
 	phase = Phase.EXTRACTED
 	extract_progress = EXTRACT_COUNTDOWN
+	if mission != null:
+		mission.notify("extract")
 	return true
 
 
@@ -322,6 +566,7 @@ func settle() -> Dictionary:
 		"brought_out_value": LootRoller.total_value(brought, _items),
 		"containers_looted": containers_looted,
 		"enemies_killed": enemies_killed,
+		"mission_wallet": mission_wallet_earned,
 		"lost_slots": lost_slots,
 		"lost_value": lost_value,
 		"damage_taken": damage_taken,
