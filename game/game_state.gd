@@ -12,6 +12,7 @@ extends Node
 
 const RAID_SCENE := "res://view/raid_scene.tscn"
 const HIDEOUT_SCENE := "res://view/hideout_scene.tscn"
+const MAIN_MENU_SCENE := "res://view/main_menu.tscn"
 
 var reg: DataRegistry = null
 var hideout: Hideout = null
@@ -59,10 +60,15 @@ func ensure_loaded() -> void:
 		return
 	_ready_done = true
 	reg = DataRegistry.new()
-	if not reg.load_all("A"):
+	# ⭐ 阶段开关（roadmap-bac.md §1 约束 5「用数据开关，不用代码分支」）：
+	#   这里只改一个参数即可推进阶段，B ⊂ A ⊂ C。
+	#   2026-10-12：A -> **C**，启用 C 阶段内容（制造配方 / 第 7~10 把枪 / C 敌人）。
+	#   （此前是 "A"，导致 recipes.json 等 C 数据加载不进来 —— 制造面板会是空的。）
+	#   ⚠️ 若要严守 roadmap 的门 1 / 门 2 节奏，把 "C" 改回 "A" 即可，不需要改任何代码。
+	if not reg.load_all("C"):
 		push_error("[Game] 数据加载失败：%s" % str(reg.errors))
 		return
-	hideout = Hideout.new(reg.items, 3000)
+	hideout = Hideout.new(reg.items, 3000, reg.weapons, reg.attachments)
 	hideout.wallet += 5000
 	save = SaveManager.new()
 	load_game()
@@ -150,8 +156,18 @@ func go_to_hideout() -> void:
 	get_tree().change_scene_to_file(HIDEOUT_SCENE)
 
 
+## 回到主菜单（主页）。藏身处 / 突袭里的「主菜单」按钮走这里。
+func go_to_main_menu() -> void:
+	get_tree().change_scene_to_file(MAIN_MENU_SCENE)
+
+
 ## 待用的地图种子（0 = 随机）
 var raid_seed: int = 0
+
+## 下一局要打的地图主题 id（对应 data/maps.json）。
+## "" = 让 raid_scene 按种子随机挑一个。
+## 藏身处可以设置它来"选择去哪张图"（森林 / 城区 / 军事基地）。
+var map_id: String = ""
 
 
 ## 全屏场景切换的简易封装（带一点淡入，避免突兀）
