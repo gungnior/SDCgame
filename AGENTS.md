@@ -177,6 +177,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1
    更新 [specs/session-handoff.md](specs/session-handoff.md) 顶部，写清
    **① 一句话状态 ② 改了哪些文件（别人别碰） ③ 复跑命令 ④ 没验证的 ⑤ 下一步**。
    中断也要写 —— 半成品比没开工更需要交接。**只写结论，不写思考过程。**
+   **deliberate 的例外必须用户明确批准**（见 §4.5），不得静默豁免。
+6. ⭐ **声称"某功能在构建里 / 在包里"之前，先打开产物核对一次**（2026-10-13 加的规矩）。
+   来历：`git log` 里有 ≠ 你跑的那个产物里有。实测做法 —— 导出 APK 后用 `zipfile` 数 `.gdc`
+   （15/15 命中才算数）；改脚本后用 `godot --headless --check-only --script res://<file>` 逐文件解析。
+7. ⭐ **`git clang-format` 的精神**：只对你**改动的部分**负责，不许顺手重排整个文件
+   （我们的等价物：补丁要小、别把无关段落一起改了）。
 
 > ⚠️ **像素基线现在可以用了，但仍别用它证明"没改坏"。**
 > 它抓的是"明显改动"，细粒度回归靠 ①②。另外**跑验收时别动鼠标**
@@ -243,6 +249,84 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1
   其中**一个一直是坏的**，只因为从不执行才没暴露
 
 ---
+
+## 4.5 2026-10-13 新增的规矩（来自一次引擎调研的对照）
+
+### 本机环境特殊性（换机请重看）
+
+- **`git` 连不上 GitHub（schannel）**：报 `SEC_E_NO_CREDENTIALS (0x8009030e)`。
+  加 `-c http.sslBackend=openssl` 可解。另外 **push 必须由拥有者在自己的终端执行** ——
+  沙箱内进程不能建命名管道，凭据助手起不来（`couldn't create signal pipe, Win32 error 5`）。
+- **`verify_all.ps1` 找 Python 的路径与本机实际差一层**：脚本找 `%LOCALAPPDATA%\dsh\...`，
+  实际在 `C:\Users\<用户>\.dsh\dsh-runtimes\...`。用 junction 补：
+  `mklink /J _install\python <实际路径>`。
+- **`art\_raw\` 必须存在**：它被 `.gitignore` 排除、新克隆里没有，而 `Image.save_png()` **不会自建父目录**
+  -> 截图静默失败（err 7）。跑 ④ 前先 `New-Item -ItemType Directory -Force art\_raw`。
+- **Android 导出**：模板只需 `android_debug.apk` / `android_release.apk` / `version.txt`；
+  **`platform-tools` 必装**（哪怕 `use_gradle_build=false`，Godot 的导出校验仍会去找 adb）。
+  完整 recipe 见 [specs/android-export.md](specs/android-export.md)。
+
+### `.godot/` 导入缓存是真实故障模式
+
+新脚本 / 新资源之后仍报古怪的 Parse 或"找不到类"，**先删 `.godot/` 重新扫描，再查代码**。
+来历：`art\_raw` 缺失导致截图失败、`.uid` 由引擎生成、`class_name` 靠 `global_script_class_cache.cfg` 解析 ——
+这三件事都是**文件系统/缓存状态**，不是代码逻辑。
+
+### 卡住时的五步（排查手册）
+
+1. **先查契约，再猜** —— 先看函数签名与文档，别猜引擎行为。
+2. **尽早打开"验证层"** —— Godot 的等价物是 `godot --headless --check-only --script res://<file>`
+   （逐文件解析、给出确切行号；这次就是靠它抓出 `_aim_push` 那处）。它慢，只在短跑里用。
+3. **先做最小复现** —— 写一个 `test/*_probe.gd`（headless 能跑），绕开场景与全局状态。
+4. **先排除上游层** —— 先确认是"我们的脚本"还是"引擎/缓存（`.godot/`）"，再往下挖。
+5. **不凭记忆断言** —— 不信"Godot 应该会…"，跑一遍看**退出码与原文**。
+
+### 单一真相源：一个可变事实，只有一个所有者
+
+| 事实 | 唯一所有者 |
+|---|---|
+| 玩家实际受到的伤害 | `RaidScene._resolve_player_hit` |
+| 人物判定身位 | `BodyMetrics`（弹道半宽 / 闪避距离全部由它推导） |
+| 存档格式与迁移 | `SaveManager.SAVE_VERSION` + `migrate()` |
+| 验收 = 可交付 | `tools/verify_all.ps1` 的退出码 |
+
+新增一处可变事实时，**先指名它的所有者**，再写代码。
+
+### 新的兜底 / TODO 必须写「移除条件」
+
+新的 `TODO` / `HACK` / `FALLBACK` / 豁免清单，都要写清**原因 + 移除条件（或到期）**；
+不许为了兼容制造第二个真相源。
+**已补（2026-10-13）**：`EnemyAgent._fire_at` 的"无弹道管理器时的兼容结算"、
+`PlayerAutopilot._step_dir` 的"流场拿不到方向的直线兜底"——两处都写明了各自的移除条件。
+同理，`pre_push_check.ps1` 里那 4 个探针豁免也带着理由（不是静默跳过）。
+
+### 同时开火节流（B 方案）的调参口径
+
+`sim/combat/lane_shot_manager.gd` 的令牌桶（`SPAWN_RATE` 条/秒 + `SPAWN_BURST` 瞬时）决定**入射量**。
+它必须与最大闪避频率（`1 / DodgeState.COOLDOWN` ≈ **1.18 次/秒**）同量级 ——
+否则"躲得开"又从数学上不成立。改这两个常量请连着真机复核（`specs/feel-tuning.md` 有实测表）。
+
+### 视觉证据三条纪律
+
+1. 截图必须由**引擎自己写文件**（不要拿窗口/系统截图当视觉正确性证据）；
+2. **写出后要断言文件存在** —— 目标目录不存在时 `save_png` 会静默失败（err 7），
+   而验收脚本会把"没图"读成"首次运行"（2026-10-13 已修：现在判【无效】）；
+3. 比对必须在 **RGB** 上做（`tools/compare_images.py`），不要用 `ImageChops...getbbox()`。
+
+### 大文件阈值：超过 ~1000 行 = 单作者文件
+
+`.gd` 超过约 1000 行就该**按既有分节拆成多个文件（纯搬运、不改行为）**，而不是继续往里加方法。
+现状（2026-10-13 两刀之后）：`view/raid_scene.gd` **≈1018 行** ——
+第一刀把「玩家动作」（闪避 / 自动作战开关 / 冻结判定）切到 `view/raid_player_actions.gd`，
+第二刀把「搜刮交互」（开面板 / 容器视图 / 面板动作）切到 `view/raid_loot_actions.gd`，两刀都是纯搬运、行为零改动。
+**它仍在阈值之上**，第三刀的自然切法是伤害/护甲结算（`_resolve_player_hit` / `_player_armor` /
+`_weapon_wear_factor`）—— ⚠️ 搬它必须同步改 `test/suites/s20_round7_fixes.gd` 的两条源码断言。
+其余：`view/raid_sim_runner.gd` ≈ 530、`ui/touch_controls.gd` ≈ 263。
+
+### 例外必须用户批准
+
+交接里若有 **deliberate 的例外**（某个门槛故意没跑、某个规矩故意没守），**必须由用户明确批准**，
+agent 不得静默豁免。
 
 ## 5. 红线（不可谈判）
 

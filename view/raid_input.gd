@@ -48,10 +48,14 @@ func handle_key(event: InputEvent) -> void:
 		KEY_T:
 			scene._try_heal()
 		KEY_B:
-			scene._open_bag()
-		KEY_C:
-			# 静步（原「蹲伏」改为静步）：慢走 + 脚步不发声
-			scene._toggle_silent_walk()
+			scene.loot_actions.open_bag()
+
+		KEY_G:
+			# 自动作战（2026-10-13 用户需求）：自动寻路 / 自动搜刮 / 自动交火
+			scene.player_actions.toggle_autopilot()
+		KEY_SHIFT:
+			# 闪避（用户需求：位移 1.5 倍人物身位）
+			scene.player_actions.try_dodge()
 		KEY_K:
 			scene._restart()
 		KEY_TAB:

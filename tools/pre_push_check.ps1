@@ -12,6 +12,7 @@
     5. 含非 ASCII 的 *.ps1 均带 UTF-8 BOM —— Win PowerShell 5.1 不带 BOM 按 ANSI 读，中文注释直接崩解析器（纯 ASCII 的豁免，不误报）
     6. 验收退出码 0          —— verify_all.ps1 -Fast（只改文档可用 -SkipVerify 跳过）
     7. remote 已配置         —— 没配 origin 就打印配置命令，不猜
+    8. 探针脚本能跑          —— test/*probe*.gd 逐个 headless 跑（20s 超时）；需真人交互的登记豁免
 
 .PARAMETER SkipVerify
   跳过第 6 项验收（只动了 specs/*.md 之类的文档时用，省 20 秒）。
@@ -118,6 +119,70 @@ if ($LASTEXITCODE -eq 0 -and $(& git remote get-url origin 2>$null)) {
     Write-Output "    git push -u origin master"
 }
 
+
+# ---- 8. 探针脚本能跑（2026-10-13 新增）----
+# 为什么：test/*probe*.gd 是"一次性诊断工具"，此前**没有任何地方保证它们还能跑** ——
+#   而"写了却没人执行"正是本项目被咬过的形态（见 run_tests.gd 的注册守卫）。
+# 做法：逐个 headless 跑（20 秒超时），退出码非 0 或超时即 FAIL。
+#   需要**真人交互**的那几个登记在 $probeSkip 里并写明理由 —— 不静默跳过，
+#   "必须能跑，或登记一个理由"。（豁免清单是 2026-10-13 逐个实测出来的，不是猜的。）
+$probeSkip = @(
+    "test/hideout_probe.gd",   # 需要真人点选藏身处界面，headless 下等不到输入 -> 必然超时
+    "test/menu_probe.gd",      # 同上（主菜单要点）
+    "test/merchant_probe.gd",  # 同上（商人面板要点）
+    "test/result_probe.gd"     # 同上（结算界面要点）
+)
+$probes = @($tracked | Where-Object { $_ -match '^test/.*probe.*\.gd$' })
+$godotExe = Join-Path $Root "_install\godot\Godot_v4.7.2-stable_win64_console.exe"
+if ($probes.Count -eq 0) {
+    Step "8. 探针脚本能跑" $true "tracked 里没有 test/*probe*.gd"
+} elseif (-not (Test-Path -LiteralPath $godotExe)) {
+    Step "8. 探针脚本能跑" $false ("找不到 Godot：{0}（{1} 个探针未验证）" -f $godotExe, $probes.Count)
+} else {
+    $probeFail = @()
+    $probeRan = 0
+    foreach ($f in $probes) {
+        if ($probeSkip -contains $f) { continue }
+        $scene = ($f -replace '\.gd$', '.tscn')
+        if (Test-Path -LiteralPath (Join-Path $Root ($scene -replace '/', '\'))) {
+            $a2 = @('--headless', '--path', '.', ('res://' + $scene))
+        } else {
+            $a2 = @('--headless', '--path', '.', '--script', ('res://' + $f))
+        }
+        # ⚠️ 为什么不用 Start-Process：2026-10-13 实测（A/B/C/D 四种写法），
+        #    本机 PS 5.1 下 Start-Process -PassThru **两种写法都读不到 ExitCode**（恒为 $null），
+        #    而 `$null -ne 0` 为真 -> 会把"跑得好好的探针"全部误判成失败。
+        #    只有 [Diagnostics.Process]::Start($psi) 与"直接调用 + $LASTEXITCODE"能读到。
+        #    这里取前者，因为只有它能同时拿到**超时**控制。
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $godotExe
+        $psi.Arguments = ($a2 -join ' ')
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+        $psi.WorkingDirectory = $Root
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        # 先把两条管道**异步**排空：否则子进程写满管道缓冲区会卡住，WaitForExit 会假超时
+        $null = $proc.StandardOutput.ReadToEndAsync()
+        $null = $proc.StandardError.ReadToEndAsync()
+        $probeRan++
+        if (-not $proc.WaitForExit(20000)) {
+            $proc.Kill()
+            $probeFail += ($f + "(超时20s)")
+        } else {
+            $ec = $proc.ExitCode
+            if ($null -eq $ec) { $probeFail += ($f + "(退出码读不到)") }
+            elseif ($ec -ne 0) { $probeFail += ($f + "(exit=$ec)") }
+        }
+        $proc.Dispose()
+    }
+
+    $d8 = ("{0} 个探针：跑 {1} / 豁免 {2} / 失败 {3}" -f $probes.Count, $probeRan, $probeSkip.Count, $probeFail.Count)
+    if ($probeFail.Count -gt 0) { $d8 += (" -> " + ($probeFail -join ', ')) }
+    Step "8. 探针脚本能跑" ($probeFail.Count -eq 0) $d8
+    if ($probeSkip.Count -gt 0) { Write-Output ("        豁免（需真人交互）：" + ($probeSkip -join ', ')) }
+}
 # ---- 汇总 ----
 Write-Output ""
 if ($script:Failed -eq 0) {

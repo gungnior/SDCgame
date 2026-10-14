@@ -26,7 +26,6 @@ var hint_label: Label = null
 var view_label: Label = null
 var corpse_label: Label = null
 var toast_label: Label = null
-var silent_label: Label = null    ## 「静步」状态指示（原蹲伏改为静步）
 
 ## 短提示状态（手机上唯一的即时反馈渠道）
 var toast_text := ""
@@ -177,7 +176,6 @@ func refresh() -> void:
 	# 用户："和敌人尸体没法交互。（战利品系统呢）"
 	# 尸体其实生成了、也能搜 —— 但**没有可见的入口**，玩家不知道按什么。
 	_refresh_corpse_prompt(raid)
-	_refresh_silent_indicator()
 
 	# 短提示
 	if toast_label != null:
@@ -190,9 +188,10 @@ func refresh() -> void:
 			_set_label(toast_label, toast_text, "_cache_toast")
 
 	# ⚠️ 提示必须按平台给（真机反馈：安卓上显示的是 WASD/J/K/L 键盘键位）
-	var hint := ("左摇杆移动 · 右摇杆瞄准 · ◉ 开火 · ⟳ 换弹 · ✚ 治疗 · ▦ 地图（看撤离点）"
+	# ⚠️ 2026-10-13：右半屏改为「十字键位」，视角摇杆与开火键已删除（攻击全自动）。
+	var hint := ("左摇杆移动（兼闪避方向）· 右半屏十字：中=闪避 上=换弹 左=治疗 右=背包 下=地图 · 攻击全自动"
 		if is_touch
-		else "WASD 移动 · J/空格 开火 · R 换弹 · T 治疗 · B 背包 · N 地图 · Tab 视图 · K 重开 · ESC 设置 · F1~F4 无障碍 · M 静音")
+		else "WASD 移动 · Shift 闪避 · G 自动作战 · J/空格 开火 · R 换弹 · T 治疗 · B 背包 · N 地图 · Tab 视图 · K 重开 · ESC 设置 · F1~F4 无障碍 · M 静音")
 	_set_label(hint_label, hint, "_cache_hint")
 
 
@@ -246,30 +245,6 @@ func _refresh_corpse_prompt(raid) -> void:
 		_set_label(corpse_label, "[%s] 搜索%s · %d 堆物资"
 			% [bag_key_hint(), c.display_name(), (c.drops as Array).size()], "_cache_corpse")
 	corpse_label.visible = true
-
-
-## 「静步」状态指示：开的时候在中下方常驻显示，避免玩家忘了自己处于慢速状态。
-## 只静步**开着**才显示；关闭时隐藏（不占屏幕）。
-func _refresh_silent_indicator() -> void:
-	if silent_label == null:
-		silent_label = Label.new()
-		silent_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-		silent_label.position = Vector2(-200, -84)
-		silent_label.size = Vector2(400, 20)
-		silent_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		silent_label.add_theme_font_size_override("font_size", hud_fs + 1)
-		silent_label.add_theme_color_override("font_color", UITokens.INFO)
-		silent_label.add_theme_constant_override("outline_size", 2)
-		silent_label.add_theme_color_override("font_outline_color", UITokens.BG_DEEP)
-		silent_label.visible = false
-		add_child(silent_label)
-	if scene == null:
-		return
-	if bool(scene.silent_walk):
-		_set_label(silent_label, "◌ 静步中（慢速 · 脚步无声）", "_cache_silent")
-		silent_label.visible = true
-	elif silent_label.visible:
-		silent_label.visible = false
 
 
 ## 只在文本真的变了才写 Label.text（见 _cache_* 的说明）

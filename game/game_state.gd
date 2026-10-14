@@ -19,11 +19,18 @@ var hideout: Hideout = null
 
 # ─── 玩家设置（UI 可改，跨局保留）───
 ## 自动射击：视野锥内发现敌人就自动开火（优先最近）
-var auto_fire := false
+##
+## ⚠️ 2026-10-13：**默认改为 true**。原因：移动端按用户要求删除了开火键，
+##    触屏玩家若不开自动开火就完全无法攻击（攻击设计已改为「自动锁定 + 自动攻击」）。
+##    桌面玩家仍可在 ESC 设置里关掉它，用 J/空格手动开火。
+var auto_fire := true
 ## 自动瞄准：不开自动射击时，准心自动对准锥内敌人
 var auto_aim := true
 ## 视野跟随锁定目标：锁定后视野锥跟着目标转
 var vision_follows_lock := true
+## 自动作战（2026-10-13 用户需求）：自动寻路 + 自动搜刮容器 + 自动交火。
+## 开启后由 PlayerAutopilot 接管移动，AutoAim 的锁定改为**全向**（不再受视野锥限制）。
+var autopilot := false
 
 ## 无障碍（转发给 Feel）
 var shake_enabled := true
@@ -86,6 +93,7 @@ func save_game() -> String:
 			"auto_fire": auto_fire,
 			"auto_aim": auto_aim,
 			"vision_follows_lock": vision_follows_lock,
+			"autopilot": autopilot,
 			"shake_enabled": shake_enabled,
 			"hitstop_enabled": hitstop_enabled,
 			"flash_enabled": flash_enabled,
@@ -115,6 +123,7 @@ func load_game() -> bool:
 		auto_fire = bool(s.get("auto_fire", auto_fire))
 		auto_aim = bool(s.get("auto_aim", auto_aim))
 		vision_follows_lock = bool(s.get("vision_follows_lock", vision_follows_lock))
+		autopilot = bool(s.get("autopilot", autopilot))
 		shake_enabled = bool(s.get("shake_enabled", shake_enabled))
 		hitstop_enabled = bool(s.get("hitstop_enabled", hitstop_enabled))
 		flash_enabled = bool(s.get("flash_enabled", flash_enabled))

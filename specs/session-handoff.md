@@ -8,6 +8,86 @@
 
 ---
 
+## 🔴 最新一轮（2026-10-13 · DSH Lead）：开火前预警 + 移动端 UI 重做
+
+> 交接时间：2026-10-13 · 工作区 `E:\AAAASDC` · **验收 `verify_all.ps1 -Fast` 退出码 0**
+
+**① 一句话**：按拥有者要求做 A 方案（开火前预警，解决贴脸必中）+ 移动端 UI 重做
+（去开火键/视角摇杆、删静步、闪避移到右半屏十字中心、方向摇杆可任意方向闪避）。
+
+**② 改了哪些（别人别碰）**
+
+- 预警：`sim/combat/lane_shot.gd`（新增 warn 阶段与 `warn_for()`）、`sim/combat/lane_shot_manager.gd`、
+  `sim/ai/enemy_agent.gd`、`view/raid_drawer.gd`（预警/飞行两态绘制）
+- UI：`ui/touch_controls.gd`（十字键位）、`ui/tokens.gd`、`view/raid_hud.gd`（提示行 + 删静步指示）、
+  `view/raid_scene.gd`（删静步、闪避取原始摇杆、修 `_aim_push`）、`view/raid_sim_runner.gd`、
+  `view/raid_input.gd`（删 `C`）、`game/game_state.gd`（`auto_fire` 默认 true）
+- 测试：`test/suites/s25_auto_combat.gd`（新增「开火前预警」套件 + 十字布局断言）、
+  `test/suites/s07_ui_mobile.gd`（触屏接口断言反转为"不许回来"）
+
+**③ 复跑命令**：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1`
+
+**③b 本轮验收原始结果**
+
+```
+① 单元测试    ✅ 通过：1639 项，0 失败（退出码 0）
+② 集成验证    ✅ PC 端验证全部通过（105 项）（退出码 0）
+③ 数据契约    ✅ 通过：0 错误，0 警告
+总退出码 0 —— 「可以交付」（④ 本次用 -Fast 跳过）
+```
+
+**④ 没验证的**
+
+- 预警时长（0.12~0.20 秒）是否"够躲又不拖沓"—— 需真机手感，本环境只能证明几何与计时正确。
+- 多敌同时开火的量级问题**未处理**（只做了 A 方案；B 节流 / C 数据节奏仍在手册里待定夺）。
+- 真机上的十字键位拇指舒适度（本环境只能截图确认在位）。
+
+**⑤ 下一步**：真机试预警手感 → 决定要不要 B（同时开火节流）；
+再看十字键位的按键间距是否需要按机型微调（`CROSS_ARM_RATIO` / `CROSS_MARGIN_RATIO`）。
+
+---
+
+## 🔴 最新一轮（2026-10-13 · DSH Lead）：自动作战 / 固定弹道 / 闪避
+
+> 交接时间：2026-10-13 · 执行：DSH Lead · 工作区 `E:\AAAASDC` · HEAD `b3641e7`
+> **验收已跑：`tools\verify_all.ps1` 退出码 0（可以交付）**
+
+**① 一句话**：按拥有者需求落地五条 —— 玩家自动寻路、自动锁定攻击、遇容器自动搜刮、
+敌人攻击改固定弹道（2 倍身位宽、锁开火瞬间人物中心）、闪避（1.5 倍身位）。
+6 个新文件 + 9 个改动文件，全部通过工程验收。
+
+**② 改了哪些（别人别碰）**
+
+- 新增：`sim/combat/body_metrics.gd`、`sim/combat/lane_shot.gd`、`sim/combat/lane_shot_manager.gd`、
+  `sim/combat/dodge.gd`、`sim/ai/player_autopilot.gd`、`test/suites/s25_auto_combat.gd`
+- 修改：`sim/ai/enemy_agent.gd`、`sim/combat/auto_aim.gd`、`view/raid_sim_runner.gd`、
+  `view/raid_scene.gd`、`view/raid_drawer.gd`、`view/raid_input.gd`、
+  `ui/touch_controls.gd`、`ui/settings_menu.gd`、`game/game_state.gd`
+
+**③ 复跑命令**：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1`
+
+**③b 本轮验收原始结果**
+
+```
+① 单元测试    ✅ 通过：1619 项，0 失败（退出码 0）
+② 集成验证    ✅ PC 端验证全部通过（105 项）（退出码 0）
+③ 数据契约    ✅ 通过：0 错误，0 警告
+④ 像素基线    ⚠️ 本环境无法成像（无交互式绘图会话），未给出有效结论 —— 该脚本开头已标明它非门槛
+总退出码 0 —— 「可以交付」   耗时 16.7 秒
+```
+
+**④ 没验证的**
+
+- ④ 像素基线：截图脚本在本环境未产出 `art/_raw/_verify_now.png`，该项**无结论**（非门槛）。
+- **真机手感未验证**：弹速 11 格/秒、闪避冷却 0.85 秒、自动作战交战距离 3~8 格都是首版数值，
+  需安卓真机复核（用户此前明确要求「手感由真机定」）。
+- 自动作战的「目标优先级 / 卡住拉黑」策略只在本机 headless 单测与集成验证下通过，未真机跑过。
+
+**⑤ 下一步**：真机试自动作战与闪避手感 → 按需调 `LaneShot.DEFAULT_SPEED`（闪避窗口）与
+`PlayerAutopilot.STANDOFF_MIN/MAX`（走位）。
+
+---
+
 ## 🔴 最新一轮（2026-10-13 · WorkBuddy）：git 历史落地（为两人协作清地基）
 
 > 交接时间：2026-10-13 · 执行：WorkBuddy · 分支 `main`，76 个提交，**工作树干净、未推远端**

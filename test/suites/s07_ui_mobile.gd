@@ -40,8 +40,10 @@ func _test_result_overlay_exists() -> void:
 	root.add_child(tc)
 	_check(tc.has_method("set_controls_visible"), "有 set_controls_visible")
 	_check(tc.has_method("release_all"), "有 release_all")
-	_check(tc.has_method("move_vector") and tc.has_method("aim_vector"), "有移动/瞄准读取接口")
-	_check(tc.has_method("aim_push"), "有 aim_push（aim assist 靠它判断推力）")
+	_check(tc.has_method("move_vector"), "有移动读取接口（闪避方向也取自它）")
+	_check(tc.has_signal("dodge_pressed"), "有闪避按钮信号")
+	_check(not tc.has_method("aim_vector") and not tc.has_method("is_firing"),
+		"视角摇杆与开火键已移除（2026-10-13：攻击改为自动锁定 + 自动开火）")
 	tc.queue_free()
 
 
@@ -65,10 +67,13 @@ func _test_touch_input_isolation() -> void:
 	#    搬到了 raid_sim_runner.gd。用 _view_src() 之后，
 	#    代码在视图层内再怎么搬都不会误报（见 suite_base.gd 的说明）。
 	var vsrc := _view_src()
-	_check(vsrc.contains("touch.is_firing()"),
-		"开火状态确实读取了触屏开火按钮（否则按钮点了没反应）")
+	# ⚠️ 2026-10-13 更新：开火键与视角摇杆已按用户要求删除，
+	#    所以这里从"必须读取"改成"**不许回来**"（同样是防回流守卫）。
+	_check(not vsrc.contains("touch.is_firing()"),
+		"触屏开火键已删除（攻击改为自动锁定 + 自动开火）")
 	_check(vsrc.contains("touch.move_vector()"), "移动读取触屏摇杆")
-	_check(vsrc.contains("touch.aim_vector()"), "瞄准读取触屏摇杆")
+	_check(not vsrc.contains("touch.aim_vector()"),
+		"视角摇杆已删除（瞄准全自动，不再读触屏瞄准）")
 
 	# 触屏按钮必须按 finger index 分别记录（T-12）
 	var btn := FileAccess.get_file_as_string("res://ui/touch_button.gd")
@@ -144,7 +149,7 @@ func _test_keybindings() -> void:
 		"R = 装弹")
 	_check(seg.contains("KEY_T:") and seg.contains("_try_heal()"),
 		"T = 治疗")
-	_check(seg.contains("KEY_B:") and seg.contains("_open_bag()"),
+	_check(seg.contains("KEY_B:") and seg.contains("loot_actions.open_bag()"),
 		"B = 背包/搜索（PC 上必须有键，否则尸体搜不了）")
 	_check(seg.contains("KEY_K:"), "K 已绑定（重开）")
 	_check(not seg.contains("KEY_L:"), "旧的 L 键已移除")

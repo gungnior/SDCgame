@@ -11,6 +11,14 @@ extends RefCounted
 ## 移动用共享流场（T-81），不各自跑 A*
 ## reaction_time 是公平感的关键数值（reference-teardown.md §7）
 ##
+## ── 2026-10-13 用户需求：远程攻击改成【固定弹道】──
+## 用户原文：「敌人的攻击为固定弹道，宽度为两倍人物判定身位，会固定锁定人物为中心，
+##            即人物两侧的弹道均为 1 格人物身位。」
+## 于是 _fire_at 从 hitscan + 掷骰子改成放出一条 LaneShot：
+##   · 方向在开火瞬间锁死（不追踪）   · 半宽 = 1 身位（两侧各 1 身位）
+##   · 命中在「前沿扫过目标」时结算 -> 飞行时间就是玩家的闪避窗口
+## 数值来源统一在 BodyMetrics（不许在这里写死 0.9）。
+##
 ## 纯 RefCounted，无 Node 依赖，可 headless 单测。
 
 enum State { IDLE, ALERT, COMBAT, SEARCH, DEAD }
@@ -236,7 +244,7 @@ func tick(delta: float, ctx: Dictionary) -> void:
 				state = State.IDLE
 				move_dir = Vector2.ZERO
 		State.COMBAT:
-			_combat(delta, targets, rng, seen, grid)
+			_combat(delta, targets, rng, seen, grid, ctx)
 		State.DEAD:
 			pass
 
@@ -351,7 +359,8 @@ func _find_audible_noise(grid: LogicalGrid, noises: Array,
 
 # ─────────────────── 战斗 ───────────────────
 
-func _combat(delta: float, targets: Array, rng: SimRng, seen: Dictionary, grid: LogicalGrid) -> void:
+func _combat(delta: float, targets: Array, rng: SimRng, seen: Dictionary, grid: LogicalGrid,
+		ctx: Dictionary) -> void:
 	var dist := pos.distance_to(target_pos)
 
 	# ── ⭐ 包夹：不直接冲玩家，而是冲自己那个"包夹位" ──
@@ -386,7 +395,7 @@ func _combat(delta: float, targets: Array, rng: SimRng, seen: Dictionary, grid: 
 			return
 		if seen.is_empty():
 			return
-		_fire_at(targets, dist, rng)
+		_fire_at(targets, dist, rng, ctx, grid)
 	else:
 		# 近战：贴身。有包夹位就先绕到包夹位，到位了再扑
 		var to_goal := goal - pos
@@ -399,26 +408,64 @@ func _combat(delta: float, targets: Array, rng: SimRng, seen: Dictionary, grid: 
 			_deal_damage_to_nearest(targets, def.damage)
 
 
-func _fire_at(targets: Array, dist: float, rng: SimRng) -> void:
+func _fire_at(targets: Array, dist: float, rng: SimRng, ctx: Dictionary,
+		grid: LogicalGrid) -> void:
 	if weapon == null or not weapon.can_fire():
 		return
+	var tgt := _nearest_target(targets)
+	if tgt.is_empty():
+		return                                  # 没有目标就不放弹道（省一条无主弹道）
+
+	# ── 同时开火节流（B 方案，2026-10-13）──
+	# 配额不足就**这一帧不开火**：不消耗武器冷却、不计 shots_fired，下个 tick 再试。
+	# 放在 weapon.fire() **之前**，为了让节流表现为"延迟"而不是"打空"。
+	var throttle = ctx.get("lane_shots")
+	if throttle != null and not throttle.can_spawn():
+		return
+
 	weapon.fire()
 	shots_fired += 1
 	attack_cooldown = def.attack_cooldown
 
-	# 命中判定走 DamageModel 的概率部位模型（T-52）
+	# 伤害与部位仍走 DamageModel 的概率部位模型（T-52）
 	var extra := weapon.current_spread_deg() - weapon.def.spread_deg
 	var hit := DamageModel.resolve_hit(weapon.def, dist, extra, rng)
+	var damage := int(hit["damage"])
 
-	# 命中率：距离与散布影响"是否打中"
-	var acc := DamageModel.accuracy_at(weapon.def, dist, extra)
-	if rng.randf() > clampf(0.35 + acc * 0.6, 0.05, 0.95):
-		return   # 打空
+	# ── 兼容路径 ──
+	# 没有弹道管理器的调用方（headless 单测 / 工具脚本）保持改造前的即时结算，
+	# 否则「没有管理器」会退化成敌人完全打不出伤害 —— 那是更难查的坑。
+	#
+	# ⚠️ 移除条件（AGENTS.md §4.5「兜底必须写移除条件」）：
+	#    当 `test/suites/s25_auto_combat.gd::_test_enemy_lane_fire` 里那条
+	#    「没有管理器也照常开火」的兼容用例被删掉时（意味着所有调用方都必带 lane_shots），
+	#    连同本分支一起删除，并让"缺 manager"成为显式错误。
+	var mgr: Variant = ctx.get("lane_shots")
+	if mgr == null:
+		var acc := DamageModel.accuracy_at(weapon.def, dist, extra)
+		if rng.randf() > clampf(0.35 + acc * 0.6, 0.05, 0.95):
+			return   # 打空
+		weapon.mark_hit()
+		_apply_damage(tgt, damage)
+		return
 
-	weapon.mark_hit()
-	var tgt := _nearest_target(targets)
-	if not tgt.is_empty():
-		_apply_damage(tgt, int(hit["damage"]))
+	# ── 固定弹道（2026-10-13 用户需求）──
+	# 方向 = 开火瞬间指向目标中心，之后**永不改变**（不追踪、不修正）；
+	# 命中在弹道前沿「扫过目标」时结算（见 LaneShotManager），不是开火这一帧。
+	var tp: Vector2 = tgt.get("pos", Vector2.ZERO)
+	var to_t := tp - pos
+	if to_t.length() <= 0.0001:
+		return
+	var dir := to_t.normalized()
+	# 弹道长度 = min(武器射程, 撞墙前的距离)。墙不会动，所以开火时算一次就够。
+	var length := float(weapon.def.range_m)
+	if grid != null:
+		length = minf(length, Ballistics.los_distance(grid, pos, dir, length))
+	# ── 开火前预警（A 方案，2026-10-13）──
+	# 预警按「弹道真正要飞多远」反推：贴脸自动获得更长预警，远处几乎不加。
+	var reach := minf(length, to_t.length())
+	var warn := LaneShot.warn_for(reach, LaneShot.DEFAULT_SPEED)
+	mgr.spawn(pos, dir, LaneShot.DEFAULT_SPEED, damage, length, id, weapon.def.id, warn)
 
 
 func _nearest_target(targets: Array) -> Dictionary:
