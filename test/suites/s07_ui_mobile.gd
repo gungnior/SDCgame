@@ -149,7 +149,7 @@ func _test_keybindings() -> void:
 		"R = 装弹")
 	_check(seg.contains("KEY_T:") and seg.contains("_try_heal()"),
 		"T = 治疗")
-	_check(seg.contains("KEY_B:") and seg.contains("_open_bag()"),
+	_check(seg.contains("KEY_B:") and seg.contains("loot_actions.open_bag()"),
 		"B = 背包/搜索（PC 上必须有键，否则尸体搜不了）")
 	_check(seg.contains("KEY_K:"), "K 已绑定（重开）")
 	_check(not seg.contains("KEY_L:"), "旧的 L 键已移除")

@@ -48,7 +48,7 @@ func handle_key(event: InputEvent) -> void:
 		KEY_T:
 			scene._try_heal()
 		KEY_B:
-			scene._open_bag()
+			scene.loot_actions.open_bag()
 
 		KEY_G:
 			# 自动作战（2026-10-13 用户需求）：自动寻路 / 自动搜刮 / 自动交火

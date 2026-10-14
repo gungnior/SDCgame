@@ -99,6 +99,8 @@ var raid_input: RaidInput = null
 var sim_runner: RaidSimRunner = null
 ## 玩家动作（闪避 / 自动作战开关）—— 2026-10-13 从本文件分出的第一刀（见 AGENTS.md §4.5）
 var player_actions: RaidPlayerActions = null
+## 搜刮交互（打开背包 / 构建容器视图 / 应用拿取）—— 2026-10-13 第二刀
+var loot_actions: RaidLootActions = null
 var touch: TouchControls = null  ## 双摇杆 + 动作按钮
 var flash_rect: ColorRect = null ## 受击闪白覆盖层
 var inventory_panel: InventoryPanel = null   ## 背包/搜索面板（#3 / #6）
@@ -659,6 +661,8 @@ func _setup_view() -> void:
 	# 玩家动作模块（纯搬运：闪避 / 自动作战开关）
 	player_actions = RaidPlayerActions.new()
 	player_actions.scene = self
+	loot_actions = RaidLootActions.new()
+	loot_actions.scene = self
 
 	_setup_feel_and_touch()
 
@@ -704,7 +708,7 @@ func _setup_feel_and_touch() -> void:
 
 	# ── 背包 / 搜索面板（#3 / #6）──
 	inventory_panel = InventoryPanel.new()
-	inventory_panel.action.connect(_on_panel_action)
+	inventory_panel.action.connect(loot_actions.on_panel_action)
 	# 装备系统：面板只发"我想穿/脱"，判定与重建武器都在场景这边
 	inventory_panel.equip_requested.connect(_on_equip_requested)
 	inventory_panel.unequip_requested.connect(_on_unequip_requested)
@@ -715,7 +719,7 @@ func _setup_feel_and_touch() -> void:
 	inv_layer.layer = 45
 	inv_layer.add_child(inventory_panel)
 	add_child(inv_layer)
-	touch.bag_pressed.connect(_open_bag)
+	touch.bag_pressed.connect(loot_actions.open_bag)
 	# 闪避（用户需求：位移 1.5 倍人物身位）。PC 用 Shift。
 	touch.dodge_pressed.connect(player_actions.try_dodge)
 	touch.menu_pressed.connect(_open_settings)
@@ -1114,125 +1118,6 @@ func _toggle_map() -> void:
 		touch.set_controls_visible(not map_panel.is_open())
 	if Sfx != null:
 		Sfx.play("ui_click" if map_panel.is_open() else "ui_confirm")
-
-
-func _open_bag() -> void:
-	if inventory_panel == null or raid.is_over():
-		return
-	# 地图开着时先关它（互斥，见 _toggle_map）
-	if map_panel != null and map_panel.is_open():
-		map_panel.close()
-	_corpse_open_idx = -1
-	_container_open_idx = -1
-	var ctitle := ""
-	var container: Inventory = null
-	# 尸体与容器都算"搜索目标"，取**更近的那个** —— 站在两者中间时开最近的那个。
-	var ci := raid.corpse_near(player_pos)
-	var xi := raid.container_near(player_pos)
-	var d_corpse := 999.0
-	var d_cont := 999.0
-	if ci >= 0:
-		d_corpse = (raid.corpses[ci]["pos"] as Vector2).distance_to(player_pos)
-	if xi >= 0:
-		d_cont = raid.containers[xi].pos.distance_to(player_pos)
-	if ci >= 0 and (xi < 0 or d_corpse <= d_cont):
-		_corpse_open_idx = ci
-		container = _build_corpse_inv(ci)
-		ctitle = "尸体"
-	elif xi >= 0:
-		_container_open_idx = xi
-		container = _build_container_inv(xi)
-		ctitle = raid.containers[xi].display_name()
-	_container_title = ctitle if ctitle != "" else "搜索目标"
-	inventory_panel.open(reg.items, raid.carry, container, ctitle, raid.equipment)
-	if touch != null:
-		touch.set_controls_visible(false)   # 面板打开时收起摇杆，避免抢触点
-	if Sfx != null:
-		Sfx.play("ui_click")
-
-
-## 把容器当前内容倒进一个临时 Inventory 供面板渲染。
-## ⚠️ 与 _build_corpse_inv 同理由：take 是从【容器】里扣的，
-##    临时 Inventory 只是视图 —— 不重建就会一直显示已拿走的东西。
-func _build_container_inv(idx: int) -> Inventory:
-	var inv := Inventory.new(24, reg.items, 999.0)
-	if idx < 0 or idx >= raid.containers.size():
-		return inv
-	for d in (raid.containers[idx].drops as Array):
-		inv.add(str(d["item_id"]), int(d["count"]))
-	return inv
-
-
-## 把尸体当前的掉落物倒进一个临时 Inventory 供面板渲染。
-## ⚠️ 必须每次重新构建：`take_from_corpse` 是从【尸体】里扣的，
-##    临时 Inventory 只是个视图 —— 不重建的话面板会一直显示已拿走的东西。
-func _build_corpse_inv(idx: int) -> Inventory:
-	var inv := Inventory.new(20, reg.items, 999.0)
-	if idx < 0 or idx >= raid.corpses.size():
-		return inv
-	for d in (raid.corpses[idx]["drops"] as Array):
-		inv.add(str(d["item_id"]), int(d["count"]))
-	return inv
-
-
-## 面板里的动作。count=-1 表示"使用"，-2 表示"丢弃"，>0 表示从容器拿走。
-func _on_panel_action(item_id: String, count: int) -> void:
-	if item_id.is_empty():
-		return
-	if count == -1:
-		# 使用：只支持医疗品（其余交给后续的制造/消耗系统）
-		var d: ItemDef = reg.get_item(item_id)
-		if d != null and d.category == "medical":
-			var err := medical.start(d, vitals)
-			if err == "":
-				raid.carry.remove(item_id, 1)
-				_toast("开始治疗 · %s" % d.name)
-			else:
-				_toast(err)
-		else:
-			_toast("现在用不了：%s" % (d.name if d != null else item_id))
-		return
-	if count == -2:
-		var n := raid.carry.remove(item_id, 1)
-		if n > 0:
-			drops_on_ground.append({"pos": player_pos, "item_id": item_id, "count": n})
-			_toast("丢弃 %d 个" % n)
-		return
-	# count > 0：从搜到的容器里拿（1 = 单个 / N = 自定义数量 / 全部 = 整堆）
-	if _corpse_open_idx >= 0:
-		var got := raid.take_from_corpse(_corpse_open_idx, item_id, count)
-		if got > 0:
-			if Sfx != null:
-				Sfx.play("pickup")
-			if got < count:
-				_toast("背包放不下，只拿了 %d/%d" % [got, count])
-			# 重建视图 —— 见 _build_corpse_inv 的说明
-			inventory_panel.open(reg.items, raid.carry,
-				_build_corpse_inv(_corpse_open_idx), _container_title, raid.equipment)
-		elif Sfx != null:
-			Sfx.play("ui_deny")
-			_toast("背包放不下")
-		return
-	if _container_open_idx >= 0:
-		var got2 := raid.take_from_container(_container_open_idx, item_id, count)
-		if got2 > 0:
-			if Sfx != null:
-				Sfx.play("pickup")
-			if got2 < count:
-				_toast("背包放不下，只拿了 %d/%d" % [got2, count])
-			inventory_panel.open(reg.items, raid.carry,
-				_build_container_inv(_container_open_idx), _container_title, raid.equipment)
-		elif Sfx != null:
-			Sfx.play("ui_deny")
-			_toast("背包放不下")
-
-
-var _corpse_open_idx := -1
-## 当前打开的容器索引（-1 = 没在搜容器）
-var _container_open_idx := -1
-## 当前搜索目标的名字（尸体 / 药柜 …）—— 搬运后重建面板时用它当标题，
-## 免得"从药柜拿东西后标题变成『容器』"（真机反馈 #5 拾取流程里很显眼）
-var _container_title := "搜索目标"
 
 
 func _go_hideout() -> void:

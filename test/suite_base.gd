@@ -80,6 +80,7 @@ const VIEW_LAYER_FILES := [
 	"res://view/raid_input.gd",
 	"res://view/raid_sim_runner.gd",
 	"res://view/raid_player_actions.gd",   # 2026-10-13 从 raid_scene 分出的玩家动作
+	"res://view/raid_loot_actions.gd",     # 2026-10-13 第二刀：搜刮交互
 ]
 
 
