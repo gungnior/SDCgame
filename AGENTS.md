@@ -295,8 +295,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1
 ### 新的兜底 / TODO 必须写「移除条件」
 
 新的 `TODO` / `HACK` / `FALLBACK` / 豁免清单，都要写清**原因 + 移除条件（或到期）**；
-不许为了兼容制造第二个真相源。**现有两处待补**：`EnemyAgent._fire_at` 的"无弹道管理器时的兼容结算"、
-`PlayerAutopilot._step_dir` 的"流场拿不到方向的直线兜底"。
+不许为了兼容制造第二个真相源。
+**已补（2026-10-13）**：`EnemyAgent._fire_at` 的"无弹道管理器时的兼容结算"、
+`PlayerAutopilot._step_dir` 的"流场拿不到方向的直线兜底"——两处都写明了各自的移除条件。
+同理，`pre_push_check.ps1` 里那 4 个探针豁免也带着理由（不是静默跳过）。
 
 ### 同时开火节流（B 方案）的调参口径
 
