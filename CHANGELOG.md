@@ -1,5 +1,28 @@
 # 改动日志
 
+## 2026-10-13 · 第二刀（搜刮拆出）+ B 方案（同时开火节流）
+
+**类型**：`refactor(view)` + `feat(combat)` · **验收**：`verify_all.ps1 -Fast` 退出码 0
+
+### 第二刀：搜刮交互 → `view/raid_loot_actions.gd`
+
+`raid_scene.gd` 1339 → 约 **1215** 行。搬出：打开搜索面板（尸体/容器取更近者）、
+容器内容倒进临时 Inventory、面板动作（使用/丢弃/拿取）与三个状态字段。**纯搬运，行为零改动。**
+调用点三处改指新模块（`inventory_panel.action`、`touch.bag_pressed`、`raid_input` 的 `B`），
+`suite_base.VIEW_LAYER_FILES` 与 `s07` 的源码断言同步跟进。
+
+### B 方案：同时开火节流（令牌桶）
+
+要解决的是**量级**：闪避最多 1.18 次/秒（`1/DodgeState.COOLDOWN`），而多敌合计能打出 6+ 条弹道/秒 ——
+那不是"难"，是**无解**。
+
+- `LaneShotManager` 加令牌桶：`SPAWN_RATE = 2.0` 条/秒、`SPAWN_BURST = 2.0` 瞬时爆发；
+  `tick()` 按时间回充，`can_spawn()` 供调用方查询，`spawn()` 配额不足时**返回 null**。
+- `EnemyAgent._fire_at` 在 `weapon.fire()` **之前**查配额：不足就这一帧不开火
+  （不消耗武器冷却、不计 `shots_fired`），下个 tick 重试 —— 表现为**延迟**而不是**打空**。
+- 调参口径：`SPAWN_RATE` 应与最大闪避频率同量级，否则"躲得开"又从数学上不成立。
+
+---
 ## 2026-10-13 · 开火前预警 + 移动端 UI 重做
 
 **类型**：`feat(combat,ui)` · **范围**：`sim/` `view/` `ui/` `game/` `test/`

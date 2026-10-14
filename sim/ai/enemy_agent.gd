@@ -415,6 +415,14 @@ func _fire_at(targets: Array, dist: float, rng: SimRng, ctx: Dictionary,
 	var tgt := _nearest_target(targets)
 	if tgt.is_empty():
 		return                                  # 没有目标就不放弹道（省一条无主弹道）
+
+	# ── 同时开火节流（B 方案，2026-10-13）──
+	# 配额不足就**这一帧不开火**：不消耗武器冷却、不计 shots_fired，下个 tick 再试。
+	# 放在 weapon.fire() **之前**，为了让节流表现为"延迟"而不是"打空"。
+	var throttle = ctx.get("lane_shots")
+	if throttle != null and not throttle.can_spawn():
+		return
+
 	weapon.fire()
 	shots_fired += 1
 	attack_cooldown = def.attack_cooldown

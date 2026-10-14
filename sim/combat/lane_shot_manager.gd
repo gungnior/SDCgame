@@ -11,6 +11,21 @@ extends RefCounted
 ##
 ## 纯 RefCounted，无 Node 依赖，可 headless 单测。
 
+## ── 同时开火节流（B 方案，2026-10-13）──
+#
+# 要解决的是**量级**问题：闪避最多 1.18 次/秒（1/DodgeState.COOLDOWN），
+# 而多个敌人合计可以打出 6+ 条弹道/秒 —— 那不是"难"，是**无解**。
+#
+# 做法：**令牌桶**。最多 SPAWN_RATE 条新弹道/秒，允许 SPAWN_BURST 的瞬时爆发。
+# 确定性（不用 RNG）、可单测、可调 —— 与"每帧最多建 1 个流场"同一思路。
+#
+# ⚠️ 被节流时 spawn() **返回 null**。调用方（EnemyAgent）会先问 can_spawn()，
+#    不足就**这一帧不开火**（不消耗武器冷却、不计 shots_fired），下个 tick 再试。
+#
+# 调参口径：SPAWN_RATE 应与最大闪避频率同量级，否则"躲得开"又从数学上不成立。
+const SPAWN_RATE := 2.0      ## 条 / 秒
+const SPAWN_BURST := 2.0     ## 瞬时允许的爆发条数
+
 ## 上限保护：防止极端情况下（几十个敌人一起开火）数组无限增长
 const MAX_SHOTS := 96
 
@@ -24,6 +39,9 @@ var impacts: Array[Vector2] = []
 ## 本帧被无敌帧挡下的伤害总量 —— 只用于提示与统计
 var dodged_damage: int = 0
 
+## 令牌桶余量（< 1.0 表示暂时不允许新开火）
+var _tokens: float = SPAWN_BURST
+
 
 func clear() -> void:
 	shots.clear()
@@ -31,15 +49,25 @@ func clear() -> void:
 	hits.clear()
 	impacts.clear()
 	dodged_damage = 0
+	_tokens = SPAWN_BURST
 
 
 func count() -> int:
 	return shots.size()
 
 
+## 配额还有吗？（EnemyAgent 在开火**之前**问它，以便"延迟"而不是"打空"）
+func can_spawn() -> bool:
+	return _tokens >= 1.0
+
+
 ## 放一条弹道出去。dir 会被归一化；length <= 0 时仍然登记（表现层看得见），但不结算。
+## ⚠️ 配额不足时**返回 null**（B 方案节流）—— 调用方应先问 can_spawn()。
 func spawn(origin: Vector2, dir: Vector2, speed: float, damage: int, length: float,
 		owner_id: int = -1, weapon_id: String = "", warn_sec: float = 0.0) -> LaneShot:
+	if not can_spawn():
+		return null                     # 被节流（B 方案）
+	_tokens -= 1.0
 	if shots.size() >= MAX_SHOTS:
 		shots.pop_front()
 	var s := LaneShot.new()
@@ -62,6 +90,8 @@ func spawn(origin: Vector2, dir: Vector2, speed: float, damage: int, length: flo
 ## player_pos 传**当前帧的**玩家中心；玩家是否无敌由调用方决定
 ## （这里只给出几何结论 —— 无敌帧在场景那侧吞掉伤害）。
 func tick(delta: float, player_pos: Vector2) -> void:
+	# 令牌桶按时间回充（B 方案）
+	_tokens = minf(SPAWN_BURST, _tokens + SPAWN_RATE * maxf(delta, 0.0))
 	hits.clear()
 	impacts.clear()
 	for i in range(shots.size() - 1, -1, -1):

@@ -22,6 +22,7 @@ func register() -> void:
 	_suite("闪避 DodgeState", _test_dodge)
 	_suite("接线（防回流）", _test_wiring)
 	_suite("开火前预警 Telegraph", _test_telegraph)
+	_suite("同时开火节流（B 方案）", _test_throttle)
 
 
 ## 造一条弹道：起点 / 方向 / 弹速 / 伤害。半宽与长度用默认值（长度给足）。
@@ -328,3 +329,64 @@ func _test_telegraph() -> void:
 	var ea := FileAccess.get_file_as_string("res://sim/ai/enemy_agent.gd")
 	_check(ea.contains("warn_for"), "敌人开火时按距离算预警")
 	_check(_view_src().contains("is_warning"), "绘制区分预警与飞行两态")
+
+
+# ─────────────────── ⑨ 同时开火节流（B 方案，2026-10-13）───────────────────
+
+func _test_throttle() -> void:
+	# 解决的是**量级**：闪避最多 1.18 次/秒，多敌合计却能打出 6+ 条/秒。
+	var m := LaneShotManager.new()
+	_check(m.can_spawn(), "初始有配额")
+	var s1 := m.spawn(Vector2(1.5, 1.5), Vector2.RIGHT, 10.0, 5, 20.0, 0, "w", 0.0)
+	var s2 := m.spawn(Vector2(1.5, 1.5), Vector2.RIGHT, 10.0, 5, 20.0, 0, "w", 0.0)
+	_check(s1 != null and s2 != null, "爆发额度内两条都出得来")
+	_check(not m.can_spawn(), "爆发额度用完 -> 不再允许开火")
+	var s3 := m.spawn(Vector2(1.5, 1.5), Vector2.RIGHT, 10.0, 5, 20.0, 0, "w", 0.0)
+	_check(s3 == null, "配额不足时 spawn 返回 null（不悄悄造弹道）")
+	m.tick(0.5, Vector2(30.5, 30.5))
+	_check(m.can_spawn(), "按时间回充后又能开火")
+
+	# 稳态速率：10 秒里每帧都试着开火，总量必须受令牌桶约束
+	var m2 := LaneShotManager.new()
+	var made := 0
+	var t := 0.0
+	for _i in 600:
+		if m2.can_spawn() and m2.spawn(Vector2(1.5, 1.5), Vector2.RIGHT, 10.0, 5, 20.0, 0, "w", 0.0) != null:
+			made += 1
+		m2.tick(1.0 / 60.0, Vector2(30.5, 30.5))
+		t += 1.0 / 60.0
+	var cap := int(LaneShotManager.SPAWN_BURST + LaneShotManager.SPAWN_RATE * t) + 1
+	_check(made <= cap, "10 秒内总量受约束（%d <= %d）" % [made, cap])
+
+	# 敌人被节流时是「延迟」而不是「打空」：不扣冷却、不计 shots_fired
+	var g := _open_grid(20, 10)
+	var flows := FlowFieldManager.new()
+	flows.setup(g)
+	var reg := DataRegistry.new()
+	reg.load_all("B")
+	var scav: EnemyDef = reg.get_enemy("enemy_scav")
+	var e := EnemyAgent.new(0, scav, Vector2(2.5, 3.5))
+	e.equip(reg.get_weapon("weapon_pistol"), 60)
+	e.facing = Vector2.RIGHT
+	var mgr := LaneShotManager.new()
+	while mgr.can_spawn():
+		mgr.spawn(Vector2(1.5, 1.5), Vector2.RIGHT, 10.0, 5, 20.0, 0, "w", 0.0)
+	var targets := [{"id": "player", "pos": Vector2(8.5, 3.5), "hp": 100}]
+	var ctx := {"grid": g, "flows": flows, "targets": targets, "rng": SimRng.new(1),
+		"now": 0.0, "noises": [], "lane_shots": mgr}
+	e.reaction_timer = 0.0
+	e.attack_cooldown = 0.0
+	for _i in 30:
+		e.tick(0.05, ctx)
+	_check_eq(e.shots_fired, 0, "配额耗尽时敌人不开火（延迟，不是打空）")
+	_check(e.attack_cooldown <= 0.0, "被节流时不消耗武器冷却 —— 下个 tick 会重试")
+	mgr.tick(2.0, targets[0]["pos"])
+	for _i in 30:
+		e.tick(0.05, ctx)
+	_check(e.shots_fired > 0, "配额回充后恢复开火（%d 发）" % e.shots_fired)
+
+	# 接线守卫
+	var lsm := FileAccess.get_file_as_string("res://sim/combat/lane_shot_manager.gd")
+	_check(lsm.contains("can_spawn") and lsm.contains("SPAWN_RATE"), "节流在 LaneShotManager 里（令牌桶）")
+	var ea := FileAccess.get_file_as_string("res://sim/ai/enemy_agent.gd")
+	_check(ea.contains("can_spawn"), "敌人开火前先查配额（延迟而非打空）")
