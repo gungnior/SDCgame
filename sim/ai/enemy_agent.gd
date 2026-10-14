@@ -427,6 +427,11 @@ func _fire_at(targets: Array, dist: float, rng: SimRng, ctx: Dictionary,
 	# ── 兼容路径 ──
 	# 没有弹道管理器的调用方（headless 单测 / 工具脚本）保持改造前的即时结算，
 	# 否则「没有管理器」会退化成敌人完全打不出伤害 —— 那是更难查的坑。
+	#
+	# ⚠️ 移除条件（AGENTS.md §4.5「兜底必须写移除条件」）：
+	#    当 `test/suites/s25_auto_combat.gd::_test_enemy_lane_fire` 里那条
+	#    「没有管理器也照常开火」的兼容用例被删掉时（意味着所有调用方都必带 lane_shots），
+	#    连同本分支一起删除，并让"缺 manager"成为显式错误。
 	var mgr: Variant = ctx.get("lane_shots")
 	if mgr == null:
 		var acc := DamageModel.accuracy_at(weapon.def, dist, extra)

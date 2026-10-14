@@ -260,7 +260,7 @@ func _test_wiring() -> void:
 	_check(vsrc.contains("_apply_player_step"),
 		"常规移动与闪避共用同一个位移函数（闪避因此不会穿墙）")
 	_check(vsrc.contains("scene.lane_shots"), "视图层接了固定弹道")
-	_check(vsrc.contains("func _try_dodge"), "有闪避入口")
+	_check(vsrc.contains("func try_dodge"), "有闪避入口（view/raid_player_actions.gd，2026-10-13 拆出）")
 
 	# 结构关系 -> 查具体文件（防回流）
 	var ea := FileAccess.get_file_as_string("res://sim/ai/enemy_agent.gd")

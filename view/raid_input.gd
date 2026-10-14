@@ -52,10 +52,10 @@ func handle_key(event: InputEvent) -> void:
 
 		KEY_G:
 			# 自动作战（2026-10-13 用户需求）：自动寻路 / 自动搜刮 / 自动交火
-			scene._toggle_autopilot()
+			scene.player_actions.toggle_autopilot()
 		KEY_SHIFT:
 			# 闪避（用户需求：位移 1.5 倍人物身位）
-			scene._try_dodge()
+			scene.player_actions.try_dodge()
 		KEY_K:
 			scene._restart()
 		KEY_TAB:

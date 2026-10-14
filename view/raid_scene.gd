@@ -97,6 +97,8 @@ var drawer: RaidDrawer = null
 var raid_input: RaidInput = null
 ## 模拟调度器（view/raid_sim_runner.gd）—— 玩家/敌人 tick、自动瞄准、开火
 var sim_runner: RaidSimRunner = null
+## 玩家动作（闪避 / 自动作战开关）—— 2026-10-13 从本文件分出的第一刀（见 AGENTS.md §4.5）
+var player_actions: RaidPlayerActions = null
 var touch: TouchControls = null  ## 双摇杆 + 动作按钮
 var flash_rect: ColorRect = null ## 受击闪白覆盖层
 var inventory_panel: InventoryPanel = null   ## 背包/搜索面板（#3 / #6）
@@ -654,6 +656,10 @@ func _setup_view() -> void:
 	sim_runner = RaidSimRunner.new()
 	sim_runner.scene = self
 
+	# 玩家动作模块（纯搬运：闪避 / 自动作战开关）
+	player_actions = RaidPlayerActions.new()
+	player_actions.scene = self
+
 	_setup_feel_and_touch()
 
 
@@ -711,7 +717,7 @@ func _setup_feel_and_touch() -> void:
 	add_child(inv_layer)
 	touch.bag_pressed.connect(_open_bag)
 	# 闪避（用户需求：位移 1.5 倍人物身位）。PC 用 Shift。
-	touch.dodge_pressed.connect(_try_dodge)
+	touch.dodge_pressed.connect(player_actions.try_dodge)
 	touch.menu_pressed.connect(_open_settings)
 	touch.map_pressed.connect(_toggle_map)              # 地图（真机反馈 #2）
 
@@ -1094,53 +1100,6 @@ func _open_settings() -> void:
 
 
 ## 打开面板。附近有尸体就进入搜索模式，否则就是纯背包。
-
-
-## 闪避（用户需求：位移 1.5 倍人物身位）。
-##
-## 方向取「正在推的方向」—— 与移动同一套输入，符合"操作方式沿用既有手感"；
-## 没推方向时用瞄准方向（桌面用鼠标瞄准时就是这个）。
-## 触发条件（冷却 / 时长 / 无敌帧）全在 DodgeState 里，这里只负责给方向。
-func _try_dodge() -> void:
-	if dodge == null or raid == null or raid.is_over():
-		return
-	if game_paused or (Game != null and Game.paused) or frozen_by_overlay():
-		return
-	# ── 任意方向闪避（2026-10-13 用户需求）──
-	# 优先取**方向摇杆的原始向量**（只有触屏有）：它可以是任意角度，
-	# 所以「推着摇杆 + 点闪避」= 朝那个方向闪。
-	# 放在 _move_input 之前，是为了让玩家在"自动作战接管移动"时仍能自己决定闪避方向。
-	var dir := Vector2.ZERO
-	if touch != null:
-		dir = touch.move_vector()
-	if dir.length() < 0.15:
-		dir = _move_input
-	if dir.length() < 0.15:
-		dir = player_aim
-	if not dodge.start(dir):
-		return
-	if Sfx != null:
-		Sfx.play("ui_click")
-
-
-## 覆盖层（背包 / 地图）打开时不接受战场操作 —— 与 _process 的冻结口径一致。
-func frozen_by_overlay() -> bool:
-	if inventory_panel != null and inventory_panel.is_open():
-		return true
-	return map_panel != null and map_panel.is_open()
-
-
-## 自动作战开关（用户需求：自动寻路 / 自动搜刮 / 自动攻击）。
-## 设置持久在 Game（跨场景），这里只做切换与提示。
-func _toggle_autopilot() -> void:
-	if Game == null:
-		return
-	Game.autopilot = not Game.autopilot
-	if not Game.autopilot:
-		_move_input = Vector2.ZERO
-	if Sfx != null:
-		Sfx.play("ui_click" if Game.autopilot else "ui_deny")
-	_toast("自动作战：%s" % ("开 —— 自动寻路 / 自动搜刮 / 自动交火" if Game.autopilot else "关"))
 
 
 ## 开关战术地图（真机反馈 #2）。地图打开时冻结模拟（见 _process）。

@@ -239,6 +239,10 @@ func _step_dir(flows: FlowFieldManager, me: Vector2, target: Vector2) -> Vector2
 		if d != Vector2i.ZERO:
 			return Vector2(d).normalized()
 	# 流场拿不到方向（目标不可达 / 预算用尽退化成旧场）：直线兜底
+	#
+	# ⚠️ 移除条件（AGENTS.md §4.5）：当 FlowFieldManager 能保证
+	#    「目标可达时必有方向、不可达时能被调用方提前判掉」之后，删掉这个兜底。
+	#    它现在唯一的作用是"别在原地卡死"；直线本身穿不了墙（分轴碰撞兜着）。
 	var fallback := target - me
 	return fallback.normalized() if fallback.length() > 0.001 else Vector2.ZERO
 
