@@ -298,6 +298,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1
 不许为了兼容制造第二个真相源。**现有两处待补**：`EnemyAgent._fire_at` 的"无弹道管理器时的兼容结算"、
 `PlayerAutopilot._step_dir` 的"流场拿不到方向的直线兜底"。
 
+### 同时开火节流（B 方案）的调参口径
+
+`sim/combat/lane_shot_manager.gd` 的令牌桶（`SPAWN_RATE` 条/秒 + `SPAWN_BURST` 瞬时）决定**入射量**。
+它必须与最大闪避频率（`1 / DodgeState.COOLDOWN` ≈ **1.18 次/秒**）同量级 ——
+否则"躲得开"又从数学上不成立。改这两个常量请连着真机复核（`specs/feel-tuning.md` 有实测表）。
+
 ### 视觉证据三条纪律
 
 1. 截图必须由**引擎自己写文件**（不要拿窗口/系统截图当视觉正确性证据）；
@@ -308,8 +314,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1
 ### 大文件阈值：超过 ~1000 行 = 单作者文件
 
 `.gd` 超过约 1000 行就该**按既有分节拆成多个文件（纯搬运、不改行为）**，而不是继续往里加方法。
-现状：`view/raid_scene.gd` ≈ 1380 行（**下一个重构候选**；自然切法：把闪避/自动作战的入口
-收进 `view/raid_player_actions.gd`）、`view/raid_sim_runner.gd` ≈ 530、`ui/touch_controls.gd` ≈ 263。
+现状（2026-10-13 两刀之后）：`view/raid_scene.gd` **≈1018 行** ——
+第一刀把「玩家动作」（闪避 / 自动作战开关 / 冻结判定）切到 `view/raid_player_actions.gd`，
+第二刀把「搜刮交互」（开面板 / 容器视图 / 面板动作）切到 `view/raid_loot_actions.gd`，两刀都是纯搬运、行为零改动。
+**它仍在阈值之上**，第三刀的自然切法是伤害/护甲结算（`_resolve_player_hit` / `_player_armor` /
+`_weapon_wear_factor`）—— ⚠️ 搬它必须同步改 `test/suites/s20_round7_fixes.gd` 的两条源码断言。
+其余：`view/raid_sim_runner.gd` ≈ 530、`ui/touch_controls.gd` ≈ 263。
 
 ### 例外必须用户批准
 
