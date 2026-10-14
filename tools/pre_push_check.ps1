@@ -152,8 +152,18 @@ if ($probes.Count -eq 0) {
         }
         $proc = Start-Process -FilePath $godotExe -ArgumentList $a2 -PassThru -NoNewWindow -RedirectStandardOutput $probeOut -RedirectStandardError ($probeOut + ".err")
         $probeRan++
-        if (-not $proc.WaitForExit(20000)) { $proc.Kill(); $probeFail += ($f + "(超时20s)") }
-        elseif ($proc.ExitCode -ne 0) { $probeFail += ($f + "(exit=$($proc.ExitCode))") }
+        if (-not $proc.WaitForExit(20000)) {
+            $proc.Kill()
+            $probeFail += ($f + "(超时20s)")
+        } else {
+            # ⚠️ 用了 -RedirectStandardOutput 时，必须再等一次**无参** WaitForExit，
+            #    否则异步输出流尚未收尾，$proc.ExitCode 会是 $null —— 而 `$null -ne 0` 为真，
+            #    会把"跑得好好的探针"**全部误判成失败**（2026-10-13 实测踩到，正是本项自己抓出来的）。
+            $proc.WaitForExit()
+            $ec = $proc.ExitCode
+            if ($null -eq $ec) { $probeFail += ($f + "(退出码读不到)") }
+            elseif ($ec -ne 0) { $probeFail += ($f + "(exit=$ec)") }
+        }
     }
     Remove-Item $probeOut, ($probeOut + ".err") -ErrorAction SilentlyContinue
     $d8 = ("{0} 个探针：跑 {1} / 豁免 {2} / 失败 {3}" -f $probes.Count, $probeRan, $probeSkip.Count, $probeFail.Count)
