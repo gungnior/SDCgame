@@ -173,16 +173,33 @@ if ($Fast) {
     & $Godot --path $Root --fixed-fps 60 --rendering-driver opengl3 --rendering-method gl_compatibility `
         --resolution 1280x720 --script "res://test/screenshot.gd" -- `
         --seed $SEED --frames $FRAMES --hide-hud --out "res://$($shot2 -replace '\\','/')" *> $null
-    $selfDiff = (& $Py "tools\compare_images.py" $shot $shot2 --tolerance 0 2>&1 | Out-String).Trim()
-    $selfOk = ($LASTEXITCODE -eq 0)
-    if ($selfOk) {
-        Write-Host "  · 自身复现性：同构建两次截图完全一致（本环境稳定）" -ForegroundColor Green
+    # ⚠️⚠️ 2026-10-13：**截图没产出 ≠ 首次运行**。
+    #    实测踩过：art\_raw\ 被 .gitignore 排除、克隆里根本不存在，
+    #    而 Image.save_png() 不会自建父目录 -> 静默失败（err 7）。
+    #    旧脚本接着把"找不到基线"读成"首次运行，已建立基线"，
+    #    于是报出一个**看着通过、其实什么都没测**的结果（连续两轮 ④ 都是这么绿的）。
+    #    现在：先判定图在不在；不在就判【无效】—— ④ 依然**不是门槛**（咨询性），
+    #    但它**不许再说自己通过了**。
+    $shotMissing = -not ((Test-Path -LiteralPath $shot) -and (Test-Path -LiteralPath $shot2))
+    if ($shotMissing) {
+        Write-Host "  · 自身复现性：截图未产出，无法比对" -ForegroundColor Yellow
+        Write-Host "    截图目标：$shot / $shot2" -ForegroundColor Yellow
+        Write-Host "    实测原因：目标目录被 .gitignore 排除（克隆里不存在），且 Godot 的 save_png 不会自建父目录。" -ForegroundColor Yellow
+        Write-Host "    修法：New-Item -ItemType Directory -Force (Split-Path '$BASELINE' -Parent)，然后重跑本命令。" -ForegroundColor Yellow
     } else {
-        Write-Host "  · 自身复现性：两次截图不一致 -> $selfDiff" -ForegroundColor Yellow
-        Write-Host "    说明这局游戏**运行期本质不确定**（手感用真实时钟），像素比对不可作为回归门。" -ForegroundColor Yellow
+        $selfDiff = (& $Py "tools\compare_images.py" $shot $shot2 --tolerance 0 2>&1 | Out-String).Trim()
+        $selfOk = ($LASTEXITCODE -eq 0)
+        if ($selfOk) {
+            Write-Host "  · 自身复现性：同构建两次截图完全一致（本环境稳定）" -ForegroundColor Green
+        } else {
+            Write-Host "  · 自身复现性：两次截图不一致 -> $selfDiff" -ForegroundColor Yellow
+            Write-Host "    说明这局游戏**运行期本质不确定**（手感用真实时钟），像素比对不可作为回归门。" -ForegroundColor Yellow
+        }
     }
 
-    if ($UpdateBaseline) {
+    if ($shotMissing) {
+        $results += [pscustomobject]@{ 项 = "像素基线"; 结果 = "无效"; 详情 = "截图未产出（目录缺失 / save_png 不自建父目录）" }
+    } elseif ($UpdateBaseline) {
         Copy-Item $shot $BASELINE -Force
         Record "像素基线" $true "已重设基线 -> $BASELINE"
     } elseif (-not (Test-Path $BASELINE)) {
