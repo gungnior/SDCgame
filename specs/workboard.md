@@ -297,6 +297,10 @@ enemies 4→7（新增 C 普通敌人 + 1 Boss，ranged 反应时间均 ≥ 0.25
 
 ## 完成
 
+> 📌 下表中 “_（本会话，未提交）_” 是 2026-10-13 **git 历史落地之前**的旧标注 ——
+> 这些任务的提交现已全部在 `main` 历史中，逐任务到提交的映射见 [git-history-bootstrap.md](git-history-bootstrap.md)。
+> 表格保留原样是为了不改写历史记录。
+
 | 任务 | 负责人 | verify_all 退出码 | 提交 |
 |---|---|---|---|
 | 拆分 `test/run_tests.gd`（3439 → 110 行 + 10 套件 + 结构守卫） | DSH | 0 | `fc4bf3d` |
@@ -361,4 +365,8 @@ enemies 4→7（新增 C 普通敌人 + 1 Boss，ranged 反应时间均 ≥ 0.25
 `view/raid_drawer.gd`、`view/raid_hud.gd`、`view/raid_scene.gd`、`view/raid_sim_runner.gd`、`view/raid_input.gd`、
 `ui/touch_controls.gd`、`ui/tokens.gd`、`game/game_state.gd`、`test/suites/s25_auto_combat.gd`、`test/suites/s07_ui_mobile.gd`
 
-**未处理**：B 方案「同时开火节流」（多敌入射量）仍未做。
+**✅ 后续已补**（2026-10-13 · 队友 `de493b7`）：B 方案「同时开火节流」已落地 ——
+`LaneShotManager` 加令牌桶（`SPAWN_RATE = 2.0` 条/秒、`SPAWN_BURST = 2.0` 瞬时爆发），
+`EnemyAgent._fire_at` 在 `weapon.fire()` 前查配额，不足就本帧不开火（表现为**延迟**而非打空）。
+调参口径：`SPAWN_RATE` 应与最大闪避频率（`1/DodgeState.COOLDOWN` ≈ 1.18 次/秒）同量级，
+否则“躲得开”从数学上不成立。详见 `CHANGELOG.md` 顶部条目。
