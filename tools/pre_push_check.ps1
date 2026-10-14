@@ -141,7 +141,6 @@ if ($probes.Count -eq 0) {
 } else {
     $probeFail = @()
     $probeRan = 0
-    $probeOut = Join-Path $env:TEMP "probe_smoke_out.txt"
     foreach ($f in $probes) {
         if ($probeSkip -contains $f) { continue }
         $scene = ($f -replace '\.gd$', '.tscn')
@@ -150,22 +149,35 @@ if ($probes.Count -eq 0) {
         } else {
             $a2 = @('--headless', '--path', '.', '--script', ('res://' + $f))
         }
-        $proc = Start-Process -FilePath $godotExe -ArgumentList $a2 -PassThru -NoNewWindow -RedirectStandardOutput $probeOut -RedirectStandardError ($probeOut + ".err")
+        # ⚠️ 为什么不用 Start-Process：2026-10-13 实测（A/B/C/D 四种写法），
+        #    本机 PS 5.1 下 Start-Process -PassThru **两种写法都读不到 ExitCode**（恒为 $null），
+        #    而 `$null -ne 0` 为真 -> 会把"跑得好好的探针"全部误判成失败。
+        #    只有 [Diagnostics.Process]::Start($psi) 与"直接调用 + $LASTEXITCODE"能读到。
+        #    这里取前者，因为只有它能同时拿到**超时**控制。
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $godotExe
+        $psi.Arguments = ($a2 -join ' ')
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+        $psi.WorkingDirectory = $Root
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        # 先把两条管道**异步**排空：否则子进程写满管道缓冲区会卡住，WaitForExit 会假超时
+        $null = $proc.StandardOutput.ReadToEndAsync()
+        $null = $proc.StandardError.ReadToEndAsync()
         $probeRan++
         if (-not $proc.WaitForExit(20000)) {
             $proc.Kill()
             $probeFail += ($f + "(超时20s)")
         } else {
-            # ⚠️ 用了 -RedirectStandardOutput 时，必须再等一次**无参** WaitForExit，
-            #    否则异步输出流尚未收尾，$proc.ExitCode 会是 $null —— 而 `$null -ne 0` 为真，
-            #    会把"跑得好好的探针"**全部误判成失败**（2026-10-13 实测踩到，正是本项自己抓出来的）。
-            $proc.WaitForExit()
             $ec = $proc.ExitCode
             if ($null -eq $ec) { $probeFail += ($f + "(退出码读不到)") }
             elseif ($ec -ne 0) { $probeFail += ($f + "(exit=$ec)") }
         }
+        $proc.Dispose()
     }
-    Remove-Item $probeOut, ($probeOut + ".err") -ErrorAction SilentlyContinue
+
     $d8 = ("{0} 个探针：跑 {1} / 豁免 {2} / 失败 {3}" -f $probes.Count, $probeRan, $probeSkip.Count, $probeFail.Count)
     if ($probeFail.Count -gt 0) { $d8 += (" -> " + ($probeFail -join ', ')) }
     Step "8. 探针脚本能跑" ($probeFail.Count -eq 0) $d8
