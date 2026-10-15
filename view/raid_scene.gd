@@ -259,6 +259,10 @@ func _spawn_containers() -> void:
 			if table == null:
 				continue
 			var rolls := clampi(def.capacity / 4, 1, 5)
+			# 肉鸽变体：容器丰度倍率（Phase 1 用"多 roll 几次"近似价值倍率，
+			# 不碰 LootRoller 内部逻辑；上限放到 8，否则 +40% 会被 clamp 砍掉）。
+			if raid != null and raid.run_mods != null and not raid.run_mods.is_empty():
+				rolls = clampi(int(round(float(rolls) * raid.run_mods.loot_rolls_mul())), 1, 8)
 			var drops := LootRoller.roll_for_room(table, _rng, r.depth, rolls)
 			if drops.is_empty():
 				continue
@@ -362,6 +366,17 @@ func _setup_sim() -> void:
 	# ⭐ 地图主题（森林 / 城区 / 军事基地）：决定地图多大、房间配额、
 	#    敌人种类与密度。theme == null 时退化为旧的固定 27×27 单一主题。
 	theme = _pick_map_theme()
+	# ⭐ 防御性拷贝：reg.get_map() 返回的是 **registry 里的共享实例**，
+	#    肉鸽变体要乘 enemy_density，直接改会污染全局（后续每局累积倍率）。
+	if theme != null:
+		theme = theme.clone()
+	# ── 肉鸽：roll 本局规则变体（2026-10-16 拥有者拍板转向）──
+	#    与 seed 的分工：seed 管**地图结构**每局不同，本类管**规则**每局不同。
+	#    用 _rng（_raid_seed 驱动）保证同 seed 整局可复现；mapgen 内部另持
+	#    自己的 rng，这次消耗不影响地图输出，只影响本局容器/敌人抽取序列。
+	var run_mods := RunModifiers.roll(_rng, reg.run_modifiers, 1, 2)
+	if theme != null and not run_mods.is_empty():
+		theme.enemy_density *= run_mods.enemy_density_mul()
 	gen = MapGenerator.new()
 	var mw: int = theme.map_w if theme != null else 27
 	var mh: int = theme.map_h if theme != null else 27
@@ -409,6 +424,8 @@ func _setup_sim() -> void:
 
 	raid = RaidSession.new(reg.items, _rng, hideout.stash, mods, reg.missions)
 	raid.load_map(gen)
+	# 肉鸽：把本局变体挂进 session（HUD / 容器抽取的唯一真源）
+	raid.run_mods = run_mods
 	raid.start(240.0)
 
 	# ⭐ 装备系统：把藏身处的**配装**接进本局。

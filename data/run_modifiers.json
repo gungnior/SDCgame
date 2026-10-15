@@ -1,0 +1,38 @@
+{
+  "schema": "run_modifiers.v1",
+  "note": "肉鸽局内规则变体表（契约 data/SCHEMA.md §11）。Phase 1 等权；倍率为温和默认值，待平衡专家定夺。同 group 互斥（一局最多出一个）。",
+  "modifiers": [
+    {
+      "id": "mob_rush",
+      "name": "敌潮",
+      "desc": "本局敌人密度 +35%（敌人数 ≈ 房间数 × 密度 × 1.35）",
+      "group": "enemy",
+      "enemy_density_mul": 1.35,
+      "loot_rolls_mul": 1.0
+    },
+    {
+      "id": "thin_line",
+      "name": "防线薄弱",
+      "desc": "本局敌人密度 -25%（搜打撤的'打'压力变小，'搜'更从容）",
+      "group": "enemy",
+      "enemy_density_mul": 0.75,
+      "loot_rolls_mul": 1.0
+    },
+    {
+      "id": "fat_containers",
+      "name": "富饶容器",
+      "desc": "本局容器搜索次数 +40%（多 roll 几次，近似'更肥'）",
+      "group": "loot",
+      "enemy_density_mul": 1.0,
+      "loot_rolls_mul": 1.4
+    },
+    {
+      "id": "picked_clean",
+      "name": "被搜刮过",
+      "desc": "本局容器搜索次数 -30%（晚进场，好货没了）",
+      "group": "loot",
+      "enemy_density_mul": 1.0,
+      "loot_rolls_mul": 0.7
+    }
+  ]
+}

@@ -88,5 +88,24 @@ func target_enemy_count(room_count: int) -> int:
 	return maxi(0, int(round(float(room_count) * enemy_density)))
 
 
+## 深拷贝。⭐ 任何"本局临时改主题"的路径必须先 clone() ——
+## reg.get_map() 返回的是 **registry 里的共享实例**，直接改 enemy_density
+## 会污染全局（后续每一局都带着倍率，且跨局累积）。
+## 肉鸽变体（RunModifiers）乘密度、以及未来任何局内修正都走这条路。
+func clone() -> MapThemeDef:
+	var o := MapThemeDef.new()
+	o.id = id
+	o.name = name
+	o.desc = desc
+	o.map_w = map_w
+	o.map_h = map_h
+	o.enemy_density = enemy_density
+	o.tile_theme = tile_theme
+	o.room_weights = room_weights.duplicate()
+	o.enemy_weights = enemy_weights.duplicate()
+	o.stage = stage
+	return o
+
+
 func _to_string() -> String:
 	return "MapThemeDef(%s, %dx%d, density=%.2f)" % [id, map_w, map_h, enemy_density]

@@ -33,6 +33,7 @@ var containers: Dictionary = {}   # container_id  -> ContainerDef（房间里可
 var maps: Dictionary = {}         # map_id        -> MapThemeDef（森林/城区/军事基地）
 ## 任务（C 阶段）。框架在 sim/mission_system.gd，本表是纯内容（GameDesigner 填）。
 var missions: Dictionary = {}     # mission_id    -> Dictionary（原始任务定义）
+var run_modifiers: Array[Dictionary] = []  ## 肉鸽局内规则变体表（data/run_modifiers.json，见 SCHEMA §11）
 
 # ─────────────── 诊断 ───────────────
 var errors: Array[String] = []
@@ -69,6 +70,7 @@ func load_all(stage: String = "B") -> bool:
 	_load_containers()
 	_load_maps()
 	_load_missions()
+	_load_run_modifiers()
 
 	_validate_cross_refs()
 	_validate_map_constraints()
@@ -318,6 +320,43 @@ func _load_missions() -> void:
 
 func get_mission(id: String) -> Dictionary:
 	return missions.get(id, {})
+
+
+## 肉鸽局内规则变体（data/run_modifiers.json，契约 SCHEMA §11）。
+## 每条：id / name / group（互斥组）/ enemy_density_mul / loot_rolls_mul。
+## 顶层是 {schema, modifiers:[...]} 对象而非裸数组（与 recipes 等一致）。
+func _load_run_modifiers() -> void:
+	var data: Variant = _read_json("run_modifiers", true)
+	if data == null:
+		return                       # 允许缺表：RunModifiers.roll 收到空 defs 安全返回
+	if not (data is Dictionary):
+		errors.append("[run_modifiers] 顶层必须是对象 {modifiers:[...]}")
+		return
+	var rows: Variant = data.get("modifiers", [])
+	if not (rows is Array):
+		errors.append("[run_modifiers] modifiers 必须是数组")
+		return
+	for row in rows:
+		if not (row is Dictionary):
+			errors.append("[run_modifiers] 存在非对象条目")
+			continue
+		if not row.has("id") or str(row["id"]).is_empty():
+			errors.append("[run_modifiers] 有条目缺少 id")
+			continue
+		var mid := str(row["id"])
+		if str(row.get("name", "")).is_empty():
+			errors.append("[run_modifiers] %s: 缺少中文名 name" % mid)
+		if str(row.get("group", "")).is_empty():
+			errors.append("[run_modifiers] %s: 缺少互斥组 group" % mid)
+		if float(row.get("enemy_density_mul", 1.0)) <= 0.0:
+			errors.append("[run_modifiers] %s: enemy_density_mul 必须 > 0" % mid)
+		if float(row.get("loot_rolls_mul", 1.0)) <= 0.0:
+			errors.append("[run_modifiers] %s: loot_rolls_mul 必须 > 0" % mid)
+		for prev in run_modifiers:
+			if str(prev.get("id", "")) == mid:
+				errors.append("[run_modifiers] id 重复: %s" % mid)
+				continue
+		run_modifiers.append(row)
 
 
 func _load_loot_tables() -> void:

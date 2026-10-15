@@ -135,6 +135,10 @@ func refresh() -> void:
 		lines.append("地图 %s  %d×%d  威胁 %.1f" % [
 			scene.theme.name, scene.theme.map_w, scene.theme.map_h,
 			scene.theme.enemy_density])
+	# 肉鸽：本局规则变体（roguelite 仪式感——开局就让玩家看到"这局什么规则"）。
+	# 无变体时一行不加，旧场景 HUD 文本逐字不变（与上面 theme 行同一纪律）。
+	if raid.run_mods != null and not raid.run_mods.is_empty():
+		lines.append("本局变体  %s" % raid.run_mods.summary())
 	lines.append("弹药 %d / %d%s" % [
 		scene.player_weapon.ammo_in_mag, scene.player_weapon.reserve_ammo,
 		"  [换弹中]" if scene.player_weapon.is_reloading() else ""])

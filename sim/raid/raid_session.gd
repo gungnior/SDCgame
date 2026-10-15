@@ -60,6 +60,10 @@ var extract_points: Array[Vector2] = []
 var extract_progress: float = 0.0
 var extract_radius: float = 1.5            ## 距离撤离点多少格内算"在撤离"
 
+## 肉鸽：本局生效的规则变体（2026-10-16）。由 view 层 roll 后注入；
+## null = 无变体（老路径/单测直接构造 session 时）。
+var run_mods: RunModifiers = null
+
 ## 战局统计
 var containers_looted: int = 0
 var enemies_killed: int = 0

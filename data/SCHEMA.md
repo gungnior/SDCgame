@@ -324,3 +324,29 @@ room_type.containers[]  →  container.id  →  container.loot_table_id  →  it
 
 **当前 3 个主题**：`map_forest` 森林（34×34，感染体为主）、
 `map_urban` 城区（40×40，拾荒者/劫掠者混编）、`map_military` 军事基地（44×44，重装单位）。
+
+---
+
+## 11. `data/run_modifiers.json`（C 阶段 · 肉鸽局内规则变体）
+
+**顶层是对象** `{schema, modifiers:[...]}`（不是裸数组）。
+
+与地图种子的分工：`seed` 让**地图结构**每局不同（BSP/房间/连通），
+本表让**规则**每局不同（敌人数/容器丰度）。每局由 view 层
+（`raid_scene._setup_sim`）用 `RunModifiers.roll(_rng, reg.run_modifiers, 1, 2)`
+抽 1~2 个，HUD 开局一行显示。运行时类：`sim/run_modifiers.gd`。
+
+**数组** `modifiers`，每项：
+
+| 字段 | 类型 | 必填 | 约束 |
+|---|---|---|---|
+| `id` | string | ✅ | 全局唯一 |
+| `name` | string | ✅ | 中文名（HUD 直接显示，**不许英文占位**） |
+| `desc` | string | ⬜ | 给文档/结果页看的说明 |
+| `group` | string | ✅ | 互斥组；**同组一局最多出一个** |
+| `enemy_density_mul` | number | ✅ | >0；敌人密度倍率（同局连乘） |
+| `loot_rolls_mul` | number | ✅ | >0；容器搜索次数倍率（同局连乘） |
+
+⚠️ 倍率数值是**温和默认值，待平衡专家定夺**（`data/BALANCE_TUNING.md` 一族）。
+Phase 1 四个变体两个组：`enemy` 组（敌潮 1.35 / 防线薄弱 0.75）、
+`loot` 组（富饶容器 1.4 / 被搜刮过 0.7）。加新变体只改本表，不动代码。
