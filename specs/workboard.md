@@ -21,6 +21,32 @@
 
 ## 进行中
 
+### ✅ sim/view 边界类型安全收口（2026-10-16 · 规划盘点后的代码推进）
+
+**负责人**：@WorkBuddy · **`verify_all.ps1 -Fast` 退出码 0**（单元 **1664/0** + 集成 **105/105** + 数据 0 错 0 警）
+
+**背景**：拥有者要求"读规划、推进代码层面"。盘点 `roadmap-bac.md` + `progress-report.md` 后发现
+报告的代码清单**大部分已过时**（警戒扩散/商人/撤离结算/存档/B 方案均已由 DSH 完成），
+逐一核实后选定本项 —— `progress-report.md` 技术债第 2 条的真实残存部分。
+
+**写入范围（实际）**：`sim/ai/enemy_agent.gd`、`test/suites/s26_type_safety.gd`（**新文件**）、
+`specs/progress-report.md`（同步过时状态）。未碰数值、玩法与队友的 `s25`。
+
+**做了什么**：
+① `enemy_agent` 两处消费 `ctx.get("lane_shots")` 用 `Variant` 接（`LaneShotManager` 有
+`class_name` 却在 sim 层被鸭子类型消费，方法名拼错要到运行时以"敌人不开火"暴露）→
+改 `as LaneShotManager` 强类型，`as` 失败得 null、自然落进既有兼容路径，行为不变；
+② `ctx.get("prof")` 的 4 处重复 `!= null` 检查收口成 `_mark_prof()`，加
+`is Object + has_method("mark")` 两层防护（鸭子类型**保留**：Tel 是 autoload，
+sim/ 不能依赖，headless 编译不过——实测踩过 `Identifier not found: Sfx`）；
+③ 新套件 `s26_type_safety.gd`（5 套件 14 断言）钉死：三条路径（正常/缺失/错类型）
+行为不变、正确的鸭子探针仍照常打点、prof 传错对象不炸 tick、源码结构防回流；
+④ `progress-report.md` 头部加 2026-10-16 核对块（正文是 10-12 快照：制造/任务/存档/
+商人/结算/警戒扩散/多主题均已完成、测试 1664 项），§九 加指向注记。
+
+**为什么不做更大的**（流场增量构建等）：`roadmap-bac.md` §5 纪律 —— 门 1 未过，
+"回去改数值与节奏，而不是加系统"；性能大改等拥有者真机反馈后再定。
+
 ### ✅ 自动作战 / 固定弹道 / 闪避（2026-10-13 · 拥有者需求）
 
 **负责人**：@DSH-Lead · **`verify_all.ps1` 退出码 0**（单元 **1619/0** + 集成 **105/105** + 数据 0 错 0 警；

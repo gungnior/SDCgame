@@ -8,6 +8,42 @@
 
 ---
 
+## 🔴 最新一轮（2026-10-16 · WorkBuddy）：规划盘点 + 类型安全收口
+
+> 交接时间：2026-10-16 · 执行：WorkBuddy · 工作区 `D:\AAAASDC`
+> **验收 `verify_all.ps1 -Fast` 退出码 0**（单元 **1664/0** + 集成 **105/105** + 数据 0 错 0 警）
+
+**① 一句话**：拥有者要求"读规划、推进代码层面"。盘点后发现 `progress-report.md` 的
+代码清单**大部分已过时**（制造/任务/存档/商人/撤离结算/警戒扩散/B 方案均已完成），
+逐一核实后做了技术债残存项：`enemy_agent` 的 `lane_shots` 强类型化 + `prof` 打点收口，
+并给进度报告加了防误导的核对块。
+
+**② 改了哪些（别人别碰）**
+
+- `sim/ai/enemy_agent.gd`：两处 `ctx.get("lane_shots")` 由 Variant 改
+  `as LaneShotManager`（节流查询 + 弹道生成；`as` 失败得 null，兼容路径行为不变）；
+  prof 四处 `if prof != null` 收口为 `_mark_prof()`（`is Object + has_method("mark")` 两层防护）。
+  鸭子类型**有意保留**（Tel 是 autoload，sim/ 依赖它 headless 编译不过）。
+- `test/suites/s26_type_safety.gd`（**新**，5 套件 14 断言）：三条路径行为不变 /
+  正确鸭子探针仍打点 / prof 错对象不炸 / 源码结构防回流。
+- `specs/progress-report.md`：头部加 2026-10-16 核对块 + §九 指向注记（正文是 10-12 快照）。
+- `specs/workboard.md`：本任务声明与完成记录。
+
+**③ 复跑命令**：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1 -Fast`
+
+**④ 没验证的**：④ 像素基线本轮 `-Fast` 跳过（零画面改动，但基线已两轮没当门禁跑）；
+改动只跑了 headless 单测 + 集成，**没有真机实跑**（敌人开火路径的真机表现未验）；
+`progress-report.md` 正文其他章节仍是 10-12 原样（只加了核对块，没有逐章重写）。
+
+**⑤ 下一步**（按优先级）：
+1. **拥有者真机试玩**（门 1 判定）：照 `specs/feel-tuning.md` §6 上机清单走一遍，
+   重点收集"死亡时亏不亏/战斗难不难"——这是代码无法自证的两项；
+2. 平衡专家介入：按收集到的反馈调 `data/BALANCE_TUNING.md` 口径内的数值；
+3. 技术债剩余项（流场增量构建，`ai_act` 21ms 尖峰）**暂缓**——等真机帧率反馈再定要不要做；
+4. 谁改画面谁全量跑一次 ④ 像素基线（咨询性，但已攒两轮）。
+
+---
+
 ## 🔴 最新一轮（2026-10-13 · DSH Lead）：开火前预警 + 移动端 UI 重做
 
 > 交接时间：2026-10-13 · 工作区 `E:\AAAASDC` · **验收 `verify_all.ps1 -Fast` 退出码 0**

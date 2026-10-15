@@ -176,8 +176,7 @@ func tick(delta: float, ctx: Dictionary) -> void:
 	# 用鸭子类型而不是直接引用 Tel autoload —— 否则 sim/ 会依赖视图层，
 	# 导致 headless 测试编译失败（实测踩过：Identifier not found: Sfx）。
 	var prof: Variant = ctx.get("prof")
-	if prof != null:
-		prof.mark("ai_see")
+	_mark_prof(prof, "ai_see")
 	var seen := _find_visible_target(grid, targets)
 	if not seen.is_empty():
 		var sp: Vector2 = seen["pos"]
@@ -198,8 +197,7 @@ func tick(delta: float, ctx: Dictionary) -> void:
 
 	# ── 听觉（只在非交战时才需要，交战中已经知道位置）──
 	if state != State.COMBAT and state != State.SEARCH:
-		if prof != null:
-			prof.mark("ai_hear")
+		_mark_prof(prof, "ai_hear")
 		var noise := _find_audible_noise(grid, ctx.get("noises", []),
 			ctx.get("hearing_cache"))
 		if not noise.is_empty():
@@ -210,8 +208,7 @@ func tick(delta: float, ctx: Dictionary) -> void:
 			state = State.ALERT
 			if squad != null:
 				squad.report_noise(np, now)
-	if prof != null:
-		prof.mark("ai_act")
+	_mark_prof(prof, "ai_act")
 
 	# ── ⭐ 小组警戒扩散：别人发现了，我也该压过去 ──
 	#
@@ -419,7 +416,9 @@ func _fire_at(targets: Array, dist: float, rng: SimRng, ctx: Dictionary,
 	# ── 同时开火节流（B 方案，2026-10-13）──
 	# 配额不足就**这一帧不开火**：不消耗武器冷却、不计 shots_fired，下个 tick 再试。
 	# 放在 weapon.fire() **之前**，为了让节流表现为"延迟"而不是"打空"。
-	var throttle = ctx.get("lane_shots")
+	# lane_shots 是 sim 层自己的类（有 class_name）→ 强类型接，`as` 失败得 null
+	# （调用方没给/给错类型时自然落进下方兼容路径，与改造前行为一致）。
+	var throttle := ctx.get("lane_shots") as LaneShotManager
 	if throttle != null and not throttle.can_spawn():
 		return
 
@@ -440,7 +439,7 @@ func _fire_at(targets: Array, dist: float, rng: SimRng, ctx: Dictionary,
 	#    当 `test/suites/s25_auto_combat.gd::_test_enemy_lane_fire` 里那条
 	#    「没有管理器也照常开火」的兼容用例被删掉时（意味着所有调用方都必带 lane_shots），
 	#    连同本分支一起删除，并让"缺 manager"成为显式错误。
-	var mgr: Variant = ctx.get("lane_shots")
+	var mgr := ctx.get("lane_shots") as LaneShotManager
 	if mgr == null:
 		var acc := DamageModel.accuracy_at(weapon.def, dist, extra)
 		if rng.randf() > clampf(0.35 + acc * 0.6, 0.05, 0.95):
@@ -466,6 +465,18 @@ func _fire_at(targets: Array, dist: float, rng: SimRng, ctx: Dictionary,
 	var reach := minf(length, to_t.length())
 	var warn := LaneShot.warn_for(reach, LaneShot.DEFAULT_SPEED)
 	mgr.spawn(pos, dir, LaneShot.DEFAULT_SPEED, damage, length, id, weapon.def.id, warn)
+
+
+## 性能探针打点（**受控的鸭子类型**，2026-10-16 收口）。
+##
+## 为什么不是强类型接口：探针实体是 Tel autoload（Node），而 sim/ 不能依赖 autoload
+## （headless 测试编译不过 —— 实测踩过 `Identifier not found: Sfx`）。
+## 两层防护取代原先散落四处的 `if prof != null`：
+##   ① 非 Object（基本类型/字典）直接跳过；
+##   ② 没有 mark 方法的对象也跳过 —— 打点是**诊断**不是逻辑，不因它炸掉 AI tick。
+func _mark_prof(prof: Variant, phase: String) -> void:
+	if prof is Object and prof.has_method("mark"):
+		prof.mark(phase)
 
 
 func _nearest_target(targets: Array) -> Dictionary:
