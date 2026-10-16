@@ -5,11 +5,48 @@
 > 做到哪了、**哪些是没验过的**、下一步做什么、为什么这么决定。
 >
 > 写于 2026-10-12，工作区 `D:\AAAASDC`，提交 `e8aaa1f`。
-> **最新条目永远在最顶部**（当前：2026-10-16 装备 Phase 1）。
+> **最新条目永远在最顶部**（当前：2026-10-16 装备闭环补齐四步）。
 
 ---
 
-## 🔴 最新一轮（2026-10-16 · WorkBuddy）：⭐ 全境2化装备 Phase 1 — 品质 + 评分 + 词条进公式
+## 🔴 最新一轮（2026-10-16 · WorkBuddy）：⭐ 装备闭环补齐四步（拥有者四问体检后）
+
+> 交接时间：2026-10-16 · 执行：WorkBuddy · 工作区 `D:\AAAASDC`
+> **验收 `verify_all.ps1 -Fast` 退出码 0**（单元 **3124/0** + 集成 **105/0** + 数据 0 错 0 警）
+> 四个提交：`bb779c6`（A）→ `0b84198`（B）→ `dfb5e8c`（C）→ `ec601a5`（D），每步单独验收
+
+**① 一句话**：拥有者问「自动战斗推进 / 掉落后怎么装备 / 敌人性能配合 / 辅助瞄准挂钩」四问，
+读代码体检后确认：**辅助瞄准✅已挂钩（射程/散布词条生效），但"掉落到捡起"是断的**。
+拥有者点名四项全做，分四步补齐：掉落→捡起的 gear 断点、UI 显示品质词条、敌人侧接装备系统、
+自动作战自动换上更好的装备。
+
+**② 改了哪些**：
+- **A** `sim/items/container.gd`、`sim/raid/raid_session.gd`、`view/raid_scene.gd`：
+  容器补 `roll_gear_for_drops`；登记与四条取物路径改 `add_with_gear`；塞不下时 gear 留原处
+- **B** `view/raid_loot_actions.gd`、`ui/inventory_panel.gd`：搜刮面板的临时 Inventory
+  **此前也用 add**（gear 在视图层也丢）→ 同改；带 gear 的装备每槽一行不合并，
+  显示"稀有 · 武器伤害+8% · 评分 132"，描边用数据自带 color；装备栏显示品质名
+- **C** `sim/gear/gear_gen.gd`、`sim/equipment.gd`、`view/raid_scene.gd`：
+  `GearGen.apply_affixes()` 抽成**玩家/敌人共用**；敌人改用 `enemies.json` 的 `weapon_id`
+  （此前统一发手枪），depth≥1 roll 品质、depth≤0 不变；死后掉他自己那把
+- **D** `sim/equipment.gd`、`sim/raid/raid_session.gd`、`view/raid_sim_runner.gd`：
+  `equip_at(槽位)` 修"点史诗却穿上稀有"；`best_upgrade_slot()` 按评分挑更好的，
+  自动作战搜刮完自动换上（只升不降）
+- **测试**：`test/suites/s29_gear_flow.gd`（新，8 套件，含面板冒烟）
+
+**③ 复跑命令**：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1 -Fast`
+
+**④ 没验证的**：**真机没跑**（品质色好不好看、词条文案挤不挤、自动换装的手感都要人眼）；
+⚠️ **rng 消耗序列变长**（容器 + 深区敌人都多 roll）→ 同 seed 世界不再与旧版一致，
+像素基线 ④ 若需重设请按协作规则说明理由；背包面板「装备」按钮仍走 item_id
+（sim 的 equip_at 已就位，面板改按下标是下一小步）；倍率全是温和默认值待平衡专家定夺。
+
+**⑤ 下一步**：① 真机跑一局看品质显示与自动换装观感；② 面板改按下标穿（一小步）；
+③ 平衡专家定敌人/装备倍率；④ 门 1 两缺口（死亡痛感/难度）仍挂待办。
+
+---
+
+## 🔴 上一轮（2026-10-16 · WorkBuddy）：⭐ 全境2化装备 Phase 1 — 品质 + 评分 + 词条进公式
 
 > 交接时间：2026-10-16 · 执行：WorkBuddy · 工作区 `D:\AAAASDC`
 > **验收 `verify_all.ps1 -Fast` 退出码 0**（单元 **3091/0** + 集成 **105/0** + 数据 0 错 0 警）
