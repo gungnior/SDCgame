@@ -230,12 +230,17 @@ func _test_armor_from_equipment() -> void:
 
 	# ④ 源码守卫：突袭场景不许再写死 40 点护甲
 	var rs := FileAccess.get_file_as_string("res://view/raid_scene.gd")
-	_check(rs.contains("vitals.reset(100, _player_armor())"),
+	# ⭐ 2026-10-16 全境2化 P1：生命上限改为吃装备 hp 词条，断言跟随升级
+	#    （语义未变：护甲仍来自装备；effective_armor = worn_armor + 词条 flat）
+	_check(rs.contains("vitals.reset(") and rs.contains("_player_armor())"),
 		"突袭场景的护甲来自 _player_armor()（装备）")
+	_check(rs.contains("_player_hp_bonus()"),
+		"生命上限吃装备 hp 词条加成（全境2化 P1）")
 	# 只查【代码行】（tab 缩进 + 调用），不误伤注释里的 `vitals.reset(100, 40)`
 	_check(not rs.contains("\tvitals.reset(100, 40)"),
 		"不再写死 vitals.reset(100, 40)（白送护甲）")
-	_check(rs.contains("raid.equipment.worn_armor()"), "_player_armor() 取的是装备护甲")
+	_check(rs.contains("raid.equipment.effective_armor()"),
+		"_player_armor() 取的是 effective_armor（装备护甲 + 词条，空装仍 0）")
 
 
 # ─────────────────── 问题 4：容器/尸体可见 ───────────────────
