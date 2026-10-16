@@ -5,10 +5,46 @@
 > 做到哪了、**哪些是没验过的**、下一步做什么、为什么这么决定。
 >
 > 写于 2026-10-12，工作区 `D:\AAAASDC`，提交 `e8aaa1f`。
+> **最新条目永远在最顶部**（当前：2026-10-16 装备 Phase 1）。
 
 ---
 
-## 🔴 最新一轮（2026-10-16 · WorkBuddy）：⭐ 转向「肉鸽 × 自动战斗 × 搜打撤」+ 肉鸽第一块
+## 🔴 最新一轮（2026-10-16 · WorkBuddy）：⭐ 全境2化装备 Phase 1 — 品质 + 评分 + 词条进公式
+
+> 交接时间：2026-10-16 · 执行：WorkBuddy · 工作区 `D:\AAAASDC`
+> **验收 `verify_all.ps1 -Fast` 退出码 0**（单元 **3091/0** + 集成 **105/0** + 数据 0 错 0 警）
+> 提交：`0065857`（数据层）→ `da055d6`（sim 接线）→ `a55d3e3`（表现层）→
+> `0f3598e`（s28 测试）→ 文档提交（SCHEMA §12 + workboard + 本文件）
+
+**① 一句话**：拥有者拍板「数值偏 RPG，装备参考全境封锁2」。盘点差距：品质/词条/评分
+**全部不存在**，伤害链上没有任何玩家属性加成乘区。Phase 1 落地三件事：
+世界生成的装备带**品质**（5 级）与**词条**（8 条）；穿上后进 `Loadout.effective` 乘区 /
+`effective_armor()` / vitals 上限 / 移速；死亡按 **价值 × 品质权重** 保留。
+向后兼容：无 gear = 普通品质无词条，老档/商店货零影响。
+
+**② 改了哪些**：新 `sim/gear/`（`rarity_def`/`affix_def`/`gear_gen`，rng 全程注入、
+同 seed 可复现）+ `data/gear_rarity.json`/`data/gear_affixes.json` + registry 接线；
+`Inventory.add_with_gear()/first_slot_of()/transfer_to()`（⭐ 词条挂背包槽位，
+装备 `stack_max=1` 永不堆叠，不破坏堆叠语义）；`Equipment` 槽位 gear 表 +
+`build_loadout()` 内 `_apply_weapon_affixes()` 乘区 + `effective_armor()`；
+`RaidSession` 容器 roll / 死亡品质加权 / `add_corpse` 保留 gear；
+`raid_scene`（掉落/尸体带 gear、vitals 吃生命词条）/ `raid_sim_runner`（移速乘区）；
+新套件 `s28_gear_system.gd`（984 断言）；`data/SCHEMA.md` §12 契约。
+
+**③ 复跑命令**：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify_all.ps1 -Fast`
+
+**④ 没验证的**：**真机没跑**（词条数值观感、掉落仪式感要人眼确认）；词条只在
+**世界生成（掉落/容器）**时 roll，**商店购买是普通品质**；`progress-report.md` 本轮未同步；
+像素基线 ④ 又攒了一轮（raid_scene 的 vitals/掉落改动没过 ④ 全量）。
+
+**⑤ 下一步**：① 真机进一局看带词条掉落的观感、强度是否可感知；
+② Phase 2 候选（**等真机验证后再定，不擅自加**）：品牌套装/天赋/校准重铸；
+③ 倍率数值全是温和默认值，待平衡专家按 `data/BALANCE_TUNING.md` 定夺；
+④ 门 1 两缺口仍挂待办——本轮转向同 s27，是拥有者明确接受的偏离（roadmap §5 有注记）。
+
+---
+
+## 🔴 上一轮（2026-10-16 · WorkBuddy）：⭐ 转向「肉鸽 × 自动战斗 × 搜打撤」+ 肉鸽第一块
 
 > 交接时间：2026-10-16 · 执行：WorkBuddy · 工作区 `D:\AAAASDC`
 > **验收 `verify_all.ps1 -Fast` 退出码 0**（单元 **2107/0** + 集成 **105/105** + 数据 0 错 0 警）

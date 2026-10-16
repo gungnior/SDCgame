@@ -21,6 +21,45 @@
 
 ## 进行中
 
+### ✅ 全境2化装备 Phase 1：品质 + 评分 + 词条进公式 — 已完成 2026-10-16（拥有者拍板转向）
+
+**负责人**：@WorkBuddy · **`verify_all.ps1 -Fast` 退出码 0**（单元 **3091/0** + 集成 **105/0** + 数据 0 错 0 警）
+
+**背景**：拥有者 2026-10-16 拍板：**数值偏 RPG，装备系统参考全境封锁2**。
+盘点差距：品质分级/词条/装备评分**全部不存在**；伤害链
+（`weapon.damage → 部位×距离 → 弹型×护甲 → 磨损`）上**没有任何玩家属性加成乘区**
+——这就是"数值 RPG 化"的缺口。三个拍板：① 范围=品质+评分+词条进公式
+（品牌套装/天赋/校准重铸放 Phase 2 候选）；② 公式=词条直加成乘区（不做三围面板化）；
+③ 死亡=品质加权保留（`death_policy` 权重从纯价值改 品质×价值）。
+
+**写入范围**：`sim/gear/`（rarity_def/affix_def/gear_gen，新）、`data/gear_rarity.json`（新）、
+`data/gear_affixes.json`（新）、`io/data_registry.gd`、`sim/items/inventory.gd`、
+`sim/equipment.gd`、`sim/raid/raid_session.gd`、`view/raid_scene.gd`、
+`test/suites/s28_gear_system.gd`（新）、`data/SCHEMA.md`、`data/BALANCE_TUNING.md`、
+本文件、`specs/session-handoff.md`。
+**不碰**：队友的 `sim/ai/`、`view/raid_scene.gd` 之外的协调者文件、数值细节
+（倍率全是温和默认值，标"待平衡专家定夺"）、UI 面板大改（Phase 1b）。
+
+**设计定案**：
+① 品质 5 级（普通/精良/稀有/史诗/传说），决定词条数 0~4、强度倍率、评分系数、死亡保留权重；
+② 词条 8 条：武器 5（伤害/射速/装填/散布/射程，pct 或 pct_neg 进 `Loadout.effective` 乘区）+
+   护甲 flat（+1~3 进 `effective_armor()`）+ 生命/移速 pct（进 vitals 与玩家移速）；
+③ ⭐ 词条挂**背包槽位**：装备类 `stack_max=1` 永不堆叠，每槽天然一件独立装备 →
+   slot 加可选 `gear` 字段，掉落时 roll、转移时搬运、不破坏现有堆叠语义；
+④ rng 全程注入（T-32 纪律，同 seed 整局可复现）；无 gear = 向后兼容（老档/商店货=普通品质无词条）。
+
+**已知限制（诚实记录，别当成已做）**：
+· 词条只在**世界生成（掉落/容器）**时 roll；`Hideout.stash` 转移保留 gear，但商店购买是普通品质；
+· `Inventory` 仍是 id 堆叠模型，本设计靠"装备不堆叠"绕过；将来若做装备实例化再统一；
+· 天赋（条件触发词条）/品牌/套装/校准重铸**没做**，Phase 2 候选，等真机验证。
+
+**结果**：`0065857`（数据层）→ `da055d6`（sim 接线）→ `a55d3e3`（表现层）→
+`0f3598e`（s28 测试 984 断言）→ 文档提交（SCHEMA §12 契约 + 本文件 + handoff）。
+战局内闭环：容器/掉落 roll 出带品质词条的装备 → 穿上进 `Loadout.effective` 乘区与
+`effective_armor()` → 死亡按 `价值 × death_weight` 品质加权保留。
+**⚠️ 偏离记录**：同 s27——`roadmap-bac.md` §5「门 1 不过不加系统」，拥有者 2026-10-16
+**明确拍板接受偏离**（原文不改写，加注记）。门 1 两缺口仍挂待办。
+
 ### ✅ 肉鸽第一块：局内规则变体 RunModifiers（2026-10-16 · 拥有者拍板转向）
 
 **负责人**：@WorkBuddy · **`verify_all.ps1 -Fast` 退出码 0**（单元 **2107/0** + 集成 **105/105** + 数据 0 错 0 警）

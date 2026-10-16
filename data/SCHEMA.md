@@ -350,3 +350,53 @@ room_type.containers[]  →  container.id  →  container.loot_table_id  →  it
 ⚠️ 倍率数值是**温和默认值，待平衡专家定夺**（`data/BALANCE_TUNING.md` 一族）。
 Phase 1 四个变体两个组：`enemy` 组（敌潮 1.35 / 防线薄弱 0.75）、
 `loot` 组（富饶容器 1.4 / 被搜刮过 0.7）。加新变体只改本表，不动代码。
+
+---
+
+## 12. `data/gear_rarity.json` + `data/gear_affixes.json`（C 阶段 · 全境2化装备 P1）
+
+> 2026-10-16 拥有者拍板：**数值偏 RPG，装备系统参考全境封锁2**。Phase 1 = 品质 + 评分 + 词条进公式。
+> 运行时类：`sim/gear/rarity_def.gd`（`RarityDef`）、`sim/gear/affix_def.gd`（`AffixDef`）、
+> `sim/gear/gear_gen.gd`（`GearGen`，roll 品质/词条/评分）。
+
+### `gear_rarity.json`（顶层数组，5 品质）
+
+| 字段 | 类型 | 必填 | 约束 |
+|---|---|---|---|
+| `id` | string | ✅ | 全局唯一（common/fine/rare/epic/legendary） |
+| `name` | string | ✅ | 中文名（HUD/面板直接显示，**不许英文占位**） |
+| `color` | string | ✅ | 合法十六进制（`#rrggbb`），UI 名称染色 |
+| `affix_count` | int | ✅ | 词条数 0~4 |
+| `power_mul` | number | ✅ | >0，词条强度倍率（连乘进每个 roll 出的值） |
+| `score_mul` | number | ✅ | >0，装备评分系数 |
+| `death_weight` | number | ✅ | >0，**死亡保留权重**（价值×此权重参与 `DeathPolicy.plan_keep` 排序） |
+| `drop_weight` | int | ✅ | 世界生成 roll 权重；**应按品质递减**（普通货最多见） |
+
+### `gear_affixes.json`（顶层数组，8 词条）
+
+| 字段 | 类型 | 必填 | 约束 |
+|---|---|---|---|
+| `id` | string | ✅ | 全局唯一（`aff_` 前缀） |
+| `name` | string | ✅ | 中文名 |
+| `field` | string | ✅ | 目标字段：武器 5 个（`damage`/`rpm`/`reload_time`/`spread_deg`/`range_m`，进 `Loadout.effective`）+ 玩家属性 3 个（`armor`→`effective_armor()`、`hp`/`move_speed`→raid_scene） |
+| `kind` | string | ✅ | `pct`（×1+v）/ `pct_neg`（×1-v，装填/散布越低越好）/ `flat`（+v，护甲） |
+| `min`/`max` | number | ✅ | roll 区间，均取正值，符号由 kind 处理；`max > 0` |
+| `cats` | array | ✅ | 适用类别 `weapon`/`armor`/`backpack`（数据层 helmet 同属 armor） |
+
+### gear 数据流（挂哪、怎么流）
+
+```
+世界生成（容器/尸体）-- GearGen.roll_gear(rng, rarities, affixes, category)
+   -> {"rarity": "rare", "affixes": [{"id":..,"value":..}]}
+   -> Inventory slot 的可选 "gear" 键（装备 stack_max=1 不堆叠，天然每件独立）
+   -> Equipment.equip/inv.take_slot 搬到槽位级 gear 表
+   -> build_loadout() 乘进 Loadout.effective -> to_weapon_def() -> DamageModel
+   -> effective_armor() / affix_pct("hp") / affix_pct("move_speed") -> 玩家侧
+   -> 死亡：_keep_weight = value × rarity.death_weight -> plan_keep 排序
+```
+
+⚠️ **数值全部是温和默认值，待平衡专家定夺**（`data/BALANCE_TUNING.md` §13）。
+⚠️ **向后兼容**：无 gear（老档/商店货/缺表）= 普通品质零词条，数值与 2026-10-16 之前逐字一致；
+    `Equipment.from_dict` 刻意**不补 roll**（老装备就是普通货，凭空发词条会破坏经济）。
+⚠️ **已知限制**：词条只在世界生成时 roll；`Inventory` 仍是 id 堆叠模型（靠"装备不堆叠"绕过）；
+    天赋（条件触发）/品牌/套装/校准重铸**未做**，Phase 2 候选。
