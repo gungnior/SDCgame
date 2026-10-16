@@ -20,6 +20,7 @@ func register() -> void:
 	_suite("尸体：add_corpse 保留 gear + take 搬进背包", _test_corpse_take)
 	_suite("尸体：take_all 保留 gear，塞不下的留在尸体里", _test_corpse_take_all)
 	_suite("向后兼容：无 gear 掉落行为不变", _test_no_gear_unchanged)
+	_suite("UI：背包面板真的显示品质与评分", _test_panel_shows_gear)
 
 
 var _reg: DataRegistry = null
@@ -126,3 +127,43 @@ func _test_no_gear_unchanged() -> void:
 	var d0: Dictionary = c.drops[0] as Dictionary
 	_check_eq(int(d0.get("count", 0)), 18, "容器里余 18")
 	_check(not d0.has("gear"), "无 gear 掉落不该被凭空加上 gear")
+
+
+## 面板冒烟：真的建出来、真的 open、真的扫子节点文本。
+##
+## ⚠️ 与 s17 同手法：**刻意不 add_child(root)**（运行器在 SceneTree._initialize 跑测试，
+##    那一刻 root 还没进树，`_ready` 会被推迟到测试体之后）→ 手动 `_ensure_built()`。
+func _test_panel_shows_gear() -> void:
+	var reg := _fresh_reg()
+	var carry := Inventory.new(20, reg.items, 999.0)
+	carry.add_with_gear("weapon_rifle",
+		{"rarity": "rare", "affixes": [{"id": "aff_weapon_dmg", "value": 0.1}]})
+	var ip := InventoryPanel.new()
+	ip.call("_ensure_built")
+	ip.open(reg.items, carry, null, "背包", null,
+		{"rarities": reg.gear_rarities, "affixes": reg.gear_affixes})
+	var texts := _collect_text(ip)
+	var hit_rarity := false
+	var hit_score := false
+	for t in texts:
+		if t.find("稀有") >= 0:
+			hit_rarity = true
+		if t.find("评分") >= 0:
+			hit_score = true
+	_check(hit_rarity, "★ 背包面板要显示品质名（否则玩家看不出装备差异）")
+	_check(hit_score, "★ 背包面板要显示评分（全境2 的取舍依据）")
+	ip.close()
+
+
+## 递归收集子树里所有控件的文本（TouchButton.label_text / Label.text）
+func _collect_text(node: Node) -> Array[String]:
+	var out: Array[String] = []
+	if node == null:
+		return out
+	if "label_text" in node:
+		out.append(str(node.get("label_text")))
+	elif "text" in node:
+		out.append(str(node.get("text")))
+	for c in node.get_children():
+		out.append_array(_collect_text(c))
+	return out

@@ -53,6 +53,10 @@ var _items: Dictionary = {}          ## ItemDef 表
 var _left_inv: Inventory = null      ## 搜索目标（可为 null）
 var _right_inv: Inventory = null     ## 玩家背包
 var _equipment: Equipment = null     ## 身上装备（null = 本局没有装备系统）
+## 全境2化 P2：品质/词条表（面板显示"稀有 · 伤害+8% · 评分 132"用）。
+## 空表 = 退回 2026-10-16 之前的样式（不显示品质），老调用方行为不变。
+var _rarities: Array = []
+var _affixes: Array = []
 var _left_mode := "take"             ## take=从容器拿
 var _open := false
 var _built := false
@@ -235,13 +239,17 @@ func _clear(box: Container) -> void:
 ## 打开面板。
 ##   container_inv / container_title：要搜索的容器（null = 纯背包）
 ##   equipment：身上装备（null = 不显示装备栏 —— 保持旧调用方的行为）
+##   gear_defs：{"rarities": Array[RarityDef], "affixes": Array[AffixDef]}（可省略）
 func open(items: Dictionary, carry: Inventory, container_inv: Inventory = null,
-		container_title: String = "搜索目标", equipment: Equipment = null) -> void:
+		container_title: String = "搜索目标", equipment: Equipment = null,
+		gear_defs: Dictionary = {}) -> void:
 	_ensure_built()
 	_items = items
 	_right_inv = carry
 	_left_inv = container_inv
 	_equipment = equipment
+	_rarities = (gear_defs.get("rarities", []) as Array).duplicate()
+	_affixes = (gear_defs.get("affixes", []) as Array).duplicate()
 	_open = true
 	visible = true
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -318,8 +326,16 @@ func _refresh_equip() -> void:
 		b.base_radius = 22.0
 		b.custom_minimum_size = Vector2(0, 52)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.label_text = "%s\n%s" % [str(Equipment.SLOT_LABEL.get(slot, slot)), _display_name(id)]
-		b.accent = UITokens.SUCCESS if id != "" else UITokens.TEXT_LOW
+		# ⭐ 全境2化 P2：身上这件显示品质名 + 用品质色描边（数据自带 color）
+		var g: Dictionary = (_equipment.gear.get(slot, {}) as Dictionary) \
+			if _equipment.gear != null else {}
+		var shown := _display_name(id)
+		var r := _rarity_def(g)
+		if r != null:
+			shown = "%s · %s" % [shown, r.name]
+		b.label_text = "%s\n%s" % [str(Equipment.SLOT_LABEL.get(slot, slot)), shown]
+		b.accent = _rarity_color(g) if not g.is_empty() \
+			else (UITokens.SUCCESS if id != "" else UITokens.TEXT_LOW)
 		# ⚠️ 用 bind 而不是 lambda 读循环变量：bind 的参数在**绑定时**求值，
 		#    4 个按钮一定各拿到自己的槽位（lambda 捕获循环变量的语义容易出错）。
 		b.pressed_down.connect(_on_slot_pressed.bind(slot, id))
@@ -341,23 +357,85 @@ func _display_name(id: String) -> String:
 	return str(d.name) if d != null else id
 
 
+# ─────────────── 全境2化 P2：品质 / 词条 / 评分的显示 ───────────────
+
+## 品质定义（无 gear 或查不到 = null）
+func _rarity_def(gear: Dictionary) -> RarityDef:
+	if gear.is_empty():
+		return null
+	return GearGen.find_rarity(_rarities, str(gear.get("rarity", "")))
+
+
+## 品质染色：数据自带 #rrggbb；没表 / 解析失败一律退回中性色（不许因显示报错）
+func _rarity_color(gear: Dictionary) -> Color:
+	var r := _rarity_def(gear)
+	if r == null or r.color == "":
+		return UITokens.NEUTRAL
+	return Color(r.color)
+
+
+## 一行的装备摘要："稀有 · 武器伤害+8% · 评分 132"（无 gear 返回空串）
+func _gear_text(gear: Dictionary, category: String) -> String:
+	if gear.is_empty():
+		return ""
+	var r := _rarity_def(gear)
+	var head := GearGen.summary(gear, r, _affixes)
+	return "%s · 评分 %d" % [head, GearGen.score_of(gear, category, r)]
+
+
+func _category_of(id: String) -> String:
+	var d: ItemDef = _items.get(id)
+	return str(d.category) if d != null else "?"
+
+
 ## 把背包里的堆叠汇总成一行一项（手机屏幕上重复条目很碍眼）
 func _add_rows(box: VBoxContainer, inv: Inventory, is_container: bool) -> void:
 	var counts: Dictionary = {}
 	var order: Array[String] = []
+	# ⭐ 全境2化 P2：带 gear 的装备**每槽一行** —— 两把同 id 的枪品质不同，
+	#    合并成一行的话玩家根本没法挑（这正是"看到词条才能决策"的意义）。
+	var gears: Array[Dictionary] = []
 	for s in inv.slots:
 		if s == null:
 			continue
-		var id := str(s["item_id"])
+		var sd: Dictionary = s as Dictionary
+		if sd.has("gear"):
+			gears.append({"id": str(sd.get("item_id", "")), "gear": sd["gear"]})
+			continue
+		var id := str(sd.get("item_id", ""))
 		if not counts.has(id):
 			counts[id] = 0
 			order.append(id)
-		counts[id] = int(counts[id]) + int(s["count"])
+		counts[id] = int(counts[id]) + int(sd.get("count", 0))
 	for id in order:
 		box.add_child(_make_row(id, int(counts[id]), is_container))
-	if order.is_empty():
+	for e in gears:
+		box.add_child(_make_gear_row(str(e["id"]), (e["gear"] as Dictionary), is_container))
+	if order.is_empty() and gears.is_empty():
 		var l := _mk_label("（空）", 13, UITokens.TEXT_LOW)
 		box.add_child(l)
+
+
+## 带品质词条的装备单独成行："名字 / 稀有 · 词条 / 动作"。
+##
+## ⚠️ 已知限制：装备动作仍按 item_id 发信号（`Equipment.equip` 走
+##    `first_slot_of`），背包里有两把同 id 不同品质的枪时，穿上的可能不是你点的那把。
+##    修法（下一步）：equip 改按槽位下标 —— 见 workboard「装备闭环补齐四步」。
+func _make_gear_row(item_id: String, gear: Dictionary, is_container: bool) -> Control:
+	var name_ := _display_name(item_id)
+	var tail := _gear_text(gear, _category_of(item_id))
+	if is_container:
+		return _mk_item_button("%s\n%s\n拿走" % [name_, tail], _rarity_color(gear), func():
+			action.emit(item_id, 1)
+			_refresh())
+	var can_equip := _equipment != null and _equipment.is_equippable(item_id)
+	if can_equip:
+		return _mk_item_button("%s\n%s\n装备" % [name_, tail], _rarity_color(gear), func():
+			_hint.text = "装备 %s（%s）" % [name_, tail]
+			equip_requested.emit(item_id))
+	return _mk_item_button("%s\n%s\n丢弃" % [name_, tail], _rarity_color(gear), func():
+		action.emit(item_id, -2)
+		_refresh())
 
 
 func _make_row(item_id: String, count: int, is_container: bool) -> Control:

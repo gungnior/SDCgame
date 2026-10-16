@@ -23,6 +23,14 @@ var _container_open_idx := -1
 var _container_title := "搜索目标"
 
 
+## 装备品质/词条表（面板显示品质与词条用）。
+## 空表 = 面板退回旧样式（不显示品质），向后兼容没有 gear 数据的老调用方。
+func _gear_defs() -> Dictionary:
+	if scene == null or scene.reg == null:
+		return {}
+	return {"rarities": scene.reg.gear_rarities, "affixes": scene.reg.gear_affixes}
+
+
 func open_bag() -> void:
 	if scene == null or scene.inventory_panel == null or scene.raid.is_over():
 		return
@@ -51,7 +59,8 @@ func open_bag() -> void:
 		container = _build_container_inv(xi)
 		ctitle = scene.raid.containers[xi].display_name()
 	_container_title = ctitle if ctitle != "" else "搜索目标"
-	scene.inventory_panel.open(scene.reg.items, scene.raid.carry, container, ctitle, scene.raid.equipment)
+	scene.inventory_panel.open(scene.reg.items, scene.raid.carry, container, ctitle,
+		scene.raid.equipment, _gear_defs())
 	if scene.touch != null:
 		scene.touch.set_controls_visible(false)   # 面板打开时收起摇杆，避免抢触点
 	if Sfx != null:
@@ -66,7 +75,13 @@ func _build_container_inv(idx: int) -> Inventory:
 	if idx < 0 or idx >= scene.raid.containers.size():
 		return inv
 	for d in (scene.raid.containers[idx].drops as Array):
-		inv.add(str(d["item_id"]), int(d["count"]))
+		var dd: Dictionary = d as Dictionary
+		# ⭐ 全境2化 P2：带 gear 的走 add_with_gear，否则面板**看不见**品质词条
+		#    （sim 层修好了搬运，但视图 Inventory 这里丢的话玩家照样看不到）
+		if dd.has("gear"):
+			inv.add_with_gear(str(dd["item_id"]), (dd["gear"] as Dictionary))
+		else:
+			inv.add(str(dd["item_id"]), int(dd["count"]))
 	return inv
 
 
@@ -78,7 +93,12 @@ func _build_corpse_inv(idx: int) -> Inventory:
 	if idx < 0 or idx >= scene.raid.corpses.size():
 		return inv
 	for d in (scene.raid.corpses[idx]["drops"] as Array):
-		inv.add(str(d["item_id"]), int(d["count"]))
+		var dd: Dictionary = d as Dictionary
+		# ⭐ 同上：尸体的带词条装备也要原样进视图 Inventory
+		if dd.has("gear"):
+			inv.add_with_gear(str(dd["item_id"]), (dd["gear"] as Dictionary))
+		else:
+			inv.add(str(dd["item_id"]), int(dd["count"]))
 	return inv
 
 
@@ -114,7 +134,8 @@ func on_panel_action(item_id: String, count: int) -> void:
 			if got < count:
 				scene._toast("背包放不下，只拿了 %d/%d" % [got, count])
 			scene.inventory_panel.open(scene.reg.items, scene.raid.carry,
-				_build_corpse_inv(_corpse_open_idx), _container_title, scene.raid.equipment)
+				_build_corpse_inv(_corpse_open_idx), _container_title,
+				scene.raid.equipment, _gear_defs())
 		elif Sfx != null:
 			Sfx.play("ui_deny")
 			scene._toast("背包放不下")
@@ -127,7 +148,8 @@ func on_panel_action(item_id: String, count: int) -> void:
 			if got2 < count:
 				scene._toast("背包放不下，只拿了 %d/%d" % [got2, count])
 			scene.inventory_panel.open(scene.reg.items, scene.raid.carry,
-				_build_container_inv(_container_open_idx), _container_title, scene.raid.equipment)
+				_build_container_inv(_container_open_idx), _container_title,
+				scene.raid.equipment, _gear_defs())
 		elif Sfx != null:
 			Sfx.play("ui_deny")
 			scene._toast("背包放不下")
