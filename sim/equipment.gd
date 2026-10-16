@@ -51,6 +51,7 @@ var _items: Dictionary = {}       ## item_id   -> ItemDef
 var _weapons: Dictionary = {}     ## weapon_id -> WeaponDef
 var _attachments: Dictionary = {} ## attachment_id -> AttachmentDef
 var _affixes: Dictionary = {}     ## affix_id -> AffixDef（全境2化 P1；空表 = 词条全不生效）
+var _affix_list: Array = []       ## 同一份表的数组形态（GearGen.apply_affixes 要数组）
 
 
 func _init(items: Dictionary = {}, weapons: Dictionary = {},
@@ -59,6 +60,7 @@ func _init(items: Dictionary = {}, weapons: Dictionary = {},
 	_weapons = weapons
 	_attachments = attachments
 	_affixes = affixes
+	_affix_list = affixes.values()
 	for s in SLOTS:
 		slots[s] = ""
 
@@ -426,19 +428,9 @@ func build_loadout(slot_limit: int = WeaponModding.SLOTS_C) -> WeaponModding.Loa
 func _apply_weapon_affixes(lo: WeaponModding.Loadout) -> WeaponModding.Loadout:
 	if lo == null:
 		return null
-	var g: Dictionary = gear.get("weapon", {})
-	if g.is_empty():
-		return lo
-	var eff: Dictionary = lo.effective
-	for e in (g.get("affixes", []) as Array):
-		if not (e is Dictionary):
-			continue
-		var ed: Dictionary = e as Dictionary
-		var ad: AffixDef = _affixes.get(str(ed.get("id", "")))
-		if ad == null or not eff.has(ad.field):
-			continue
-		eff[ad.field] = ad.apply_to(float(eff[ad.field]), float(ed.get("value", 0.0)))
-	return lo
+	# ⭐ 数学抽到 GearGen.apply_affixes —— 敌人侧（raid_scene）用的是**同一个函数**，
+	#    两边公式不会各走各的（2026-10-16 Phase C）。
+	return GearGen.apply_affixes(lo, gear.get("weapon", {}), _affix_list)
 
 
 func summary() -> String:

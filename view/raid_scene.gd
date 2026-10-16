@@ -68,6 +68,10 @@ var bullets: Array = []          ## 表现层专用：曳光弹 {from, to, ttl, 
 var muzzle_flash: Array = []
 var noises: Array = []
 var drops_on_ground: Array = []  ## {pos, item_id, count}
+## 敌人 id -> 它身上那件装备的 gear（全境2化 P2：敌人穿戴的枪也 roll 品质词条）。
+## ⭐ 记在这里而不是 EnemyAgent 上 —— `sim/ai/` 是队友的地盘（防撞车：改别人文件前先协调），
+##    而"死了掉自己那把枪"只需要 agent id 就能对上。
+var _enemy_gear: Dictionary = {}
 
 # ─── 玩家 ───
 var player_pos := Vector2.ZERO
@@ -273,6 +277,39 @@ func _spawn_containers() -> void:
 			#      像素基线 ④ 若需要重设，请在提交信息里说明理由（协作规则第 2 条）。
 			raid.roll_gear_for_drops(drops)
 			raid.add_container(def, Ballistics.cell_center(cs.get("pos", r.center)), drops)
+
+
+## 敌人手里的枪：用 `enemies.json` 的 `weapon_id`（此前**被忽略**，只用于死亡掉落，
+## 所有远程敌人统一发手枪），并按房间深度 roll 品质词条。
+##
+## ⭐ 为什么要有这条：体检发现玩家靠装备在 6 个维度单方面变强、敌人零成长 ——
+##   门 1「难度偏低」的缺口会被新装备系统**放大**。
+## ⚠️ 数值纪律：**倍率/权重全部是温和默认值，标"待平衡专家定夺"**，本项只搭机制。
+##   · depth <= 0（浅区）：不 roll，保持 2026-10-16 之前的强度（新手区不变难）；
+##   · depth >= 1：走同一张品质表（与玩家掉落同一套数据）。
+func _enemy_weapon_def(d: EnemyDef, depth: int, agent_id: int = -1) -> WeaponDef:
+	var wid := d.weapon_id if d.weapon_id != "" else "weapon_pistol"
+	var w: WeaponDef = reg.get_weapon(wid)
+	if w == null:
+		w = reg.get_weapon("weapon_pistol")
+	if w == null:
+		return null
+	if raid == null or not raid.gear_enabled() or depth <= 0:
+		return w
+	if reg.gear_rarities.is_empty() or reg.gear_affixes.is_empty():
+		return w
+	var g := GearGen.roll_gear(_rng, reg.gear_rarities, reg.gear_affixes, "weapon")
+	if g.is_empty():
+		return w
+	# 记下来：这把枪死后要**原样**掉进尸体（打精英掉他的金枪）
+	if agent_id >= 0:
+		_enemy_gear[agent_id] = g
+	var lo := WeaponModding.create_loadout(w, WeaponModding.SLOTS_A)
+	if lo == null:
+		return w
+	# 与玩家侧**同一个函数**（GearGen.apply_affixes），公式不会各走各的
+	GearGen.apply_affixes(lo, g, reg.gear_affixes)
+	return lo.to_weapon_def()
 
 
 # ─────────────── 弹药 / 护甲 / 损耗（2026-10-13）───────────────
@@ -517,7 +554,9 @@ func _setup_sim() -> void:
 			var d: EnemyDef = kinds[eid % kinds.size()]
 			var a := EnemyAgent.new(eid, d, _enemy_spawn_point(r))
 			if d.is_ranged():
-				a.equip(reg.get_weapon("weapon_pistol"), 60)
+				var wd := _enemy_weapon_def(d, r.depth, eid)
+				if wd != null:
+					a.equip(wd, 60)
 			# ⚠️ 用 **_rng**（由 _raid_seed 播种）而**不是全局 randf_range**。
 			#    全局 RNG 会被别的系统消耗 —— 最典型的是 audio/sfx.gd 给每个音效
 			#    随机挑音高，**消耗次数随音频状态浮动**。
@@ -536,7 +575,9 @@ func _setup_sim() -> void:
 				var d2: EnemyDef = _pick_enemy(kinds, eid)
 				var a2 := EnemyAgent.new(eid, d2, _enemy_spawn_point(r))
 				if d2.is_ranged():
-					a2.equip(reg.get_weapon("weapon_pistol"), 60)
+					var wd2 := _enemy_weapon_def(d2, r.depth, eid)
+					if wd2 != null:
+						a2.equip(wd2, 60)
 				a2.facing = _rng_dir()
 				squad.add_member(a2)
 				agents.append(a2)
@@ -1004,7 +1045,12 @@ func _spawn_corpse(a: EnemyAgent) -> void:
 	#   weapon_id / armor_id / helmet_id，字段定义在 sim/defs/enemy_def.gd）。
 	#   武器已作为 item 存在（id 与 weapons.json 一致），所以能直接进尸体背包。
 	if a.def.weapon_id != "":
-		drops.append({"item_id": a.def.weapon_id, "count": 1})
+		var row: Dictionary = {"item_id": a.def.weapon_id, "count": 1}
+		# ⭐ 掉**他自己那把**（含生成时 roll 出来的品质词条）——
+		#   roll_gear_for_drops 会跳过已有 gear 的条目，不会重复 roll
+		if _enemy_gear.has(a.id):
+			row["gear"] = _enemy_gear[a.id]
+		drops.append(row)
 	if a.def.armor_id != "":
 		drops.append({"item_id": a.def.armor_id, "count": 1})
 	if a.def.helmet_id != "":
@@ -1192,6 +1238,7 @@ func _restart() -> void:
 	bullets.clear()
 	muzzle_flash.clear()
 	drops_on_ground.clear()
+	_enemy_gear.clear()
 	_prev_shots.clear()
 	_step_accum = 0.0
 	_time = 0.0

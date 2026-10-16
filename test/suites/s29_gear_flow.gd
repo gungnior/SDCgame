@@ -21,6 +21,7 @@ func register() -> void:
 	_suite("尸体：take_all 保留 gear，塞不下的留在尸体里", _test_corpse_take_all)
 	_suite("向后兼容：无 gear 掉落行为不变", _test_no_gear_unchanged)
 	_suite("UI：背包面板真的显示品质与评分", _test_panel_shows_gear)
+	_suite("敌人侧：gear 词条乘区（与玩家侧同一函数）", _test_apply_affixes_shared)
 
 
 var _reg: DataRegistry = null
@@ -153,6 +154,45 @@ func _test_panel_shows_gear() -> void:
 	_check(hit_rarity, "★ 背包面板要显示品质名（否则玩家看不出装备差异）")
 	_check(hit_score, "★ 背包面板要显示评分（全境2 的取舍依据）")
 	ip.close()
+
+
+## 敌人穿戴的装备也要吃品质词条 —— 关键是**与玩家侧同一个函数**，
+## 否则两边公式会各走各的（玩家涨 10%、敌人涨 12% 这种偏差最难查）。
+func _test_apply_affixes_shared() -> void:
+	var reg := _fresh_reg()
+	var w: WeaponDef = reg.get_weapon("weapon_rifle")
+	_check(w != null, "weapon_rifle 应在武器表里")
+	if w == null:
+		return
+	var dmg_affix: AffixDef = reg.get_affix("aff_weapon_dmg")
+	var armor_affix: AffixDef = reg.get_affix("aff_armor")
+	_check(dmg_affix != null and armor_affix != null, "伤害/护甲词条都应在表里")
+
+	# ① 无 gear：数值与裸枪逐字段一致（浅区敌人不变强 = 向后兼容）
+	var lo0 := WeaponModding.create_loadout(w, WeaponModding.SLOTS_A)
+	GearGen.apply_affixes(lo0, {}, reg.gear_affixes)
+	_check_eq(int(round(float(lo0.effective.get("damage", 0.0)))), int(w.damage),
+		"★ 无 gear 时与裸枪一致（浅区敌人不加成，行为与旧版相同）")
+
+	# ② 有 gear：伤害 +10%
+	var gear: Dictionary = {"rarity": "rare",
+		"affixes": [{"id": "aff_weapon_dmg", "value": 0.1}]}
+	var lo1 := WeaponModding.create_loadout(w, WeaponModding.SLOTS_A)
+	GearGen.apply_affixes(lo1, gear, reg.gear_affixes)
+	var d1: float = float(lo1.effective.get("damage", 0.0))
+	_check(absf(d1 - float(w.damage) * 1.1) < 0.001, "伤害词条 +10pct 生效")
+
+	# ③ 敌人 equip 的是 to_weapon_def() 的产物 —— 词条必须烘进 WeaponDef
+	var wd: WeaponDef = lo1.to_weapon_def()
+	_check_eq(int(wd.damage), int(round(d1)),
+		"to_weapon_def 把词条烘进 WeaponDef（敌人手里拿的就是它）")
+
+	# ④ 防呆：护甲词条是玩家属性，不该污染武器数值
+	var lo2 := WeaponModding.create_loadout(w, WeaponModding.SLOTS_A)
+	GearGen.apply_affixes(lo2, {"rarity": "rare",
+		"affixes": [{"id": "aff_armor", "value": 2.0}]}, reg.gear_affixes)
+	_check_eq(int(round(float(lo2.effective.get("damage", 0.0)))), int(w.damage),
+		"防呆：护甲词条不污染武器数值")
 
 
 ## 递归收集子树里所有控件的文本（TouchButton.label_text / Label.text）

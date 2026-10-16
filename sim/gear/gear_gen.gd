@@ -121,6 +121,29 @@ static func summary(gear: Dictionary, rarity: RarityDef = null,
 	return head + " · " + ", ".join(parts)
 
 
+## 把一件 gear 的词条乘进 Loadout.effective —— **玩家侧与敌人侧共用同一条数学**
+## （2026-10-16 Phase C：此前只有玩家的 Equipment 会应用武器词条，
+##   敌人就算拿到 gear 也没人用，于是"敌人不吃装备系统"）。
+##
+## field 不在 effective 里的词条（armor/hp/move_speed 属玩家属性，不是武器数值）
+## 自然跳过 —— 防呆：武器上滚出护甲词条也不会污染武器数值。
+## 无 gear / 空表时原样返回（行为与抽出来之前逐字一致）。
+static func apply_affixes(lo: WeaponModding.Loadout, gear: Dictionary,
+		affix_table: Array) -> WeaponModding.Loadout:
+	if lo == null or gear.is_empty():
+		return lo
+	var eff: Dictionary = lo.effective
+	for e in (gear.get("affixes", []) as Array):
+		if not (e is Dictionary):
+			continue
+		var ed: Dictionary = e as Dictionary
+		var ad := find_affix(affix_table, str(ed.get("id", "")))
+		if ad == null or not eff.has(ad.field):
+			continue
+		eff[ad.field] = ad.apply_to(float(eff[ad.field]), float(ed.get("value", 0.0)))
+	return lo
+
+
 ## 按 id 找词条定义（找不到返回 null）
 static func find_affix(affix_table: Array, id: String) -> AffixDef:
 	for a in affix_table:
