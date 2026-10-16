@@ -330,6 +330,13 @@ func tick_enemies(delta: float) -> void:
 				_apply_player_damage(lane_damage)
 
 	scene.noises.clear()
+
+	# ⭐ 搜刮会发出动静（可玩性 Step2）：翻箱子、撬柜门不是无声的。
+	#   响度介于走路与开枪之间 —— 近距离的敌人会循声过来，这就是"站着挨打"的风险。
+	if scene.raid.is_searching():
+		var sc: ContainerInstance = scene.raid.containers[scene.raid.search_idx]
+		scene.noises.append({"pos": sc.pos, "loudness_m": scene.NOISE_LOUD * 0.5})
+
 	scene.squad.tick(delta, scene._time)
 
 	# ── 群体协同：包夹角色分配 + 跨小队警戒扩散 ──
@@ -475,7 +482,17 @@ func _autopilot_loot(req: Dictionary) -> void:
 		return
 	var rest: Array = []
 	if kind == "container":
-		rest = scene.raid.take_all_from_container(idx)
+		var rd: RaidSession = scene.raid
+		if idx >= rd.containers.size():
+			return
+		var c: ContainerInstance = rd.containers[idx]
+		# ⭐ 搜刮有代价（Step2）：翻箱要花时间。到达后 autopilot 本就站着不动
+		#   （player_autopilot 在 LOOT_ARRIVE 内下发 move=ZERO），所以这里不会被
+		#   "走开中断"卡死。没翻完就**不** note_done —— 下一帧接着翻。
+		if not c.is_unlocked():
+			rd.begin_search(idx)
+			return
+		rest = rd.take_all_from_container(idx)
 	else:
 		rest = scene.raid.take_all_from_corpse(idx)
 	scene.autopilot.note_done(kind, idx)

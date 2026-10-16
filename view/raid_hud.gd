@@ -157,6 +157,10 @@ func refresh() -> void:
 			raid.active_extract_count(), ex_left])
 	elif raid.active_extract_count() < raid.extract_points.size():
 		lines.append("撤离点仅剩 %d 个（最近的已关闭）" % raid.active_extract_count())
+	# ⭐ 搜刮进度（可玩性 Step2）：翻箱子的这几秒是**真实风险窗口** ——
+	#   面板只冻结输入、不冻结世界，敌人照常巡逻。
+	if raid.is_searching():
+		lines.append("搜刮中 %.0f%%" % (raid.search_ratio() * 100.0))
 	lines.append("携带 %s" % raid.carry.summary())
 	lines.append("击杀 %d   受伤 %d   治疗 %s" % [
 		raid.enemies_killed, vitals.total_damage_taken, scene.medical.status_text()])

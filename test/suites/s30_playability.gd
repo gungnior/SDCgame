@@ -18,6 +18,8 @@ func register() -> void:
 	_suite("撤离点按离出生点由近到远排序", _test_extract_sorted_by_distance)
 	_suite("撤离窗口：最近的先关，最后一个保底常开", _test_extract_windows)
 	_suite("时间流逝后撤离点真的关闭，且不能在那儿撤离", _test_extract_closes_over_time)
+	_suite("搜刮有代价：翻够时间才拿得到东西", _test_search_costs_time)
+	_suite("搜刮中走开 → 中断但进度保留", _test_search_interrupted_keeps_progress)
 
 
 var _reg: DataRegistry = null
@@ -148,3 +150,58 @@ func _test_extract_closes_over_time() -> void:
 	var last_pt: Vector2 = raid.extract_points[n - 1]
 	raid.tick(RaidSession.EXTRACT_COUNTDOWN + 0.5, last_pt)
 	_check_eq(raid.phase_name(), "EXTRACTED", "保底撤离点照样能撤出去")
+
+
+func _new_raid_with(cd: ContainerDef) -> RaidSession:
+	var reg := _fresh_reg()
+	var rng := SimRng.new(7)
+	var stash := Inventory.new(40, reg.items, 999.0)
+	var raid := RaidSession.new(reg.items, rng, stash)
+	raid.add_container(cd, Vector2(5.0, 5.0), [{"item_id": "ammo_rifle", "count": 10}])
+	raid.start(120.0)
+	return raid
+
+
+func _test_search_costs_time() -> void:
+	var reg := _fresh_reg()
+	var cd: ContainerDef = reg.get_container("container_ammo_box")
+	_check(cd != null and cd.search_time > 0.0,
+			"容器定义了 search_time（%.1f 秒）" % (0.0 if cd == null else cd.search_time))
+	var raid := _new_raid_with(cd)
+
+	_check(not raid.containers[0].is_unlocked(), "刚登记 = 锁着")
+	_check_eq(raid.take_from_container(0, "ammo_rifle", 5), 0, "没翻完 → 一件都拿不到")
+
+	raid.begin_search(0)
+	raid.tick(cd.search_time * 0.5, Vector2(5.0, 5.0))
+	_check(not raid.containers[0].is_unlocked(), "只翻了一半 → 还锁着")
+	_check(raid.search_ratio() > 0.4 and raid.search_ratio() < 0.6,
+			"进度约 50%%（实际 %.2f）" % raid.search_ratio())
+
+	raid.tick(cd.search_time * 0.6, Vector2(5.0, 5.0))
+	_check(raid.containers[0].is_unlocked(), "翻够了 → 解锁")
+	_check_eq(raid.search_finished_idx, 0, "解锁那一帧记下 search_finished_idx（view 据此刷面板）")
+	_check_eq(raid.take_from_container(0, "ammo_rifle", 5), 5, "解锁后才拿得到")
+
+
+func _test_search_interrupted_keeps_progress() -> void:
+	var reg := _fresh_reg()
+	var cd: ContainerDef = reg.get_container("container_lab_case")
+	_check(cd != null, "取到实验柜定义（search_time 最长的那类）")
+	var raid := _new_raid_with(cd)
+
+	raid.begin_search(0)
+	raid.tick(1.0, Vector2(5.0, 5.0))
+	var p1: float = raid.containers[0].search_progress
+	_check(p1 > 0.0, "翻了 %.1f 秒" % p1)
+
+	# 走开 → 中断
+	raid.tick(0.1, Vector2(40.0, 40.0))
+	_check_eq(raid.search_idx, -1, "走开了 → 搜刮中断")
+	# ⭐ 进度保留：回来不用从头翻（否则一被打断就前功尽弃，那是惩罚不是张力）
+	_check(float(raid.containers[0].search_progress) >= p1 - 0.001,
+			"进度保留（%.1f 秒）—— 回来接着搜" % raid.containers[0].search_progress)
+
+	raid.begin_search(0)
+	raid.tick(cd.search_time, Vector2(5.0, 5.0))
+	_check(raid.containers[0].is_unlocked(), "回来翻够 → 解锁")

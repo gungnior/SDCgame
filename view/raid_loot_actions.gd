@@ -56,6 +56,10 @@ func open_bag() -> void:
 		ctitle = "尸体"
 	elif xi >= 0:
 		_container_open_idx = xi
+		# ⭐ 搜刮有代价（可玩性 Step2）：开箱即开始翻，翻够了才看得见内容。
+		#   这段时间是**站着不动的风险窗口** —— 面板只冻结输入，不冻结世界，
+		#   敌人照常巡逻、照常听见动静。
+		scene.raid.begin_search(xi)
 		container = _build_container_inv(xi)
 		ctitle = scene.raid.containers[xi].display_name()
 	_container_title = ctitle if ctitle != "" else "搜索目标"
@@ -67,12 +71,29 @@ func open_bag() -> void:
 		Sfx.play("ui_click")
 
 
+## ⭐ 搜刮完成的那一帧：把容器内容刷进已打开的面板。
+## 在此之前面板左边是空的（因为还没翻够时间，看不见里面有什么）。
+func on_search_finished(idx: int) -> void:
+	if scene == null or scene.inventory_panel == null:
+		return
+	if idx != _container_open_idx or not scene.inventory_panel.is_open():
+		return
+	scene.inventory_panel.open(scene.reg.items, scene.raid.carry,
+		_build_container_inv(idx), _container_title, scene.raid.equipment, _gear_defs())
+	if Sfx != null:
+		Sfx.play("ui_click")
+
+
 ## 把容器当前内容倒进一个临时 Inventory 供面板渲染。
 ## ⚠️ 与 _build_corpse_inv 同理由：take 是从【容器】里扣的，
 ##    临时 Inventory 只是视图 —— 不重建就会一直显示已拿走的东西。
 func _build_container_inv(idx: int) -> Inventory:
 	var inv := Inventory.new(24, scene.reg.items, 999.0)
 	if idx < 0 or idx >= scene.raid.containers.size():
+		return inv
+	# ⭐ 搜刮有代价（可玩性 Step2）：没翻够时间就**看不见里面有什么**
+	#    —— 先听见动静才知道有货，这是搜打撤该有的节奏。
+	if not scene.raid.containers[idx].is_unlocked():
 		return inv
 	for d in (scene.raid.containers[idx].drops as Array):
 		var dd: Dictionary = d as Dictionary

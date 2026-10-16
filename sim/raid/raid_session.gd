@@ -269,9 +269,50 @@ func tick(delta: float, player_pos: Vector2) -> void:
 	else:
 		extract_progress = maxf(0.0, extract_progress - delta * 2.0)
 
+	_tick_search(delta, player_pos)
+
 
 func extract_progress_ratio() -> float:
 	return clampf(extract_progress / EXTRACT_COUNTDOWN, 0.0, 1.0)
+
+
+## ⭐ 搜刮有代价（可玩性 Step2）：翻箱子要花时间，而且**站着不动**。
+## 走开 = 中断（进度保留，回来接着搜）；搜不够时间 = 一件都拿不出来。
+func begin_search(idx: int) -> bool:
+	if idx < 0 or idx >= containers.size():
+		return false
+	search_idx = idx
+	return true
+
+
+func cancel_search() -> void:
+	search_idx = -1
+
+
+func is_searching() -> bool:
+	if search_idx < 0 or search_idx >= containers.size():
+		return false
+	return not (containers[search_idx] as ContainerInstance).is_unlocked()
+
+
+## 当前搜刮进度 0~1（供 UI 进度条）
+func search_ratio() -> float:
+	if search_idx < 0 or search_idx >= containers.size():
+		return 0.0
+	return (containers[search_idx] as ContainerInstance).search_ratio()
+
+
+func _tick_search(delta: float, player_pos: Vector2) -> void:
+	if search_idx < 0 or search_idx >= containers.size():
+		return
+	var c: ContainerInstance = containers[search_idx]
+	if player_pos.distance_to(c.pos) > SEARCH_RANGE_CELLS:
+		search_idx = -1          ## 走开了 = 放弃这次搜刮（进度不清零）
+		return
+	if c.is_unlocked():
+		return
+	if c.advance_search(delta):
+		search_finished_idx = search_idx      ## view 层据此刷新面板（消费后置 -1）
 
 
 ## 第 i 个撤离点现在还开着吗？关闭比例 0（或没有窗口数据）= 常开。
@@ -632,6 +673,14 @@ func take_all_from_corpse(idx: int) -> Array:
 var containers: Array[ContainerInstance] = []
 var _next_container_id: int = 0
 
+## ⭐ 正在搜的容器下标（可玩性 Step2）：-1 = 没在搜。
+var search_idx: int = -1
+## 刚搜完的那个容器下标（-1 = 没有）。view 层消费后置回 -1，
+## 用来在「搜完那一帧」刷新面板 —— 避免每帧重建控件行。
+var search_finished_idx: int = -1
+## 离开容器多远算"走开了"→ 搜刮中断（进度保留，回来接着搜）
+const SEARCH_RANGE_CELLS := 2.5
+
 
 ## 登记一个容器实例。drops 是 LootRoller 按容器类型对应掉落表抽出来的。
 func add_container(def: ContainerDef, pos: Vector2, drops: Array) -> int:
@@ -670,6 +719,9 @@ func take_from_container(idx: int, item_id: String, count: int) -> int:
 	if idx < 0 or idx >= containers.size():
 		return 0
 	var c: ContainerInstance = containers[idx]
+	# ⭐ 没搜完 = 一件都拿不到（可玩性 Step2）。调用方应先查 is_unlocked()
+	if not c.is_unlocked():
+		return 0
 	var first := not c.searched
 	var taken := c.take(item_id, count, carry)
 	c.searched = true
@@ -685,6 +737,9 @@ func take_all_from_container(idx: int) -> Array:
 	if idx < 0 or idx >= containers.size():
 		return []
 	var c: ContainerInstance = containers[idx]
+	# ⭐ 同上：没搜完拿不到东西。返回空数组（调用方应先查 is_unlocked()）
+	if not c.is_unlocked():
+		return []
 	var first := not c.searched
 	var before_count := 0
 	for d in c.drops:

@@ -160,6 +160,23 @@ func _test_container_pipeline() -> void:
 	_check_eq(idx, 0, "第一个容器 id 为 0")
 	_check_eq(raid.container_near(Vector2(5.2, 5.0)), 0, "邻近位置能查到该容器")
 	_check_eq(raid.container_near(Vector2(50.0, 50.0)), -1, "远处查不到容器")
+	# ⭐ 搜刮有代价（可玩性 Step2）：必须先翻够 ContainerDef.search_time 秒才能拿。
+	#   这个字段早就存在但全仓没人用，本轮接上 —— 站着翻箱子是真实的风险窗口。
+	_check(not raid.containers[0].is_unlocked(), "刚登记的容器还没搜，是锁着的")
+	_check_eq(raid.take_from_container(0, "ammo_rifle", 10), 0, "没搜完 → 一件都拿不到")
+	_check_eq(raid.take_all_from_container(0).size(), 0, "没搜完 → take_all 也拿不到")
+	raid.start(120.0)                       ## tick 只在 ACTIVE 阶段推进搜刮
+	raid.begin_search(0)
+	_check(raid.is_searching(), "开始搜刮")
+	# 走开 → 搜刮中断（进度保留）
+	raid.tick(0.2, Vector2(50.0, 50.0))
+	_check_eq(raid.search_idx, -1, "走开了 → 搜刮中断")
+	# 站回旁边 → 接着搜
+	raid.begin_search(0)
+	raid.tick(cd.search_time + 0.1, Vector2(5.0, 5.0))
+	_check(raid.containers[0].is_unlocked(), "站住翻够时间 → 解锁")
+	_check_eq(raid.search_finished_idx, 0, "解锁那一帧记下 search_finished_idx（供 view 刷面板）")
+
 	var taken := raid.take_from_container(0, "ammo_rifle", 10)
 	_check_eq(taken, 10, "从容器拿走 10 发")
 	_check(raid.containers[0].searched, "拿取后容器标记为已搜过")

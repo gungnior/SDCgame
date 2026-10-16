@@ -847,6 +847,13 @@ func _process(delta: float) -> void:
 	#
 	# ⚠️ 地图也冻结逻辑：地图是铺满全屏的覆盖层，玩家此刻看不到战场 ——
 	#    不冻结就是"低头看地图被背后打死"，那不叫硬核，叫罚站。
+	# ⭐ 搜刮完成那一帧：把面板内容刷出来（此前显示的是空的"搜刮中"）。
+	#    只在这一帧刷一次，不每帧重建控件行。
+	if raid.search_finished_idx >= 0 and loot_actions != null:
+		var fi := raid.search_finished_idx
+		raid.search_finished_idx = -1
+		loot_actions.on_search_finished(fi)
+
 	var map_open: bool = map_panel != null and map_panel.is_open()
 	var frozen := game_paused or (Game != null and Game.paused) or map_open
 	if frozen:

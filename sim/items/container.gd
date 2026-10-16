@@ -18,10 +18,38 @@ var pos: Vector2 = Vector2.ZERO
 var drops: Array = []
 ## 是否已被打开过（用于"已搜过"的视觉/交互区分）
 var searched: bool = false
+## ⭐ 搜刮进度（可玩性 Step2，2026-10-16）：秒。0 = 还没开始搜。
+## `ContainerDef.search_time` 这个字段**早就存在，但全仓没有任何逻辑用它**
+## （只出现在定义与 from_dict 里）—— 是个配了没接线的死字段。
+## 本轮把它接上：没搜够时间就拿不到东西，站着翻箱子的那几秒是风险窗口。
+var search_progress: float = 0.0
 
 
 func is_empty() -> bool:
 	return drops.is_empty()
+
+
+## 搜完这个容器需要几秒（数据驱动）
+func search_required() -> float:
+	return def.search_time if def != null else 0.0
+
+
+## 搜完了吗？搜完才允许从里面拿东西。
+func is_unlocked() -> bool:
+	return search_progress >= search_required()
+
+
+## 搜刮进度 0~1（供 UI 进度条 / HUD）
+func search_ratio() -> float:
+	var need := search_required()
+	return 1.0 if need <= 0.0 else clampf(search_progress / need, 0.0, 1.0)
+
+
+## 推进搜刮。返回 true = **刚好在本帧搜完**（调用方据此播音效/刷面板）。
+func advance_search(delta: float) -> bool:
+	var was := is_unlocked()
+	search_progress += delta
+	return (not was) and is_unlocked()
 
 
 ## 已搜空 —— 不再提示交互
