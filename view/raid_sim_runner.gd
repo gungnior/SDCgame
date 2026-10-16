@@ -479,6 +479,8 @@ func _autopilot_loot(req: Dictionary) -> void:
 	else:
 		rest = scene.raid.take_all_from_corpse(idx)
 	scene.autopilot.note_done(kind, idx)
+	# ⭐ 全境2化 P2：搜完顺手换上更好的装备（拥有者点名「自动战斗会换品质更好的装备」）
+	_autopilot_maybe_upgrade()
 	var leftover := 0
 	for d in rest:
 		leftover += int(d.get("count", 0))
@@ -487,6 +489,38 @@ func _autopilot_loot(req: Dictionary) -> void:
 		scene._toast("背包已满，先跳过这个搜索目标")
 	elif Sfx != null:
 		Sfx.play("pickup")
+
+
+## 自动作战：搜刮完顺手换上**评分更高**的装备（全境2化 P2）。
+##
+## 判据在 sim 侧（`Equipment.best_upgrade_slot`），这里只负责"调 API + 给反馈"。
+## ⭐ 只在**真的更好**时才换（空手捡到第一件带词条的枪也算，因为空槽记 0 分）；
+##   不做"降级替换"；无品质系统的老档返回 -1 —— 什么都不做（行为与旧版一致）。
+func _autopilot_maybe_upgrade() -> void:
+	if scene == null or scene.raid == null or scene.raid.equipment == null:
+		return
+	if scene.reg == null or scene.reg.gear_rarities.is_empty():
+		return
+	# ⚠️ 显式类型：`scene.raid` 是 Variant（scene 不是静态类型），
+	#    用 `:=` 会 Parse Error "Cannot infer the type"（本项目踩过好几次）
+	var raid: RaidSession = scene.raid
+	var idx: int = raid.equipment.best_upgrade_slot(raid.carry, scene.reg.gear_rarities)
+	if idx < 0:
+		return
+	var sd: Dictionary = (raid.carry.slots[idx] as Dictionary) \
+		if (raid.carry.slots[idx] is Dictionary) else {}
+	var iid := str(sd.get("item_id", ""))
+	var d: ItemDef = scene.reg.get_item(iid)
+	var nm := str(d.name) if d != null else "装备"
+	if raid.equip_slot(idx) != "":
+		return
+	# 装上的正好是武器 -> 手里的枪必须换成它（否则"换枪"只是名字变了）
+	scene._rebuild_player_weapon()
+	if scene.inventory_panel != null:
+		scene.inventory_panel.refresh()
+	scene._toast("自动换上 %s" % nm)
+	if Sfx != null:
+		Sfx.play("ui_confirm")
 
 
 ## 自动闪避的提前量（秒）：弹道还要多久到达，决定了「来不来得及躲」。

@@ -22,6 +22,7 @@ func register() -> void:
 	_suite("向后兼容：无 gear 掉落行为不变", _test_no_gear_unchanged)
 	_suite("UI：背包面板真的显示品质与评分", _test_panel_shows_gear)
 	_suite("敌人侧：gear 词条乘区（与玩家侧同一函数）", _test_apply_affixes_shared)
+	_suite("按下标穿 + 自动作战挑更好的装备", _test_equip_at_and_best_upgrade)
 
 
 var _reg: DataRegistry = null
@@ -154,6 +155,55 @@ func _test_panel_shows_gear() -> void:
 	_check(hit_rarity, "★ 背包面板要显示品质名（否则玩家看不出装备差异）")
 	_check(hit_score, "★ 背包面板要显示评分（全境2 的取舍依据）")
 	ip.close()
+
+
+## 同一 id 有多件、品质不同时：按 id 穿会拿到靠前那格（可能不是你点的那件），
+## 所以要有 equip_at（按下标）+ best_upgrade_slot（挑更好的）。
+func _test_equip_at_and_best_upgrade() -> void:
+	var reg := _fresh_reg()
+	var eq := Equipment.new(reg.items, reg.weapons, reg.attachments, reg.affix_map())
+	var inv := Inventory.new(6, reg.items, 999.0)
+	inv.add_with_gear("weapon_rifle", {"rarity": "rare", "affixes": []})
+	inv.add_with_gear("weapon_rifle", {"rarity": "epic", "affixes": []})
+
+	# ① 按 id 穿 -> 靠前那格（这正是"点史诗却穿上稀有"的成因）
+	_check_eq(eq.equip(inv, "weapon_rifle"), "", "按 id 穿上步枪")
+	_check_eq(_equipped_rarity(eq, "weapon"), "rare", "按 id 穿取靠前那格（已知行为）")
+
+	# ② 脱下后按下标穿第 2 格 -> 必须是史诗
+	eq.unequip(inv, "weapon")
+	_check_eq(eq.equip_at(inv, 1), "", "按下标穿第 2 格")
+	_check_eq(_equipped_rarity(eq, "weapon"), "epic",
+		"★ 按下标穿 = 穿上的正是那一件（面板点哪件就上哪件）")
+
+	# ③ 自动作战：空槽 + 带品质候选 -> 该换
+	var eq2 := Equipment.new(reg.items, reg.weapons, reg.attachments, reg.affix_map())
+	var inv2 := Inventory.new(6, reg.items, 999.0)
+	inv2.add_with_gear("armor_light", {"rarity": "rare", "affixes": []})
+	_check(eq2.best_upgrade_slot(inv2, reg.gear_rarities) >= 0,
+		"★ 空槽遇到带品质装备 -> 自动作战会换上")
+
+	# ④ 无 gear 的普通货不参与（老档 / 无品质系统时不替玩家换装）
+	var inv3 := Inventory.new(6, reg.items, 999.0)
+	inv3.add("armor_light", 1)
+	_check_eq(eq2.best_upgrade_slot(inv3, reg.gear_rarities), -1,
+		"★ 无 gear 普通货不参与（行为与 2026-10-16 之前一致）")
+
+	# ⑤ 身上已是最好的 -> 不降级替换
+	var eq4 := Equipment.new(reg.items, reg.weapons, reg.attachments, reg.affix_map())
+	var inv4 := Inventory.new(6, reg.items, 999.0)
+	inv4.add_with_gear("armor_light", {"rarity": "legendary", "affixes": []})
+	eq4.equip(inv4, "armor_light")
+	inv4.add_with_gear("armor_light", {"rarity": "common", "affixes": []})
+	_check_eq(eq4.best_upgrade_slot(inv4, reg.gear_rarities), -1,
+		"★ 背包里更差 -> 不降级")
+
+
+func _equipped_rarity(eq: Equipment, slot: String) -> String:
+	var g: Variant = eq.gear.get(slot, {})
+	if not (g is Dictionary):
+		return ""
+	return str((g as Dictionary).get("rarity", ""))
 
 
 ## 敌人穿戴的装备也要吃品质词条 —— 关键是**与玩家侧同一个函数**，

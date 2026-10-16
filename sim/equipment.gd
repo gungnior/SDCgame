@@ -124,16 +124,36 @@ func is_equippable(id: String) -> bool:
 
 
 ## 装备。成功返回 ""，否则返回**中文原因**（直接给 UI toast 用）。
+## 从背包里穿一件（按 item_id）。返回失败原因（空串 = 成功）。
+##
 ## ⚠️ 顺序：先取新的（腾出空间）再退回旧的 —— 否则背包满时换装会失败。
 ## ⚠️ 全境2化 P1：gear 随装备一起搬运（穿上的同时词条上车；脱下时放回背包）。
+## ⚠️ 同 id 有多件时取**靠前那格**（first_slot_of）；要精确指定请用 `equip_at`。
 func equip(inv: Inventory, id: String) -> String:
-	var slot := slot_for(id)
-	if slot == "":
-		return "这件不能装备"
+	if inv == null:
+		return "背包里没有这件"
 	var idx := inv.first_slot_of(id)
 	if idx == Inventory.UNSET:
 		return "背包里没有这件"
-	var taken: Variant = inv.take_slot(idx)
+	return equip_at(inv, idx)
+
+
+## 从背包**指定槽位**穿。返回失败原因（空串 = 成功）。
+##
+## ⭐ 为什么要有这个（2026-10-16 Phase D）：全境2化之后**同一 id 可能有多件、
+## 品质词条不同**，`equip(id)` 走 `first_slot_of` 会穿上**不一定是你点的那件**
+## （UI 点史诗、结果穿上背包里靠前那把稀有）。自动作战与面板都要能"就穿这一格"。
+func equip_at(inv: Inventory, slot_idx: int) -> String:
+	if inv == null or slot_idx < 0 or slot_idx >= inv.slots.size():
+		return "背包里没有这一格"
+	var s: Variant = inv.slots[slot_idx]
+	if not (s is Dictionary):
+		return "背包里没有这一格"
+	var id := str((s as Dictionary).get("item_id", ""))
+	var slot := slot_for(id)
+	if slot == "":
+		return "这件不能装备"
+	var taken: Variant = inv.take_slot(slot_idx)
 	if taken == null:
 		return "背包里没有这件"
 	var new_gear: Dictionary = {}
@@ -151,6 +171,50 @@ func equip(inv: Inventory, id: String) -> String:
 	else:
 		gear[slot] = new_gear
 	return ""
+
+
+## 自动作战用：在背包里找一件**比身上同槽这件评分更高**的装备。
+## 返回背包槽位下标（-1 = 没有更好的）。
+##
+## 判据 `GearGen.score_of`（基础分 × 品质系数 × 词条数加成）。
+## ⭐ 只看**带 gear** 的装备：无品质系统的老档 / 普通货一律返回 -1 ——
+##    自动作战**不会偷偷替玩家换掉他自己的配装**（行为与 2026-10-16 之前一致）。
+## ⚠️ 空槽按 0 分算，所以"捡到第一件带词条的枪"也会被换上。
+func best_upgrade_slot(inv: Inventory, rarities: Array = []) -> int:
+	if inv == null:
+		return -1
+	var best_idx := -1
+	var best_gain := 0
+	for i in inv.slots.size():
+		var s: Variant = inv.slots[i]
+		if not (s is Dictionary):
+			continue
+		var sd: Dictionary = s as Dictionary
+		if not sd.has("gear"):
+			continue
+		var id := str(sd.get("item_id", ""))
+		var slot := slot_for(id)
+		if slot == "":
+			continue
+		var gain: int = _score_of(sd.get("gear", {}), id, rarities) \
+			- _score_of(gear.get(slot, {}), id_in(slot), rarities)
+		if gain > best_gain:
+			best_gain = gain
+			best_idx = i
+	return best_idx
+
+
+## 一件装备（或身上某槽）的评分；空 id / 无 gear 记 0 分
+func _score_of(g: Variant, id: String, rarities: Array) -> int:
+	if id == "" or not (g is Dictionary):
+		return 0
+	var gd: Dictionary = g as Dictionary
+	if gd.is_empty():
+		return 0
+	var r := GearGen.find_rarity(rarities, str(gd.get("rarity", "")))
+	var d: ItemDef = _items.get(id)
+	var cat := str(d.category) if d != null else "?"
+	return GearGen.score_of(gd, cat, r)
 
 
 ## 脱下并放回背包。成功返回 ""，否则返回中文原因。

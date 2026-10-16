@@ -399,6 +399,16 @@ func equip_from_carry(id: String) -> String:
 	return equipment.equip(carry, id)
 
 
+## 局内从**指定背包槽位**穿（同 id 多件、品质不同时必须按下标穿，
+## 否则 first_slot_of 会穿上靠前那格，可能不是你要的那件）。
+func equip_slot(slot_idx: int) -> String:
+	if equipment == null:
+		return "本局没有装备系统"
+	if phase != Phase.ACTIVE:
+		return "本局已经结束了"
+	return equipment.equip_at(carry, slot_idx)
+
+
 ## 局内脱下装备（放回随身背包）。返回失败原因（空串 = 成功）。
 func unequip_from_carry(slot: String) -> String:
 	if equipment == null:
