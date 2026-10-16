@@ -479,7 +479,9 @@ func _setup_sim() -> void:
 	raid.load_map(gen)
 	# 肉鸽：把本局变体挂进 session（HUD / 容器抽取的唯一真源）
 	raid.run_mods = run_mods
-	raid.start(240.0)
+	# ⭐ 地图级时限（可玩性 Step1）：三张图面积差一倍，统一时限等于
+	#   小图白给时间、大图来不及搜。0 = 地图没配，走 RaidSession 默认。
+	raid.start(0.0 if theme == null else theme.raid_seconds)
 
 	# ⭐ 装备系统：把藏身处的**配装**接进本局。
 	#    这一步让"死亡掉装备"真正有承担物：

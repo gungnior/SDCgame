@@ -26,6 +26,10 @@ var tile_theme: String = "concrete"
 var room_weights: Dictionary = {}    ## room_def_id -> weight
 var enemy_weights: Dictionary = {}   ## enemy_id    -> weight
 var stage: String = "C"
+## 本图一局的时限（秒）。0 或负 = 用 RaidSession 的默认值。
+## ⭐ 为什么要按图给：三张图面积差一倍（56² vs 72²），统一时限等于
+##   小图白给时间、大图来不及搜 —— 见 specs/game-design-doc.md「时间压力」。
+var raid_seconds: float = 0.0
 
 
 static func from_dict(d: Dictionary) -> MapThemeDef:
@@ -40,6 +44,7 @@ static func from_dict(d: Dictionary) -> MapThemeDef:
 	o.room_weights = (d.get("room_weights", {}) as Dictionary).duplicate()
 	o.enemy_weights = (d.get("enemy_weights", {}) as Dictionary).duplicate()
 	o.stage = str(d.get("stage", "C"))
+	o.raid_seconds = float(d.get("raid_seconds", 0.0))
 	return o
 
 
@@ -104,6 +109,7 @@ func clone() -> MapThemeDef:
 	o.room_weights = room_weights.duplicate()
 	o.enemy_weights = enemy_weights.duplicate()
 	o.stage = stage
+	o.raid_seconds = raid_seconds
 	return o
 
 

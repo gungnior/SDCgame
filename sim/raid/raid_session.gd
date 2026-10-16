@@ -55,10 +55,18 @@ var phase: int = Phase.PREP
 var time_left: float = DEFAULT_RAID_SECONDS
 var raid_seconds: float = DEFAULT_RAID_SECONDS
 
-## 撤离点（逻辑格坐标的浮点中心）
+## 撤离点（逻辑格坐标的浮点中心）。load_map 后按「离出生点由近到远」排序。
 var extract_points: Array[Vector2] = []
 var extract_progress: float = 0.0
 var extract_radius: float = 1.5            ## 距离撤离点多少格内算"在撤离"
+
+## ⭐ 撤离点关闭时间窗（可玩性 Step1，2026-10-16）
+## 每个元素 = 该撤离点在「本局已过去 %」时关闭；0 = 常开。
+## 数组为空 = 全部常开（老调用方 / 只有 1 个撤离点的图，行为与改造前逐字一致）。
+## 设计意图：最近的撤离点最先关闭 —— 「多摸一个箱子」的代价是「待会儿要走更远」，
+## 把搜打撤的灵魂抉择（贪 or 撤）真正做出来。最后一个撤离点**永不关闭**（保底，
+## 否则玩家必死，那是挫败不是张力）。
+var extract_close_ratios: Array[float] = []
 
 ## 肉鸽：本局生效的规则变体（2026-10-16）。由 view 层 roll 后注入；
 ## null = 无变体（老路径/单测直接构造 session 时）。
@@ -169,16 +177,50 @@ var heal_speed: float = 1.0
 func load_map(map: MapGenerator) -> void:
 	_map = map
 	extract_points.clear()
+	extract_close_ratios.clear()
 	if map == null:
 		return
+
+	# 出生点：用来给撤离点排「由近到远」的顺序
+	var spawn := Vector2.ZERO
+	var has_spawn := false
+	for r in map.graph.rooms:
+		if r.room_type == "spawn":
+			spawn = Ballistics.cell_center(r.center)
+			has_spawn = true
+			break
+
+	var pts: Array[Dictionary] = []
 	for r in map.extract_rooms():
-		extract_points.append(Ballistics.cell_center(r.center))
+		var c: Vector2 = Ballistics.cell_center(r.center)
+		pts.append({"pos": c, "d": (c.distance_to(spawn) if has_spawn else 0.0)})
+	pts.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a["d"]) < float(b["d"]))
+	for p in pts:
+		extract_points.append(p["pos"] as Vector2)
+
+	_assign_extract_windows()
+
+
+## ⭐ 撤离点关闭时间窗：最近的先关，最后一个保底常开。
+## 少于 2 个撤离点时不做（无从取舍，硬关只会变成必死）。
+func _assign_extract_windows() -> void:
+	extract_close_ratios.clear()
+	var n := extract_points.size()
+	if n <= 1:
+		return
+	for k in range(n - 1):
+		extract_close_ratios.append(clampf(0.35 + float(k) * 0.20, 0.0, 0.85))
+	extract_close_ratios.append(0.0)      ## 最远那个：永不关闭（保底）
 
 
 ## 开始一局
 func start(seconds: float = DEFAULT_RAID_SECONDS) -> void:
-	raid_seconds = seconds
-	time_left = seconds
+	# 0 / 负数 = 走默认。⚠️ 别小看这行：地图没配 raid_seconds 时，
+	# 直接把 0 灌进 time_left 会「开局即判超时死亡」，是最难查的一类坑。
+	var s := seconds if seconds > 0.0 else DEFAULT_RAID_SECONDS
+	raid_seconds = s
+	time_left = s
 	extract_progress = 0.0
 	phase = Phase.ACTIVE
 	containers_looted = 0
@@ -214,8 +256,10 @@ func tick(delta: float, player_pos: Vector2) -> void:
 
 	# 撤离判定：站在撤离点范围内需要持续待够 EXTRACT_COUNTDOWN 秒
 	var inside := false
-	for p in extract_points:
-		if player_pos.distance_to(p) <= extract_radius:
+	for i in range(extract_points.size()):
+		if not is_extract_active(i):
+			continue
+		if player_pos.distance_to(extract_points[i]) <= extract_radius:
 			inside = true
 			break
 	if inside:
@@ -228,6 +272,42 @@ func tick(delta: float, player_pos: Vector2) -> void:
 
 func extract_progress_ratio() -> float:
 	return clampf(extract_progress / EXTRACT_COUNTDOWN, 0.0, 1.0)
+
+
+## 第 i 个撤离点现在还开着吗？关闭比例 0（或没有窗口数据）= 常开。
+func is_extract_active(i: int) -> bool:
+	if i < 0 or i >= extract_points.size():
+		return false
+	if i >= extract_close_ratios.size():
+		return true
+	var ratio := float(extract_close_ratios[i])
+	if ratio <= 0.0:
+		return true
+	return (raid_seconds - time_left) < raid_seconds * ratio
+
+
+## 还开着的撤离点有几个
+func active_extract_count() -> int:
+	var n := 0
+	for i in range(extract_points.size()):
+		if is_extract_active(i):
+			n += 1
+	return n
+
+
+## 距离「下一个撤离点关闭」还有多少秒（没有会关闭的点 = -1，供 HUD 预警）
+func next_extract_close_in() -> float:
+	var best := -1.0
+	for i in range(extract_close_ratios.size()):
+		var ratio := float(extract_close_ratios[i])
+		if ratio <= 0.0:
+			continue
+		var left := raid_seconds * ratio - (raid_seconds - time_left)
+		if left <= 0.0:
+			continue
+		if best < 0.0 or left < best:
+			best = left
+	return best
 
 
 ## 搜刮一个容器。table 来自房间类型对应的 loot_table。

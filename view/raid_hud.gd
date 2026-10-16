@@ -149,6 +149,14 @@ func refresh() -> void:
 		lines.append("装备 %s" % eqt)
 	lines.append("剩余 %ds    撤离 %.0f%%" % [
 		int(raid.time_left), raid.extract_progress_ratio() * 100.0])
+	# ⭐ 撤离点关闭预警（可玩性 Step1）：不提前告诉玩家「有个点要关了」，
+	#   他只会觉得撤离点莫名其妙消失 —— 那是 bug 感，不是张力。
+	var ex_left: float = raid.next_extract_close_in()
+	if ex_left > 0.0:
+		lines.append("撤离点 %d 个可用    %.0fs 后关闭一个" % [
+			raid.active_extract_count(), ex_left])
+	elif raid.active_extract_count() < raid.extract_points.size():
+		lines.append("撤离点仅剩 %d 个（最近的已关闭）" % raid.active_extract_count())
 	lines.append("携带 %s" % raid.carry.summary())
 	lines.append("击杀 %d   受伤 %d   治疗 %s" % [
 		raid.enemies_killed, vitals.total_damage_taken, scene.medical.status_text()])

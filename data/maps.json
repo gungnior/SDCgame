@@ -19,7 +19,8 @@
       "enemy_raider": 1
     },
     "desc": "植被茂密的荒野，感染体多、武装分子少",
-    "stage": "C"
+    "stage": "C",
+    "raid_seconds": 180.0
   },
   {
     "id": "map_urban",
@@ -42,7 +43,8 @@
       "enemy_marksman": 1
     },
     "desc": "废弃街区，宿舍与仓库密集，拾荒者与劫掠者混编",
-    "stage": "C"
+    "stage": "C",
+    "raid_seconds": 240.0
   },
   {
     "id": "map_military",
@@ -66,6 +68,7 @@
       "enemy_brute": 2
     },
     "desc": "守备森严的基地，军械库与实验室，重装单位出没",
-    "stage": "C"
+    "stage": "C",
+    "raid_seconds": 300.0
   }
 ]
