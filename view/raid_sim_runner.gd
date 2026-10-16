@@ -63,7 +63,11 @@ func tick_player(delta: float) -> void:
 		if autopilot_on and scene.autopilot != null:
 			_tick_autopilot(delta)
 		if scene._move_input != Vector2.ZERO:
-			var step = scene._move_input.normalized() * scene.PLAYER_SPEED * scene.vitals.speed_multiplier(scene.raid.carry.weight_ratio()) * delta
+			# ⭐ 全境2化 P1：装备移速词条乘区（身上装备 affix_pct("move_speed")）
+			var gear_speed_mul := 1.0
+			if scene.raid.equipment != null:
+				gear_speed_mul = 1.0 + scene.raid.equipment.affix_pct("move_speed")
+			var step = scene._move_input.normalized() * scene.PLAYER_SPEED * gear_speed_mul * scene.vitals.speed_multiplier(scene.raid.carry.weight_ratio()) * delta
 			# 分轴碰撞：哪个轴撞墙就只撤销那个轴（闪避走的是同一个函数）
 			_apply_player_step(step)
 			scene.player_facing = scene._move_input.normalized()

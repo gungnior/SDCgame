@@ -294,7 +294,15 @@ func _weapon_wear_factor() -> float:
 func _player_armor() -> int:
 	if raid == null or raid.equipment == null:
 		return 0
-	return raid.equipment.worn_armor()
+	# ⭐ 全境2化 P1：effective_armor = 基础护甲 + 护甲词条 flat 加成
+	return raid.equipment.effective_armor()
+
+
+## 生命上限的词条加成总和（0.08 = +8%）。无装备/无词条表时为 0。
+func _player_hp_bonus() -> float:
+	if raid == null or raid.equipment == null:
+		return 0.0
+	return raid.equipment.affix_pct("hp")
 
 
 ## 玩家受击结算（**唯一的一处护甲逻辑**）。返回【实际进血量的伤害】。
@@ -402,7 +410,7 @@ func _setup_sim() -> void:
 		Game.ensure_loaded()
 		hideout = Game.hideout
 	if hideout == null:
-		hideout = Hideout.new(reg.items, 3000, reg.weapons, reg.attachments)
+		hideout = Hideout.new(reg.items, 3000, reg.weapons, reg.attachments, reg.affix_map())
 		hideout.wallet += 5000
 
 	# ⚠️ 把藏身处的升级效果传进本局 —— 否则升级花了钱但毫无作用。
@@ -422,7 +430,9 @@ func _setup_sim() -> void:
 			if bp.carry_weight > 0.0:
 				mods["carry_weight_limit"] = maxf(float(mods.get("carry_weight_limit", 0.0)), bp.carry_weight)
 
-	raid = RaidSession.new(reg.items, _rng, hideout.stash, mods, reg.missions)
+	# ⭐ 全境2化 P1：品质/词条表注入 session（容器与尸体掉落 roll 用）
+	var gear_defs := {"rarities": reg.gear_rarities, "affixes": reg.gear_affixes}
+	raid = RaidSession.new(reg.items, _rng, hideout.stash, mods, reg.missions, gear_defs)
 	raid.load_map(gen)
 	# 肉鸽：把本局变体挂进 session（HUD / 容器抽取的唯一真源）
 	raid.run_mods = run_mods
@@ -443,7 +453,8 @@ func _setup_sim() -> void:
 
 	vitals = Vitals.new()
 	# 护甲来自【身上装备】：没穿护甲就是 0（真机反馈 #3）。
-	vitals.reset(100, _player_armor())
+	# ⭐ 全境2化 P1：生命上限吃装备词条加成（基础 100 × (1 + hp%)）
+	vitals.reset(int(round(100.0 * (1.0 + _player_hp_bonus()))), _player_armor())
 	medical = MedicalSystem.new()
 	# 藏身处「战地急救」升级：治疗更快
 	medical.set_speed_multiplier(raid.heal_speed)
@@ -966,8 +977,13 @@ func _drop_loot(a: EnemyAgent) -> void:
 	if table == null:
 		return
 	var drops := LootRoller.roll_container(table, _rng, 2)
+	# ⭐ 全境2化 P1：装备类 roll 品质词条后散落在地（捡起即带词条）
+	raid.roll_gear_for_drops(drops)
 	for d in drops:
-		drops_on_ground.append({"pos": a.pos, "item_id": d["item_id"], "count": int(d["count"])})
+		var row := {"pos": a.pos, "item_id": d["item_id"], "count": int(d["count"])}
+		if d.has("gear"):
+			row["gear"] = d["gear"]
+		drops_on_ground.append(row)
 
 
 ## 敌人死亡 -> 生成一具【可搜索的尸体容器】（真机反馈 #6）
@@ -987,6 +1003,10 @@ func _spawn_corpse(a: EnemyAgent) -> void:
 		drops.append({"item_id": a.def.armor_id, "count": 1})
 	if a.def.helmet_id != "":
 		drops.append({"item_id": a.def.helmet_id, "count": 1})
+	# ⭐ 全境2化 P1：敌人穿戴的枪/甲/头盔也 roll 品质词条 ——
+	#    "打敌人换更好的装备"的差异就来自这里（普通兵多掉普通货，
+	 #    高品质权重已在 data/gear_rarity.json 的 drop_weight 控制）。
+	raid.roll_gear_for_drops(drops)
 	var cid := raid.add_corpse(a.pos, a.def.id, drops)
 	if Tel != null:
 		var total := 0
