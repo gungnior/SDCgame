@@ -266,6 +266,12 @@ func _spawn_containers() -> void:
 			var drops := LootRoller.roll_for_room(table, _rng, r.depth, rolls)
 			if drops.is_empty():
 				continue
+			# ⭐ 全境2化 P2（2026-10-16 补断点）：容器里的装备**也要** roll 品质词条。
+			#   体检发现生产路径（本函数）根本没调 roll_gear_for_drops ——
+			#   之前只有尸体掉落和 loot_container() 会 roll，而后者只在测试里被调用。
+			#   ⚠️ 这会让本局 rng 消耗序列变长（同 seed 的世界不再与旧版本一致）→
+			#      像素基线 ④ 若需要重设，请在提交信息里说明理由（协作规则第 2 条）。
+			raid.roll_gear_for_drops(drops)
 			raid.add_container(def, Ballistics.cell_center(cs.get("pos", r.center)), drops)
 
 

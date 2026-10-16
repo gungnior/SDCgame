@@ -486,8 +486,14 @@ func take_from_corpse(idx: int, item_id: String, count: int) -> int:
 			continue
 		var have := int(d["count"])
 		var want := mini(have, count)
-		var leftover := carry.add(item_id, want)
-		var taken := want - leftover
+		# ⭐ 全境2化 P2：带 gear 的走 add_with_gear，否则品质词条被洗掉
+		var taken := 0
+		if d.has("gear"):
+			if carry.add_with_gear(item_id, (d["gear"] as Dictionary)) == 0:
+				taken = 1
+		else:
+			var leftover := carry.add(item_id, want)
+			taken = want - leftover
 		d["count"] = have - taken
 		if int(d["count"]) <= 0:
 			drops.remove_at(i)
@@ -507,9 +513,16 @@ func take_all_from_corpse(idx: int) -> Array:
 		before_count += int(d["count"])
 	var rest: Array = []
 	for d in drops:
-		var leftover := carry.add(str(d["item_id"]), int(d["count"]))
-		if leftover > 0:
-			rest.append({"item_id": str(d["item_id"]), "count": leftover})
+		var iid := str(d["item_id"])
+		# ⭐ 全境2化 P2：同上，gear 要跟着走；塞不下时连 gear 一起留在尸体里
+		if d.has("gear"):
+			var failed := carry.add_with_gear(iid, (d["gear"] as Dictionary))
+			if failed > 0:
+				rest.append({"item_id": iid, "count": int(d["count"]), "gear": d["gear"]})
+		else:
+			var leftover := carry.add(iid, int(d["count"]))
+			if leftover > 0:
+				rest.append({"item_id": iid, "count": leftover})
 	corpses[idx]["drops"] = rest.duplicate()
 	var after_count := 0
 	for d in rest:
@@ -538,7 +551,11 @@ func add_container(def: ContainerDef, pos: Vector2, drops: Array) -> int:
 	c.def = def
 	c.pos = pos
 	for d in drops:
-		c.drops.append({"item_id": str(d.get("item_id", "")), "count": int(d.get("count", 0))})
+		var row: Dictionary = {"item_id": str(d.get("item_id", "")), "count": int(d.get("count", 0))}
+		# ⭐ 全境2化 P2：带品质词条的掉落要原样带进容器（这里丢了就再也捡不到）
+		if d.has("gear"):
+			row["gear"] = d["gear"]
+		c.drops.append(row)
 	containers.append(c)
 	return c.id
 

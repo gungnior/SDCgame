@@ -21,6 +21,37 @@
 
 ## 进行中
 
+### 🔄 装备闭环补齐四步（2026-10-16 · 拥有者点名四项全做）
+
+**负责人**：@WorkBuddy · **状态**：进行中（Phase A 起步）
+
+**背景**：拥有者问「自动战斗推进/掉落后怎么装备/敌人性能配合/辅助瞄准挂钩」四问，
+读代码体检发现：装备系统**"穿上之后"是通的（辅助瞄准✅已挂钩），"掉落到捡起"是断的**。
+断点清单（已核实带行号）：
+① `_spawn_containers`（`raid_scene.gd:266`）只调 `roll_for_room`，**容器从不 roll 词条**；
+   `add_container`（`raid_session.gd:540`）只复制 item_id/count；
+② `take_from_corpse`/`take_all_from_corpse`（`raid_session.gd:489/510`）与
+   `ContainerInstance.take/take_all`（`container.gd:59/74`）用 `inv.add()`，**搜尸洗掉 gear**；
+③ `ui/` 全局无 gear/品质/词条显示代码 → **玩家看不到，无法决策换不换**；
+④ 敌人活的时是硬编码 `weapon_pistol`（`raid_scene.gd:514/533`），`enemies.json` 的
+   `weapon_id` 只用于死亡掉落 → **敌人不吃装备系统，玩家单方面变强，门 1「难度偏低」被放大**；
+⑤ `player_autopilot.gd` grep gear/equipment 零命中 → **自动战斗不认识装备**。
+（`_drop_loot` 是死代码：有 roll gear 但全仓无调用点，尸体机制已取代。）
+
+**分步计划（每步单独跑验收，不一次堆完）**：
+- **Phase A（sim）**：四处取物改 gear-aware + 容器补 roll → 硬回归单测钉死
+- **Phase B（UI）**：背包/配装/搜刮界面显示品质颜色 + 词条行 + 评分
+- **Phase C（敌人）**：敌人穿戴装备 roll 品质词条并作用于战斗性能（倍率温和默认，待平衡专家定夺）
+- **Phase D（自动战斗）**：autopilot 搜刮后自动换上评分/品质更高的同类装备
+
+**写入范围**：`sim/items/container.gd`、`sim/raid/raid_session.gd`、
+`view/raid_scene.gd`（单一作者）、`ui/inventory_panel.gd`、`ui/loadout_panel.gd`、
+`view/raid_loot_actions.gd`、`sim/ai/enemy_agent.gd`、**不碰**（Phase A 时）、
+`test/suites/s29_gear_flow.gd`（新）、本文件、`specs/session-handoff.md`。
+**不碰**：`sim/mapgen/`、数值拍板（倍率一律标"待平衡专家定夺"）、队友的 `sim/ai/` 之外的协调者。
+
+---
+
 ### ✅ 全境2化装备 Phase 1：品质 + 评分 + 词条进公式 — 已完成 2026-10-16（拥有者拍板转向）
 
 **负责人**：@WorkBuddy · **`verify_all.ps1 -Fast` 退出码 0**（单元 **3091/0** + 集成 **105/0** + 数据 0 错 0 警）
