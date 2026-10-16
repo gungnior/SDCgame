@@ -21,27 +21,37 @@
 
 ## 进行中
 
-### 🔄 可玩性四步（2026-10-16 · 拥有者「提高可玩性」，四项全做，按依赖分步）
+### ✅ 可玩性四步 + 平衡（2026-10-16 · 拥有者「提高可玩性」+「做平衡」，全部完成）
 
-**负责人**：@WorkBuddy · **状态**：进行中（Step1 已验收，Step2 进行中）
+**负责人**：@WorkBuddy · **`verify_all.ps1 -Fast` 退出码 0**（单元 **3194/0** + 集成 **105/0** + 数据 0 错 0 警）
 
-**写入范围**（只动这些，别越界）：
-- `sim/defs/map_theme_def.gd`（+raid_seconds）· `data/maps.json`（三图时限）
-- `sim/raid/raid_session.gd`（撤离窗口 / 搜刮耗时 / 撤离守卫 / 时限回退）
-- `sim/items/container.gd` · `sim/defs/container_def.gd`（search_time 接线）
-- `view/raid_scene.gd` · `view/raid_hud.gd` · `view/raid_loot_actions.gd` · `view/raid_sim_runner.gd`
-- `test/suites/s30_playability.gd`（新）· `data/SCHEMA.md` · `specs/*`
+**四步提交链**（每步单独验收再进下一步）：
+`b82622c`（① 时间压力）→ `181bba0`（② 搜刮代价）→ `2cd4c12`（③ 撤离守卫）→
+`ca7becb`（④ 敌人威胁机制）→ `e5ea34f`（平衡：威胁带调参 + TTK 锁）。
 
-**四步**（每步单独验收再进下一步）：
-1. ✅ **时间压力真正生效**：地图级时限（森林 180 / 城区 240 / 军事基地 300）+ 撤离点分批关闭
-   （最近的先关、最远保底常开）—— 让「贪 or 撤」成为真抉择
-2. 🔄 **搜刮有代价**：`ContainerDef.search_time` **字段已存在但全仓没人用**（死字段），
-   把它接上：搜刮耗时 + 期间发噪音引敌
-3. ⬜ **撤离不是免费的**：撤离点按价值/时段分配守卫概率
-4. ⬜ **敌人威胁上调**：只搭机制，倍率标「待平衡专家定夺」，不拍板难度
+**四步结果**：
+1. ✅ **时间压力真正生效**：地图级时限（森林 180 / 城区 240 / 军事基地 300）+ 撤离点按离出生点
+   由近到远排序、最近的先关、最远保底常开（`raid_seconds` 写入 `maps.json` + `MapThemeDef` +
+   `clone()` 同步；`RaidSession.start(0)` 安全回退默认；HUD 预警「Xs 后关闭一个」）。
+2. ✅ **搜刮有代价**：`ContainerDef.search_time` 死字段接上 —— `RaidSession` 搜刮推进、
+   离开 2.5 格中断但进度保留、未解锁拿不到；`raid_loot_actions`/`raid_sim_runner` 接线、
+   搜刮发噪音（响度=开枪一半）；HUD 显示「搜刮中 XX%」。
+3. ✅ **撤离不是免费的**：`RaidSession.extract_guard_count` 守卫规则（最近 0 / 中间 1 / 保底 2，
+   仅 1 个点返回 0）；`raid_scene._spawn_extract_guards` 按规则生成（`MAX_TEST_ENEMIES>0` 跳过）。
+4. ✅ **敌人威胁上调（机制 + 平衡）**：`EnemyAgent` 惊动后反应更快（`ALERTED_REACTION_MUL=0.45`）
+   + 命中修正（`AIM_SPREAD_BONUS_DEG=1.5`）；平衡轮把基础敌人倍率约翻倍，击杀无甲玩家理想值
+   全部落入 2.7~5.0s 威胁带（拾荒者 7.5s→3.6s），全敌人在 [2.0,6.0]s；`s30` 新增「平衡锁」
+   钉死不许退化。
+
+**仍挂着的（诚实记录）**：
+- 门 1 另一卡点**「死亡痛感」**（`death_policy` 三旋钮全 0=全掉、无保险 UI）仍是**设计待拍板**，
+  本轮没替你拍板；
+- 真机没跑：所有数值/机制的真手感（敌人威胁、搜刮风险窗口、撤离守卫密度）都要人眼/真机确认；
+- ⚠️ `sim_raid.gd` 端到端走 `raid.loot_container()` 绕过容器系统，**不能当改动对照**，
+  真实节奏只能真机验。
 
 **偏离记录**：本轮又是 roadmap §5「门 1 不过不加系统」的偏离，但这次改的**正是门 1 本身**
-（难度/取舍），拥有者点名四项全做。两缺口里「难度平衡」被本轮正面处理。
+（难度/取舍），拥有者点名四项全做 + 给平衡最大权限。
 
 ---
 

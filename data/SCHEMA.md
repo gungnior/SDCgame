@@ -309,6 +309,7 @@ room_type.containers[]  →  container.id  →  container.loot_table_id  →  it
 | 敌人种类 | `enemy_weights` | `{enemy_id: weight}`，**这个主题刷哪些敌人** |
 | 敌人密度 | `enemy_density` | 敌人总数 ≈ `房间数 × enemy_density`（再按房间预算分配） |
 | 白模色调 | `tile_theme` | `dirt` / `concrete` / `metal`（白模阶段用色调区分主题，不写死美术） |
+| 撤离时限 | `raid_seconds` | 一局总时长（秒）。**面积越大时限越长**（小图不再白给时间，见下方约束） |
 
 **数组**，每项：
 
@@ -321,9 +322,12 @@ room_type.containers[]  →  container.id  →  container.loot_table_id  →  it
 | `room_weights` | object | ✅ | 非空；键必须存在于 `rooms.json`（**交叉引用校验**） |
 | `enemy_weights` | object | ✅ | 非空；键必须存在于 `enemies.json`（**交叉引用校验**） |
 | `stage` | string | ⬜ | 默认 `C` |
+| `raid_seconds` | number | ✅ | >0；一局总时限（秒）。三图梯度：`map_forest` 180 / `map_urban` 240 / `map_military` 300（城区=旧硬编码基线）。⚠️ 面积越大时限越长，否则小图白给时间（可玩性 Step1，2026-10-16） |
 
-**当前 3 个主题**：`map_forest` 森林（34×34，感染体为主）、
-`map_urban` 城区（40×40，拾荒者/劫掠者混编）、`map_military` 军事基地（44×44，重装单位）。
+**当前 3 个主题**：`map_forest` 森林（56×56，感染体为主）、
+`map_urban` 城区（64×64，拾荒者/劫掠者混编）、`map_military` 军事基地（72×72，重装单位）。
+
+> ⚠️ 旧文档写的 34×34/40×40/44×44 是 B 阶段初版尺寸，**已过期**（当前为 56/64/72，见 `data/maps.json`）。
 
 ---
 
