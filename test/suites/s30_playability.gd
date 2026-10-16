@@ -21,6 +21,7 @@ func register() -> void:
 	_suite("搜刮有代价：翻够时间才拿得到东西", _test_search_costs_time)
 	_suite("搜刮中走开 → 中断但进度保留", _test_search_interrupted_keeps_progress)
 	_suite("撤离不是免费的：守卫规则（保底点最险）", _test_extract_guard_count)
+	_suite("敌人威胁：惊动后反应更快 + 命中修正", _test_enemy_threat_up)
 
 
 var _reg: DataRegistry = null
@@ -219,3 +220,40 @@ func _test_extract_guard_count() -> void:
 	# ⭐ 只有一个撤离点时绝不设守：无从取舍，硬守 = 必死（那是挫败不是张力）
 	_check_eq(RaidSession.extract_guard_count(0, 1), 0, "只有一个撤离点 → 不设守")
 	_check_eq(RaidSession.extract_guard_count(0, 0), 0, "没有撤离点 → 不设守")
+
+
+func _test_enemy_threat_up() -> void:
+	var reg := _fresh_reg()
+	var d: EnemyDef = reg.get_enemy("enemy_scav")
+	_check(d != null, "取到拾荒者定义")
+
+	# ① 惊动后反应更快 —— 打第一枪要付出"此后不再白嫖反应窗口"的代价
+	var sq := Squad.new(1)
+	var a := EnemyAgent.new(1, d, Vector2.ZERO)
+	a.squad = sq
+	_check_eq(a.reaction_mul(), 1.0, "平静时反应倍率 1.0（第一次撞见要愣一下 = 公平感）")
+	sq.report_contact(Vector2(1.0, 1.0), 1.0)
+	_check(a.reaction_mul() < 1.0, "有接触后反应更快（倍率 %.2f）" % a.reaction_mul())
+	_check(a.reaction_mul() > 0.0, "倍率仍为正 —— 不是瞬发，仍留反应余地")
+
+	# ② 命中修正：同样距离下，修正后的命中次数不低于修正前
+	_check(EnemyAgent.AIM_SPREAD_BONUS_DEG > 0.0,
+			"命中修正为正值（%.1f 度）" % EnemyAgent.AIM_SPREAD_BONUS_DEG)
+	var w: WeaponDef = reg.get_weapon("weapon_pistol")
+	_check(w != null, "取到手枪定义")
+	if w == null:
+		return
+	var rng := SimRng.new(11)
+	var hits_plain := 0
+	var hits_bonus := 0
+	var n := 400
+	for _i in range(n):
+		var r1: Dictionary = DamageModel.resolve_hit(w, 14.0, 0.0, rng)
+		if float(r1.get("damage", 0.0)) > 0.0:
+			hits_plain += 1
+		var r2: Dictionary = DamageModel.resolve_hit(w, 14.0,
+				-EnemyAgent.AIM_SPREAD_BONUS_DEG, rng)
+		if float(r2.get("damage", 0.0)) > 0.0:
+			hits_bonus += 1
+	_check(hits_bonus >= hits_plain,
+			"命中修正后不低于修正前（%d vs %d / %d 次 @14m）" % [hits_bonus, hits_plain, n])

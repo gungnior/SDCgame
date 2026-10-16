@@ -66,6 +66,17 @@ const RANGED_PREFERRED_MAX := 9.0
 const SQUAD_ALERT_DURATION := 7.0
 const SEARCH_DURATION := 8.0
 
+## ⭐ 可玩性 Step4（2026-10-16）：**已经惊动过的敌人反应更快**。
+## 设计意图：第一次撞见要"愣一下"（那是公平感），但既然已经交火或听到动静，
+## 后面就不该每次都重新愣 —— 否则玩家打完一轮就能白嫖一整个反应窗口，
+## 潜行与莽撞在代价上毫无区别。
+## ⚠️ 倍率**待平衡专家定夺**，本轮只搭机制。
+const ALERTED_REACTION_MUL := 0.45
+## 敌人命中修正（度）：从散布里扣掉，缓解"远距离根本打不中人"。
+## 门 1 硬证据：拾荒者杀玩家要 7.5 秒，玩家杀拾荒者只要 0.3 秒（碾压约 25 倍）。
+## ⚠️ 数值**待平衡专家定夺**。
+const AIM_SPREAD_BONUS_DEG := 1.5
+
 var id: int = 0
 var def: EnemyDef = null
 var pos: Vector2 = Vector2.ZERO
@@ -184,7 +195,7 @@ func tick(delta: float, ctx: Dictionary) -> void:
 		target_pos = sp
 		if state != State.COMBAT:
 			# 刚发现：进入反应延迟（reaction_time 决定公平感）
-			reaction_timer = def.reaction_time
+			reaction_timer = def.reaction_time * reaction_mul()
 			state = State.COMBAT
 			if squad != null:
 				squad.report_contact(sp, now)
@@ -405,6 +416,13 @@ func _combat(delta: float, targets: Array, rng: SimRng, seen: Dictionary, grid: 
 			_deal_damage_to_nearest(targets, def.damage)
 
 
+## ⭐ 已被惊动时反应更快（可玩性 Step4）。ALERTED_REACTION_MUL 待平衡专家定夺。
+func reaction_mul() -> float:
+	if squad != null and (squad.has_contact or squad.is_alerted()):
+		return ALERTED_REACTION_MUL
+	return 1.0
+
+
 func _fire_at(targets: Array, dist: float, rng: SimRng, ctx: Dictionary,
 		grid: LogicalGrid) -> void:
 	if weapon == null or not weapon.can_fire():
@@ -427,7 +445,9 @@ func _fire_at(targets: Array, dist: float, rng: SimRng, ctx: Dictionary,
 	attack_cooldown = def.attack_cooldown
 
 	# 伤害与部位仍走 DamageModel 的概率部位模型（T-52）
-	var extra := weapon.current_spread_deg() - weapon.def.spread_deg
+	# ⭐ 敌人命中修正（可玩性 Step4）：散布减去 AIM_SPREAD_BONUS_DEG。
+	#    远距离散布是敌人"打不中人"的主因 —— 门 1 实测拾荒者杀玩家要 7.5 秒。
+	var extra := weapon.current_spread_deg() - weapon.def.spread_deg - AIM_SPREAD_BONUS_DEG
 	var hit := DamageModel.resolve_hit(weapon.def, dist, extra, rng)
 	var damage := int(hit["damage"])
 
