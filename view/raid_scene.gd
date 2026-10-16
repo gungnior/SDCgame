@@ -584,10 +584,71 @@ func _setup_sim() -> void:
 				squad.add_member(a2)
 				agents.append(a2)
 				eid += 1
+	eid = _spawn_extract_guards(kinds, eid)
 	print("[地图] %s" % gen.summary())
 	print("[敌方] %d 名（类型池 %d：%s）%s" % [agents.size(), kinds.size(),
 		", ".join(kinds.map(func(k): return k.name)),
 		"（技术验证模式，上限 %d）" % MAX_TEST_ENEMIES if MAX_TEST_ENEMIES > 0 else ""])
+
+
+## ⭐ 撤离不是免费的（可玩性 Step3）：撤离点有人守。
+##
+## 设计要点：**保底撤离点（最远的那个）守卫最多** —— 时间过半后其他点逐个关闭，
+## 所有人都往那儿跑，那是兵家必争之地。最近的那个不设守，鼓励"见好就收、早起撤"。
+## 于是「贪」的代价从"走更远"再加一条"得打赢"。
+##
+## ⚠️ 守卫数量是**温和默认值，待平衡专家定夺** —— 本轮只搭机制，不拍板难度。
+## 规则放在 RaidSession（sim 层）以便单测，这里只负责按规则放人。
+
+## 取离这个撤离点坐标最近的撤离房间（extract_points 与 extract_rooms 顺序不同：
+## 前者在 load_map 里按离出生点重排过）
+func _room_of_extract(p: Vector2, rooms: Array) -> Room:
+	var best: Room = null
+	var best_d := 999.0
+	for r in rooms:
+		var d: float = Ballistics.cell_center(r.center).distance_to(p)
+		if d < best_d:
+			best_d = d
+			best = r
+	return best
+
+
+## 在撤离点放守卫。返回下一个可用的敌人 id。
+func _spawn_extract_guards(kinds: Array[EnemyDef], start_eid: int) -> int:
+	if MAX_TEST_ENEMIES > 0:
+		return start_eid                  ## 技术验证模式：别把敌人总数撑爆上限
+	if raid == null or gen == null:
+		return start_eid
+	var n := raid.extract_points.size()
+	if n <= 1:
+		return start_eid                  ## 只有一个撤离点时无从取舍，硬守 = 必死
+	var rooms := gen.extract_rooms()
+	if rooms.is_empty():
+		return start_eid
+	var eid := start_eid
+	var placed := 0
+	for i in range(n):
+		var want := RaidSession.extract_guard_count(i, n)
+		if want <= 0:
+			continue
+		var room: Room = _room_of_extract(raid.extract_points[i], rooms)
+		if room == null:
+			continue
+		for _k in range(want):
+			var d: EnemyDef = _pick_enemy(kinds, eid)
+			var a := EnemyAgent.new(eid, d, _enemy_spawn_point(room))
+			if d.is_ranged():
+				var wd := _enemy_weapon_def(d, room.depth, eid)
+				if wd != null:
+					a.equip(wd, 60)
+			a.facing = _rng_dir()
+			squad.add_member(a)
+			agents.append(a)
+			eid += 1
+			placed += 1
+	if placed > 0:
+		print("[撤离] %d 名守卫驻守撤离点（保底点最险）" % placed)
+	return eid
 
 
 ## 按藏身处**配装**造出玩家手里的枪。

@@ -20,6 +20,7 @@ func register() -> void:
 	_suite("时间流逝后撤离点真的关闭，且不能在那儿撤离", _test_extract_closes_over_time)
 	_suite("搜刮有代价：翻够时间才拿得到东西", _test_search_costs_time)
 	_suite("搜刮中走开 → 中断但进度保留", _test_search_interrupted_keeps_progress)
+	_suite("撤离不是免费的：守卫规则（保底点最险）", _test_extract_guard_count)
 
 
 var _reg: DataRegistry = null
@@ -205,3 +206,16 @@ func _test_search_interrupted_keeps_progress() -> void:
 	raid.begin_search(0)
 	raid.tick(cd.search_time, Vector2(5.0, 5.0))
 	_check(raid.containers[0].is_unlocked(), "回来翻够 → 解锁")
+
+
+func _test_extract_guard_count() -> void:
+	# 三个撤离点：最近的 0 守（鼓励早起撤）、中间 1、保底 2（兵家必争之地）
+	_check_eq(RaidSession.extract_guard_count(0, 3), 0, "最近的撤离点不设守")
+	_check_eq(RaidSession.extract_guard_count(1, 3), 1, "中间的 1 名守卫")
+	_check_eq(RaidSession.extract_guard_count(2, 3), 2, "保底点 2 名守卫（最险）")
+	# 两个点：第二个就是保底点
+	_check_eq(RaidSession.extract_guard_count(0, 2), 0, "两个点时：最近的不设守")
+	_check_eq(RaidSession.extract_guard_count(1, 2), 2, "两个点时：第二个是保底点")
+	# ⭐ 只有一个撤离点时绝不设守：无从取舍，硬守 = 必死（那是挫败不是张力）
+	_check_eq(RaidSession.extract_guard_count(0, 1), 0, "只有一个撤离点 → 不设守")
+	_check_eq(RaidSession.extract_guard_count(0, 0), 0, "没有撤离点 → 不设守")

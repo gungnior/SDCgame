@@ -329,8 +329,14 @@ func _verify_raid_scene(g: Node) -> void:
 		for r in gen.graph.rooms:
 			if r.room_type != "spawn":
 				expected += int(r.enemy_budget)
+	# ⭐ 撤离守卫（可玩性 Step3）是**预算之外的额外威胁** —— 撤离不该免费。
+	#    断言随之更新为「房间预算 + 撤离守卫」，仍然严格钉死总数（不多不少）。
+	var rs = scene.get("raid")
+	if rs != null:
+		for i in range(rs.extract_points.size()):
+			expected += RaidSession.extract_guard_count(i, rs.extract_points.size())
 	_ok(agents.size() == expected,
-		"敌人数量 == 各房间 enemy_budget 之和（实际 %d / 期望 %d）" % [agents.size(), expected])
+		"敌人数量 == 房间 enemy_budget 之和 + 撤离守卫（实际 %d / 期望 %d）" % [agents.size(), expected])
 	# 地图主题应当已选定（森林/城区/军事基地）
 	_ok(scene.get("theme") != null, "突袭场景选定了地图主题（%s）"
 		% ("null" if scene.get("theme") == null else scene.theme.name))

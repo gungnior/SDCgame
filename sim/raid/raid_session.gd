@@ -336,6 +336,24 @@ func active_extract_count() -> int:
 	return n
 
 
+## ⭐ 撤离点守卫数（可玩性 Step3）：撤离不该是无脑安全的行为。
+##
+## 规则：**保底撤离点（最远的那个）守卫最多** —— 时间过半后其他点逐个关闭，
+## 所有人都往那儿跑，那是兵家必争之地；最近的那个不设守，鼓励"见好就收、早起撤"。
+## 于是「贪」的代价从"待会儿走更远"再加一条"得打赢"。
+##
+## ⚠️ 数量是**温和默认值，待平衡专家定夺** —— 本轮只搭机制，不拍板难度。
+## ⚠️ 只有一个撤离点时返回 0：无从取舍，硬设守卫等于必死（那是挫败不是张力）。
+static func extract_guard_count(idx: int, total: int) -> int:
+	if total <= 1:
+		return 0
+	if idx == total - 1:
+		return 2      ## 保底点：最险
+	if idx == 0:
+		return 0      ## 最近的点：开局好走
+	return 1
+
+
 ## 距离「下一个撤离点关闭」还有多少秒（没有会关闭的点 = -1，供 HUD 预警）
 func next_extract_close_in() -> float:
 	var best := -1.0
