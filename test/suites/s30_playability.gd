@@ -22,6 +22,7 @@ func register() -> void:
 	_suite("搜刮中走开 → 中断但进度保留", _test_search_interrupted_keeps_progress)
 	_suite("撤离不是免费的：守卫规则（保底点最险）", _test_extract_guard_count)
 	_suite("敌人威胁：惊动后反应更快 + 命中修正", _test_enemy_threat_up)
+	_suite("平衡锁：敌人威胁带（击杀无甲玩家理想值）", _test_balance_enemy_threat_band)
 
 
 var _reg: DataRegistry = null
@@ -257,3 +258,42 @@ func _test_enemy_threat_up() -> void:
 			hits_bonus += 1
 	_check(hits_bonus >= hits_plain,
 			"命中修正后不低于修正前（%d vs %d / %d 次 @14m）" % [hits_bonus, hits_plain, n])
+
+
+## 平衡轮（2026-10-16 · WorkBuddy）：把「门 1 难度偏低」的硬证据变成可回归的数字。
+##
+## 旧证据：拾荒者杀无甲玩家要 7.5 秒（理想全中），玩家杀拾荒者只要 0.3 秒 —— 约 25× 不对称。
+## 本轮调参目标：把**基础敌人击杀无甲玩家的理想值**拉进 ~3-5 秒威胁带
+## （实战因弹道可闪避会更长），同时保留玩家单挑基础敌人的爽快（0.3-1s）。
+##
+## 这里锁的是"敌人不能再被削回非威胁档"：任何敌人击杀无甲玩家理想值都必须在
+## [2.0, 6.0] 秒区间内；拾荒者（品类门面、最常见的 B 档敌人）额外卡 ≤ 4.0 秒，
+## 防止它退化成"站着白给"。计算口径与 balance_report.gd ③ 完全一致：
+##   design_dps = damage / attack_cooldown；kill_player_s = 100 / design_dps（无甲）。
+func _test_balance_enemy_threat_band() -> void:
+	var reg := _fresh_reg()
+	var player_hp := 100.0
+	var min_s := 2.0
+	var max_s := 6.0
+
+	# 拾荒者：门 1 头号证据，必须被锁死在威胁带内
+	var scav: EnemyDef = reg.get_enemy("enemy_scav")
+	_check(scav != null, "取到拾荒者")
+	if scav != null:
+		var dps := float(scav.damage) / maxf(scav.attack_cooldown, 0.01)
+		var kill_s := player_hp / dps
+		_check(dps >= 26.0,
+				"拾荒者设计 DPS ≥ 26（旧 13.3）—— 不再是站着白给（实际 %.1f）" % dps)
+		_check(kill_s <= 4.0,
+				"拾荒者击杀无甲玩家理想值 ≤ 4.0s（旧 7.5s，约翻倍威胁，实际 %.1f）" % kill_s)
+		_check(kill_s >= min_s, "拾荒者仍非秒杀（%.1f ≥ %.0f）" % [kill_s, min_s])
+
+	# 全部敌人都要落进威胁带：太弱 = 非威胁，太强 = 不公平秒杀
+	for eid in reg.enemies:
+		var e: EnemyDef = reg.enemies[eid]
+		var d := float(e.damage) / maxf(e.attack_cooldown, 0.01)
+		var ks := player_hp / d
+		_check(ks >= min_s and ks <= max_s,
+				"%s 击杀无甲玩家理想值 %.1fs ∈ [%.0f, %.0f]（DPS %.1f）"
+				% [e.name, ks, min_s, max_s, d])
+
