@@ -73,15 +73,71 @@ var damage_dealt: int = 0
 var _items: Dictionary = {}
 var _rng: SimRng = null
 var _map: MapGenerator = null
+## ── 装备品质词条表（全境2化 P1，2026-10-16）──
+## 本局世界生成（容器/尸体）roll 装备品质词条用；死亡保留的品质权重也查它。
+## 空表 = 不 roll = 全普通品质（向后兼容）。
+var _rarities: Array = []
+var _affixes: Array = []
+
+
+## 本局是否启用了装备品质词条（缺表时为 false）
+func gear_enabled() -> bool:
+	return not _rarities.is_empty() and not _affixes.is_empty()
+
+
+## 对一批掉落里的【装备类】物品 roll 品质词条（全境2化 P1）。
+## 规则：
+##   · 只 roll weapon/armor/backpack 三类（数据层 helmet 同属 armor）；
+##   · 已有 gear 键的跳过（不重复 roll）；
+##   · 缺表 / rng 为空时原样返回（向后兼容）；
+##   · rng 走本局注入的流（T-32：同 seed 整局可复现）。
+## 返回同一个数组（原地改），方便链式调用。
+func roll_gear_for_drops(drops: Array) -> Array:
+	if not gear_enabled() or _rng == null:
+		return drops
+	for d in drops:
+		if not (d is Dictionary):
+			continue
+		var dd: Dictionary = d as Dictionary
+		if dd.has("gear"):
+			continue
+		var iid := str(dd.get("item_id", ""))
+		var idef: ItemDef = _items.get(iid)
+		if idef == null:
+			continue
+		if not ["weapon", "armor", "backpack"].has(idef.category):
+			continue
+		var g := GearGen.roll_gear(_rng, _rarities, _affixes, idef.category)
+		if not g.is_empty():
+			dd["gear"] = g
+	return drops
+
+
+## 死亡保留权重 = 物品价值 × 品质权重（全境2化 P1）。
+## 高品质装备更可能被 plan_keep 留下 —— "金色枪比白色枪更值得活下来"。
+## 无 gear（普通货/老档）时权重就是价值本身（与旧行为一致）。
+func _keep_weight(item_id: String, gear: Dictionary) -> float:
+	var v := float(_item_value(item_id))
+	if gear.is_empty():
+		return v
+	var r: RarityDef = GearGen.find_rarity(_rarities, str(gear.get("rarity", "")))
+	if r != null:
+		v *= r.death_weight
+	return v
 
 
 ## shared_stash：藏身处仓库必须【跨局共享】——否则"死亡掉装备"就没有对照物了。
 ## 不传则本局自带一个空仓库（仅适合单局测试）。
 ## mission_defs：任务定义字典（来自 DataRegistry.missions），空则本局无任务。
+## gear_defs：装备品质/词条表（全境2化 P1）—— {"rarities": Array[RarityDef], "affixes": Array[AffixDef]}。
+##   空字典 = 本局不 roll 品质词条（向后兼容：老调用方/缺表时全普通品质）。
 func _init(items: Dictionary = {}, rng: SimRng = null, shared_stash: Inventory = null,
-		modifiers: Dictionary = {}, mission_defs: Dictionary = {}) -> void:
+		modifiers: Dictionary = {}, mission_defs: Dictionary = {},
+		gear_defs: Dictionary = {}) -> void:
 	_items = items
 	_rng = rng if rng != null else SimRng.new(1)
+	_rarities = (gear_defs.get("rarities", []) as Array).duplicate()
+	_affixes = (gear_defs.get("affixes", []) as Array).duplicate()
 	if not mission_defs.is_empty():
 		mission = MissionSystem.new(mission_defs)
 		if mission != null:
@@ -179,7 +235,8 @@ func extract_progress_ratio() -> float:
 func loot_container(table: LootTableDef, depth: int = 0, base_rolls: int = 1) -> Dictionary:
 	if phase != Phase.ACTIVE:
 		return {"drops": [], "leftover": [], "value": 0}
-	var drops := LootRoller.roll_for_room(table, _rng, depth, base_rolls)
+	# ⭐ 全境2化 P1：掉落先 roll 品质词条再入包（装备类才 roll，缺表时原样）
+	var drops := roll_gear_for_drops(LootRoller.roll_for_room(table, _rng, depth, base_rolls))
 	var leftover := LootRoller.fill_inventory(carry, drops)
 	containers_looted += 1
 	return {
@@ -259,7 +316,8 @@ func _on_death(reason: String) -> void:
 			var s = carry.slots[i]
 			if s != null:
 				cidx.append(i)
-				cvals.append(_item_value(str(s["item_id"])))
+				# ⭐ 全境2化 P1：保留排序用 价值×品质权重（高品质更可能活下来）
+				cvals.append(_keep_weight(str(s["item_id"]), s.get("gear", {})))
 		var keep := DeathPolicy.plan_keep(cvals, death_policy.keep_carry_ratio, death_policy.insured_slots)
 		var keepset := {}
 		for i in keep:
@@ -286,7 +344,8 @@ func _on_death(reason: String) -> void:
 			var id := equipment.id_in(s)
 			if id != "":
 				eids.append(id)
-				evals.append(_item_value(id))
+				# ⭐ 全境2化 P1：身上装备同样按 价值×品质权重 决定去留
+				evals.append(_keep_weight(id, equipment.gear.get(s, {})))
 		var keep_eq := DeathPolicy.plan_keep(evals, death_policy.keep_equipment_ratio, death_policy.insured_slots)
 		var keepmap := {}
 		for i in keep_eq:
@@ -382,7 +441,10 @@ func add_corpse(pos: Vector2, enemy_id: String, drops: Array) -> int:
 	_next_corpse_id += 1
 	var items: Array = []
 	for d in drops:
-		items.append({"item_id": str(d.get("item_id", "")), "count": int(d.get("count", 0))})
+		var row := {"item_id": str(d.get("item_id", "")), "count": int(d.get("count", 0))}
+		if d.has("gear"):
+			row["gear"] = d["gear"]      # 全境2化 P1：品质词条随掉落进尸体
+		items.append(row)
 	corpses.append({
 		"id": id, "pos": pos, "enemy_id": enemy_id,
 		"drops": items, "searched": false,

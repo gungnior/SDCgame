@@ -62,18 +62,21 @@ var pack: Inventory = null
 var _items: Dictionary = {}
 var _weapons: Dictionary = {}
 var _attachments: Dictionary = {}
+var _affixes: Dictionary = {}       ## affix_id -> AffixDef（全境2化 P1，透传给 loadout）
 
 
 func _init(items: Dictionary = {}, starting_money: int = 0,
-		weapons: Dictionary = {}, attachments: Dictionary = {}) -> void:
+		weapons: Dictionary = {}, attachments: Dictionary = {},
+		affixes: Dictionary = {}) -> void:
 	_items = items
 	_weapons = weapons
 	_attachments = attachments
+	_affixes = affixes
 	wallet = starting_money
 	stash = Inventory.new(slot_count(), items, BASE_WEIGHT_LIMIT * 99.0)
 	for id in UPGRADES:
 		upgrades[id] = 0
-	loadout = Equipment.new(items, weapons, attachments)
+	loadout = Equipment.new(items, weapons, attachments, _affixes)
 	pack = Inventory.new(PACK_SLOTS, items, BASE_WEIGHT_LIMIT)
 	_apply_pack_limits()
 

@@ -89,6 +89,8 @@ func weight_ratio() -> float:
 
 
 ## 加物品。返回【没放下的剩余数量】（0 表示全部放入）。
+## ⚠️ 装备类要走 `add_with_gear`（带品质词条）；本接口是无 gear 的普通路径
+##    （商店货/老存档/堆叠货都用它，行为与 2026-10-16 之前逐字一致）。
 func add(item_id: String, count: int) -> int:
 	if count <= 0:
 		return 0
@@ -131,6 +133,50 @@ func _first_free_slot() -> int:
 		if slots[i] == null:
 			return i
 	return UNSET
+
+
+## 加一件【带品质词条的装备】（全境2化 Phase 1，2026-10-16）。
+##
+## ⭐ 只适用于 stack_max == 1 的装备类物品：装备永不堆叠，所以每槽天然是一件
+##    独立装备，slot 上加一个可选 "gear" 键即可表达"这件有它自己的品质和词条"，
+##    不破坏现有堆叠语义（弹药/医疗仍走普通 add）。
+## gear 为空字典时等价于普通 add 一件（无品质 = 普通）。
+## 返回没放下的剩余数量（装备只有 0/1 两种结果）。
+func add_with_gear(item_id: String, gear: Dictionary) -> int:
+	var d: ItemDef = _items.get(item_id)
+	if d == null:
+		return 1
+	if d.is_stackable():
+		return add(item_id, 1)      # 堆叠货不带 gear（防御：调用方不该这么用）
+	var idx := _first_free_slot()
+	if idx == UNSET:
+		return 1
+	var slot := {"item_id": item_id, "count": 1}
+	if not gear.is_empty():
+		slot["gear"] = gear.duplicate(true)
+	slots[idx] = slot
+	return 0
+
+
+## 该 id 第一个所在槽位索引（挑选装备用，全境2化 P1）。没有返回 UNSET。
+func first_slot_of(item_id: String) -> int:
+	for i in slots.size():
+		var s = slots[i]
+		if s != null and s["item_id"] == item_id:
+			return i
+	return UNSET
+
+
+## 把某个槽位**整件取出**（含 gear 字段），返回 slot dict 或 null。
+## Equipment.equip 用它来"把这一件（连同它的品质词条）穿上"。
+func take_slot(idx: int) -> Variant:
+	if idx < 0 or idx >= slots.size():
+		return null
+	var s = slots[idx]
+	if s == null:
+		return null
+	slots[idx] = null
+	return s
 
 
 ## 移除若干。返回【实际移除的数量】。
@@ -200,7 +246,26 @@ static func clamp_amount(want: int, avail: int) -> int:
 
 
 ## 移到另一个背包（拾取/转移）。返回未转移的数量。
+## ⚠️ 全境2化 P1：装备（stack_max=1）**逐槽整体搬运**，保留 gear ——
+##    走 add/remove 会把品质词条洗掉（两把同款枪词条不同是刷装备的核心体验）。
+##    堆叠货（弹药/医疗）仍走原来的 add/remove 路径，行为不变。
 func transfer_to(dst: Inventory, item_id: String, count: int) -> int:
+	var d: ItemDef = _items.get(item_id)
+	if d == null:
+		return count
+	if not d.is_stackable():
+		var moved := 0
+		var i := 0
+		while i < slots.size() and moved < count:
+			var s = slots[i]
+			if s != null and s["item_id"] == item_id:
+				var leftover := dst.add_with_gear(item_id, s.get("gear", {}))
+				if leftover > 0:
+					break               # 对方放不下，停止搬运
+				slots[i] = null
+				moved += 1
+			i += 1
+		return count - moved
 	var avail := mini(count, count_of(item_id))
 	if avail <= 0:
 		return count

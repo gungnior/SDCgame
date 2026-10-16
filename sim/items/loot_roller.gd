@@ -38,12 +38,18 @@ static func roll_for_room(table: LootTableDef, rng: SimRng, depth: int,
 
 ## 把抽到的一批物品塞进背包，返回【没塞下的】。
 ## 搜打撤的核心取舍就是在这里发生的：包满了，你得决定丢什么。
+## ⚠️ 全境2化 P1：带 "gear" 键的掉落走 add_with_gear（装备品质词条不洗掉）。
 static func fill_inventory(inv: Inventory, drops: Array) -> Array:
 	var leftover: Array = []
 	for d in drops:
-		var rest := inv.add(d["item_id"], int(d["count"]))
-		if rest > 0:
-			leftover.append({"item_id": d["item_id"], "count": rest})
+		if d.has("gear"):
+			var rest := inv.add_with_gear(str(d["item_id"]), d["gear"])
+			if rest > 0:
+				leftover.append({"item_id": d["item_id"], "count": rest, "gear": d["gear"]})
+		else:
+			var rest := inv.add(str(d["item_id"]), int(d["count"]))
+			if rest > 0:
+				leftover.append({"item_id": d["item_id"], "count": rest})
 	return leftover
 
 

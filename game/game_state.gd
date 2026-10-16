@@ -75,7 +75,7 @@ func ensure_loaded() -> void:
 	if not reg.load_all("C"):
 		push_error("[Game] 数据加载失败：%s" % str(reg.errors))
 		return
-	hideout = Hideout.new(reg.items, 3000, reg.weapons, reg.attachments)
+	hideout = Hideout.new(reg.items, 3000, reg.weapons, reg.attachments, reg.affix_map())
 	hideout.wallet += 5000
 	save = SaveManager.new()
 	load_game()

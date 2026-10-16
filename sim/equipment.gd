@@ -33,6 +33,12 @@ const SLOT_LABEL := {
 }
 
 var slots: Dictionary = {}        ## slot -> id（"" = 空）
+## ── 装备品质词条（全境2化 P1，2026-10-16）──
+## slot -> gear dict（{"rarity": id, "affixes": [{"id":..,"value":..}, ...]}）。
+## ⭐ 按【槽位】而不是按【id】记：两把同款枪品质/词条不同是刷装备的核心体验。
+##    （dur 按 id 记是"同 id 共享磨损"的已知简化；gear 不能那么简化。）
+##    无记录 = 普通品质零词条 = 与 2026-10-16 之前的行为一致（向后兼容老存档）。
+var gear: Dictionary = {}
 ## weapon_id -> {att_slot -> att_id}。配件表按枪索引，**跟枪走**。
 var mods: Dictionary = {}
 ## ── 装备损耗（2026-10-13）──
@@ -44,13 +50,15 @@ var dur: Dictionary = {}
 var _items: Dictionary = {}       ## item_id   -> ItemDef
 var _weapons: Dictionary = {}     ## weapon_id -> WeaponDef
 var _attachments: Dictionary = {} ## attachment_id -> AttachmentDef
+var _affixes: Dictionary = {}     ## affix_id -> AffixDef（全境2化 P1；空表 = 词条全不生效）
 
 
 func _init(items: Dictionary = {}, weapons: Dictionary = {},
-		attachments: Dictionary = {}) -> void:
+		attachments: Dictionary = {}, affixes: Dictionary = {}) -> void:
 	_items = items
 	_weapons = weapons
 	_attachments = attachments
+	_affixes = affixes
 	for s in SLOTS:
 		slots[s] = ""
 
@@ -86,6 +94,7 @@ func clear() -> void:
 	for s in SLOTS:
 		slots[s] = ""
 	dur.clear()
+	gear.clear()      # 全境2化 P1：装备没了词条也没了（与 dur 同理，实物属性）
 
 
 ## 这个 id 该进哪个槽位（"" = 不能装备）
@@ -114,22 +123,31 @@ func is_equippable(id: String) -> bool:
 
 ## 装备。成功返回 ""，否则返回**中文原因**（直接给 UI toast 用）。
 ## ⚠️ 顺序：先取新的（腾出空间）再退回旧的 —— 否则背包满时换装会失败。
+## ⚠️ 全境2化 P1：gear 随装备一起搬运（穿上的同时词条上车；脱下时放回背包）。
 func equip(inv: Inventory, id: String) -> String:
 	var slot := slot_for(id)
 	if slot == "":
 		return "这件不能装备"
-	if inv.count_of(id) <= 0:
+	var idx := inv.first_slot_of(id)
+	if idx == Inventory.UNSET:
 		return "背包里没有这件"
-	var took := inv.remove(id, 1)
-	if took <= 0:
+	var taken: Variant = inv.take_slot(idx)
+	if taken == null:
 		return "背包里没有这件"
+	var new_gear: Dictionary = {}
+	if taken is Dictionary and (taken as Dictionary).has("gear"):
+		new_gear = (taken as Dictionary)["gear"]
 	var old: String = id_in(slot)
 	if old != "":
 		if not inv.can_add(old, 1):
-			inv.add(id, 1)          # 回滚：换新后放不下旧装备
+			inv.add_with_gear(id, new_gear)   # 回滚：换新后放不下旧装备
 			return "背包放不下换下的装备"
-		inv.add(old, 1)
+		inv.add_with_gear(old, gear.get(slot, {}))
 	slots[slot] = id
+	if new_gear.is_empty():
+		gear.erase(slot)
+	else:
+		gear[slot] = new_gear
 	return ""
 
 
@@ -142,8 +160,14 @@ func unequip(inv: Inventory, slot: String) -> String:
 		return "该槽位是空的"
 	if not inv.can_add(cur, 1):
 		return "背包放不下"
-	inv.add(cur, 1)
+	var g: Dictionary = gear.get(slot, {})
+	if not g.is_empty():
+		if inv.add_with_gear(cur, g) > 0:
+			return "背包放不下"
+	else:
+		inv.add(cur, 1)
 	slots[slot] = ""
+	gear.erase(slot)
 	return ""
 
 
@@ -242,7 +266,8 @@ func weapon_damage_factor() -> float:
 	return lerpf(0.6, 1.0, wear_ratio(id_in("weapon")))
 
 
-## 身上护甲总值（护甲 + 头盔）。**已损坏的不计**。玩家受击减伤用。
+## 身上护甲**基础**总值（护甲 + 头盔物品的 armor 字段，不含词条）。**已损坏的不计**。
+## effective_armor() = 本函数 + 词条 flat 加成；玩家受击减伤请用 effective_armor()。
 func worn_armor() -> int:
 	var a := 0
 	for s in ["armor", "helmet"]:
@@ -253,6 +278,54 @@ func worn_armor() -> int:
 		if d != null:
 			a += d.armor
 	return a
+
+
+## 身上护甲总值（护甲 + 头盔 + **护甲词条 flat 加成**）。**已损坏的不计**。玩家受击减伤用。
+## 全境2化 P1：词条加成叠在基础护甲上（flat 直加，不走百分比）。
+func effective_armor() -> int:
+	var a := worn_armor()
+	for s in ["armor", "helmet"]:
+		var id := id_in(s)
+		if id == "" or is_broken(id):
+			continue
+		a += int(round(_affix_sum(s, "armor")))
+	return a
+
+
+## 某槽位上某个字段的词条值总和（flat/pct 一律直接相加，符号在应用时处理）。
+func _affix_sum(slot: String, field: String) -> float:
+	var g: Dictionary = gear.get(slot, {})
+	if g.is_empty():
+		return 0.0
+	var sum := 0.0
+	for e in (g.get("affixes", []) as Array):
+		if not (e is Dictionary):
+			continue
+		var ed: Dictionary = e as Dictionary
+		var ad: AffixDef = _affixes.get(str(ed.get("id", "")))
+		if ad == null or ad.field != field:
+			continue
+		sum += float(ed.get("value", 0.0))
+	return sum
+
+
+## 身上所有装备某个 pct 字段的百分比总和（raid_scene 建 vitals / 算移速时用）。
+## flat 词条不计入（调用方要的是"乘区"）。例：affix_pct("hp") -> 0.08 = 生命 +8%。
+func affix_pct(field: String) -> float:
+	var sum := 0.0
+	for s in SLOTS:
+		var g: Dictionary = gear.get(s, {})
+		if g.is_empty():
+			continue
+		for e in (g.get("affixes", []) as Array):
+			if not (e is Dictionary):
+				continue
+			var ed: Dictionary = e as Dictionary
+			var ad: AffixDef = _affixes.get(str(ed.get("id", "")))
+			if ad == null or ad.field != field or ad.kind == "flat":
+				continue
+			sum += float(ed.get("value", 0.0))
+	return sum
 
 
 ## 身上装备的总重量（武器取 WeaponDef.weight，其余取 ItemDef.weight）
@@ -343,6 +416,28 @@ func build_loadout(slot_limit: int = WeaponModding.SLOTS_C) -> WeaponModding.Loa
 			continue          # 数据里没有这个配件（脏档）—— 跳过，不清掉记录
 		# 该枪插槽不够时 attach 会返回原因：静默保留配置，等玩家换回更"高级"的枪
 		var _err := WeaponModding.attach(lo, a)
+	return _apply_weapon_affixes(lo)
+
+
+## 把武器槽 gear 的词条乘进 Loadout.effective（全境2化 P1，词条直加成乘区）。
+## field 不在 effective 里的词条（armor/hp/move_speed 是玩家属性，不属武器数值）
+## 自然跳过 —— 防呆：武器上滚出护甲词条也不会污染武器数值。
+## 无 gear / 无词条表时原样返回（行为与 2026-10-16 之前逐字一致）。
+func _apply_weapon_affixes(lo: WeaponModding.Loadout) -> WeaponModding.Loadout:
+	if lo == null:
+		return null
+	var g: Dictionary = gear.get("weapon", {})
+	if g.is_empty():
+		return lo
+	var eff: Dictionary = lo.effective
+	for e in (g.get("affixes", []) as Array):
+		if not (e is Dictionary):
+			continue
+		var ed: Dictionary = e as Dictionary
+		var ad: AffixDef = _affixes.get(str(ed.get("id", "")))
+		if ad == null or not eff.has(ad.field):
+			continue
+		eff[ad.field] = ad.apply_to(float(eff[ad.field]), float(ed.get("value", 0.0)))
 	return lo
 
 
@@ -357,13 +452,14 @@ func summary() -> String:
 func to_dict() -> Dictionary:
 	# ⚠️ 键名从 v3 起是 {"slots":…, "mods":…}；**旧档是扁平的 slot->id**，
 	#    from_dict 必须两种都认（见那里的说明）。
-	# v6 起加入 "dur"（装备损耗）。
-	return {"slots": slots.duplicate(), "mods": mods.duplicate(true), "dur": dur.duplicate()}
+	# v6 起加入 "dur"（装备损耗）；v7 起加入 "gear"（品质词条，全境2化 P1）。
+	return {"slots": slots.duplicate(), "mods": mods.duplicate(true), "dur": dur.duplicate(),
+		"gear": gear.duplicate(true)}
 
 
 func from_dict(d: Dictionary) -> void:
 	# 兼容两种历史形状：
-	#   ① 新：{"slots": {...}, "mods": {...}, "dur": {...}}
+	#   ① 新：{"slots": {...}, "mods": {...}, "dur": {...}, "gear": {...}}
 	#   ② 旧：{"weapon": "weapon_rifle", ...}（v3 以前 to_dict 直接返回 slots）
 	if d.has("slots"):
 		var sd: Dictionary = d.get("slots", {})
@@ -376,3 +472,6 @@ func from_dict(d: Dictionary) -> void:
 		mods = {}
 	# 磨损表：老档没有 -> 空表 = 全部视为全新（不补偿、不惩罚）
 	dur = (d.get("dur", {}) as Dictionary).duplicate()
+	# 品质词条表：老档（v7 以前）没有 -> 空表 = 全部普通品质零词条。
+	# ⚠️ 刻意不"补 roll"：老装备就该是普通货，凭空发词条会破坏搜打撤经济。
+	gear = (d.get("gear", {}) as Dictionary).duplicate(true)
