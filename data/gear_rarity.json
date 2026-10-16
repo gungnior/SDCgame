@@ -1,0 +1,52 @@
+[
+  {
+    "id": "common",
+    "name": "普通",
+    "color": "#b0b0b0",
+    "affix_count": 0,
+    "power_mul": 0.9,
+    "score_mul": 0.5,
+    "death_weight": 0.7,
+    "drop_weight": 55
+  },
+  {
+    "id": "fine",
+    "name": "精良",
+    "color": "#5ec269",
+    "affix_count": 1,
+    "power_mul": 1.0,
+    "score_mul": 0.75,
+    "death_weight": 1.0,
+    "drop_weight": 28
+  },
+  {
+    "id": "rare",
+    "name": "稀有",
+    "color": "#5b9bd5",
+    "affix_count": 2,
+    "power_mul": 1.1,
+    "score_mul": 1.0,
+    "death_weight": 1.5,
+    "drop_weight": 12
+  },
+  {
+    "id": "epic",
+    "name": "史诗",
+    "color": "#a96bd5",
+    "affix_count": 3,
+    "power_mul": 1.22,
+    "score_mul": 1.3,
+    "death_weight": 2.2,
+    "drop_weight": 4
+  },
+  {
+    "id": "legendary",
+    "name": "传说",
+    "color": "#e8b93c",
+    "affix_count": 4,
+    "power_mul": 1.35,
+    "score_mul": 1.7,
+    "death_weight": 3.2,
+    "drop_weight": 1
+  }
+]

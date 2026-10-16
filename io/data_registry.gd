@@ -34,6 +34,8 @@ var maps: Dictionary = {}         # map_id        -> MapThemeDef（森林/城区
 ## 任务（C 阶段）。框架在 sim/mission_system.gd，本表是纯内容（GameDesigner 填）。
 var missions: Dictionary = {}     # mission_id    -> Dictionary（原始任务定义）
 var run_modifiers: Array[Dictionary] = []  ## 肉鸽局内规则变体表（data/run_modifiers.json，见 SCHEMA §11）
+var gear_rarities: Array[RarityDef] = []  ## 装备品质表（data/gear_rarity.json，全境2化 P1，见 SCHEMA §12）
+var gear_affixes: Array[AffixDef] = []    ## 装备词条池（data/gear_affixes.json，全境2化 P1，见 SCHEMA §12）
 
 # ─────────────── 诊断 ───────────────
 var errors: Array[String] = []
@@ -71,6 +73,8 @@ func load_all(stage: String = "B") -> bool:
 	_load_maps()
 	_load_missions()
 	_load_run_modifiers()
+	_load_gear_rarity()
+	_load_gear_affixes()
 
 	_validate_cross_refs()
 	_validate_map_constraints()
@@ -359,6 +363,64 @@ func _load_run_modifiers() -> void:
 		run_modifiers.append(row)
 
 
+func _load_gear_rarity() -> void:
+	var data: Variant = _read_json("gear_rarity", true)
+	if data == null:
+		return                       # 允许缺表：GearGen.roll_rarity 收到空表安全返回
+	if not (data is Array):
+		errors.append("[gear_rarity] 顶层必须是数组")
+		return
+	for row in data:
+		if not (row is Dictionary):
+			errors.append("[gear_rarity] 存在非对象条目")
+			continue
+		var r := RarityDef.from_dict(row)
+		if r.id.is_empty():
+			errors.append("[gear_rarity] 有条目缺少 id")
+			continue
+		if r.name.is_empty():
+			errors.append("[gear_rarity] %s: 缺少中文名 name（HUD/面板直接显示）" % r.id)
+		if not r.has_valid_color():
+			warnings.append("[gear_rarity] %s: color 不是合法十六进制，UI 染色会回退默认色" % r.id)
+		if r.affix_count > 0 and r.drop_weight <= 0:
+			warnings.append("[gear_rarity] %s: 有词条但 drop_weight=0，不会自然掉落" % r.id)
+		for prev in gear_rarities:
+			if prev.id == r.id:
+				errors.append("[gear_rarity] id 重复: %s" % r.id)
+				continue
+		gear_rarities.append(r)
+
+
+func _load_gear_affixes() -> void:
+	var data: Variant = _read_json("gear_affixes", true)
+	if data == null:
+		return                       # 允许缺表：GearGen.roll_gear 词条池为空 = 全普通品质
+	if not (data is Array):
+		errors.append("[gear_affixes] 顶层必须是数组")
+		return
+	for row in data:
+		if not (row is Dictionary):
+			errors.append("[gear_affixes] 存在非对象条目")
+			continue
+		var a := AffixDef.from_dict(row)
+		if a.id.is_empty():
+			errors.append("[gear_affixes] 有条目缺少 id")
+			continue
+		if a.name.is_empty():
+			errors.append("[gear_affixes] %s: 缺少中文名 name" % a.id)
+		if a.field.is_empty():
+			errors.append("[gear_affixes] %s: 缺少目标字段 field" % a.id)
+		if a.max_value <= 0.0:
+			errors.append("[gear_affixes] %s: max 必须 > 0" % a.id)
+		if a.cats.is_empty():
+			warnings.append("[gear_affixes] %s: cats 为空 = 全类别通用，确认是否有意为之" % a.id)
+		for prev in gear_affixes:
+			if prev.id == a.id:
+				errors.append("[gear_affixes] id 重复: %s" % a.id)
+				continue
+		gear_affixes.append(a)
+
+
 func _load_loot_tables() -> void:
 	var data: Variant = _read_json("loot_tables")
 	if data == null:
@@ -554,6 +616,30 @@ func get_container(id: String) -> ContainerDef:
 
 func get_map(id: String) -> MapThemeDef:
 	return maps.get(id)
+
+
+## 装备品质定义（全境2化 P1）。找不到返回 null。
+func get_rarity(id: String) -> RarityDef:
+	for r in gear_rarities:
+		if r.id == id:
+			return r
+	return null
+
+
+## 装备词条定义（全境2化 P1）。找不到返回 null。
+func get_affix(id: String) -> AffixDef:
+	for a in gear_affixes:
+		if a.id == id:
+			return a
+	return null
+
+
+## 词条池的 Dictionary 形式（id -> AffixDef）—— Equipment/Hideout 构造注入用。
+func affix_map() -> Dictionary:
+	var m := {}
+	for a in gear_affixes:
+		m[a.id] = a
+	return m
 
 
 ## 所有【普通房间主题】定义（room_type == "common"），按 id 稳定排序。
